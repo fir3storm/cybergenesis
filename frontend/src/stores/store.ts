@@ -16,6 +16,9 @@ interface State {
   viewMode: '3d' | '2d'
   replayBaseline: string[] | null
   replayVerdict: string | null
+  customTwins: import('../types').CustomTwinDef[]
+  customScenarios: import('../types').CustomScenarioDef[]
+  designerTwinId: string | null
   set: (p: Partial<State>) => void
 }
 
@@ -34,5 +37,8 @@ export const useStore = create<State>((set) => ({
   viewMode: '3d',
   replayBaseline: null,
   replayVerdict: null,
+  customTwins: [],
+  customScenarios: [],
+  designerTwinId: null,
   set: (p) => set(p),
 }))

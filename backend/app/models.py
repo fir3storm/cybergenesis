@@ -65,6 +65,8 @@ class SimulationRun(Base):
     __tablename__ = "simulation_runs"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
     scenario_id: Mapped[str] = mapped_column(String, index=True)
+    custom_twin_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    custom_scenario_id: Mapped[str | None] = mapped_column(String, nullable=True)
     seed: Mapped[int] = mapped_column(Integer, default=42)
     state: Mapped[str] = mapped_column(String, default="IDLE", index=True)
     mode: Mapped[str] = mapped_column(String, default="offline")  # live | offline

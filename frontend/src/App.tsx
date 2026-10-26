@@ -1,12 +1,15 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, Bug, Database, Download, FlaskConical, Globe, KeyRound, MessageSquareText, Play, RotateCcw, Route,
-  Settings as SettingsIcon, Share2, Shield, ShieldCheck, Siren, Home, Network, FileText,
+  Activity, Bot, Boxes, Bug, Database, Download, FlaskConical, Globe, KeyRound, MessageSquareText, PenTool, Play, RotateCcw, Route,
+  Settings as SettingsIcon, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText,
 } from 'lucide-react'
 import { STATUS_COLOR } from './components/status'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
+const TwinDesigner = lazy(() => import('./components/TwinDesigner'))
+const AttackPlaybook = lazy(() => import('./components/AttackPlaybook'))
+const ComponentLibrary = lazy(() => import('./components/ComponentLibrary'))
 const SCENARIO_ICONS: Record<string, ReactNode> = {
   ransomware_activity: <Bug size={13} className="inline text-red-300" />,
   compromised_identity: <KeyRound size={13} className="inline text-amber-300" />,
@@ -137,6 +140,29 @@ export default function App() {
     }
   }
 
+  async function runCustomExperiment(customScenarioId: string, customTwinId: string | null) {
+    s.set({ error: null, events: [], results: null, runState: 'SCENARIO_SELECTED', view: 'experiment', replayBaseline: null, replayVerdict: null })
+    try {
+      const created = await api.createCustomExperiment({ custom_scenario_id: customScenarioId, custom_twin_id: customTwinId, seed: 42 })
+      s.set({ runId: created.id })
+      await api.runExperiment(created.id)
+      wsRef.current?.close()
+      const ws = new WebSocket(`${WS}/ws/experiments/${created.id}`)
+      wsRef.current = ws
+      ws.onmessage = (msg) => {
+        const ev = JSON.parse(msg.data as string)
+        useStore.setState((st) => ({ events: [...st.events.slice(-199), ev], twin: ev.twin ?? st.twin,
+          runState: (ev.payload?.state as string) ?? st.runState }))
+        if (ev.event_type === 'completed' || ev.event_type === 'failed') void refreshResults(created.id)
+      }
+      ws.onerror = () => s.set({ error: 'WebSocket disconnected — polling fallback active' })
+      stopPoll()
+      pollRef.current = window.setInterval(() => void refreshResults(created.id), 1500)
+    } catch (e) {
+      s.set({ error: `Custom experiment failed to start: ${(e as Error).message}`, runState: 'FAILED' })
+    }
+  }
+
   async function resetAll() {
     stopPoll(); wsRef.current?.close()
     try { const r = await api.reset(); s.set({ twin: r.twin, events: [], results: null, runState: 'IDLE', error: null }) }
@@ -211,6 +237,9 @@ export default function App() {
     { id: 'attackpath', label: 'Attack Path', icon: <Route size={15} /> },
     { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} /> },
     { id: 'evidence', label: 'Evidence', icon: <FileText size={15} /> },
+    { id: 'designer', label: 'Twin Designer', icon: <PenTool size={15} /> },
+    { id: 'playbook', label: 'Playbook', icon: <Swords size={15} /> },
+    { id: 'library', label: 'Library', icon: <Boxes size={15} /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
   ]
   const live = s.modelStatus?.mode === 'live'
@@ -419,6 +448,9 @@ export default function App() {
         </main>
       )}
 
+      {s.view === 'designer' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Twin Designer…</div>}><TwinDesigner /></Suspense>}
+      {s.view === 'playbook' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Attack Playbook…</div>}><AttackPlaybook onRunCustom={(sid, tid) => void runCustomExperiment(sid, tid)} /></Suspense>}
+      {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
       {s.view === 'evidence' && <EvidenceView />}
       {s.view === 'settings' && (
         <main className="p-6 max-w-2xl space-y-3 text-sm">

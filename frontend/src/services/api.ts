@@ -1,4 +1,4 @@
-import type { ModelStatus, RunResult, Scenario, SimEvent, Twin } from '../types'
+import type { CustomScenarioDef, CustomTwinDef, Library, ModelStatus, RunResult, Scenario, SimEvent, Twin } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
@@ -28,4 +28,14 @@ export const api = {
     return r.text()
   },
   experiments: () => j<{ id: string; scenario_id: string; state: string; mode: string; created_at: string }[]>('/api/experiments'),
+  library: () => j<Library>('/api/library'),
+  customTwins: () => j<CustomTwinDef[]>('/api/twins/custom'),
+  createCustomTwin: (body: unknown) => j<CustomTwinDef>('/api/twins/custom', { method: 'POST', body: JSON.stringify(body) }),
+  deleteCustomTwin: (id: string) => j<{ deleted: boolean }>(`/api/twins/custom/${id}`, { method: 'DELETE' }),
+  activateCustomTwin: (id: string) => j<{ twin: Twin }>(`/api/twins/custom/${id}/activate`, { method: 'POST' }),
+  activateBuiltinTwin: () => j<{ twin: Twin }>('/api/twins/builtin/activate', { method: 'POST' }),
+  customScenarios: () => j<CustomScenarioDef[]>('/api/scenarios/custom'),
+  createCustomScenario: (body: unknown) => j<CustomScenarioDef>('/api/scenarios/custom', { method: 'POST', body: JSON.stringify(body) }),
+  deleteCustomScenario: (id: string) => j<{ deleted: boolean }>(`/api/scenarios/custom/${id}`, { method: 'DELETE' }),
+  createCustomExperiment: (body: unknown) => j<{ id: string }>('/api/experiments/custom', { method: 'POST', body: JSON.stringify(body) }),
 }

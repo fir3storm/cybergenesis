@@ -29,6 +29,14 @@
 - [x] Replay Proof: Replay-with-Seed-42 now compares telemetry event-by-event and displays the verdict
 - [x] Tier-3: live token-usage meter in header, keyboard shortcuts (Space/R/1–4), 4th scenario Data Exfiltration (live PASS verified). Skipped: light theme (dark is the design language), PDF (Markdown report instead)
 
+## Custom Twin Designer + Attack Playbook + Component Library (2026-10-27)
+- [x] Fixed attack determinism bug: stable `zlib.crc32` seed (was per-process `hash()`); attack step types now allowlist-validated in the engine
+- [x] `DigitalTwin.from_dict()` — engine runs arbitrary user topologies; clone/snapshot preserve custom defs
+- [x] Component library (`/api/library`): 9 asset types, 8 attack steps, 7 defense actions with param contracts
+- [x] Custom twin CRUD + activate (builtin restore included); custom scenario CRUD with allowlist validation; `/api/experiments/custom` runs custom scenario/twin through the identical loop (orchestrator resolves DB definitions, validates assets against twin)
+- [x] Frontend: Twin Designer (drag/click-connect SVG canvas, palette, saved twins), Attack Playbook (step/defense composer + run), Component Library browser — all lazy-loaded views
+- [x] Found & fixed route shadowing: `/api/scenarios/{id}` captured `/api/scenarios/custom` (regression test added). 18 backend tests pass; custom end-to-end (custom twin + scenario → verification PASS) covered
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.

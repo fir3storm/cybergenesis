@@ -59,13 +59,39 @@ def _check_cancel(run_id: str) -> bool:
     return run_id in _cancelled
 
 
+def activate_twin(twin: DigitalTwin) -> DigitalTwin:
+    """Replace the active twin (builtin or user-designed) and return it."""
+    global TWIN
+    TWIN = twin
+    return TWIN
+
+
 async def run_experiment(run_id: str) -> None:
+    global TWIN
     db = SessionLocal()
     try:
         run = db.get(models.SimulationRun, run_id)
         if not run:
             return
-        scenario = SCENARIOS[run.scenario_id]
+        if run.custom_scenario_id:
+            row = db.get(models.CustomScenarioDefinition, run.custom_scenario_id)
+            if not row:
+                raise ValueError(f"custom scenario not found: {run.custom_scenario_id}")
+            scenario = {**row.definition, "id": row.id, "name": row.name}
+        else:
+            scenario = SCENARIOS[run.scenario_id]
+        if run.custom_twin_id:
+            trow = db.get(models.CustomTwinDefinition, run.custom_twin_id)
+            if not trow:
+                raise ValueError(f"custom twin not found: {run.custom_twin_id}")
+            TWIN = DigitalTwin.from_dict(trow.assets, trow.connections)
+        # validate scenario against the active twin before mutating anything
+        for aid in (scenario["source_asset"], scenario["target_asset"]):
+            if aid not in TWIN.asset_ids():
+                raise ValueError(f"scenario asset '{aid}' not in twin '{TWIN.asset_ids()}'")
+        for step in scenario["attack_steps"]:
+            if step["asset"] not in TWIN.asset_ids():
+                raise ValueError(f"attack step asset '{step['asset']}' not in twin")
         run.started_at = datetime.now(timezone.utc)
         db.commit()
         mode = "live" if meta_client.configured else "offline"
@@ -88,7 +114,7 @@ async def run_experiment(run_id: str) -> None:
         await set_state("ATTACK_SIMULATING", "Executing typed synthetic attack simulation", "adversary_simulator")
         telemetry = TWIN.apply_attack(scenario, seed=run.seed)
         # baseline objective measured on an attacked clone of the baseline (pre-defense)
-        attacked_clone = DigitalTwin(); attacked_clone.apply_attack(scenario, seed=run.seed)
+        attacked_clone = baseline_twin.clone(); attacked_clone.apply_attack(scenario, seed=run.seed)
         baseline_result = attacked_clone.attempt_attack_objective(scenario)
         for e in telemetry:
             db.add(models.EvidenceRecord(run_id=run_id, kind="telemetry", ref=f"telemetry:{e['event_type']}:{e['asset_id']}",

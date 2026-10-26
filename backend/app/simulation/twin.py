@@ -2,9 +2,16 @@
 
 import copy
 import random
+import zlib
 from collections import deque
 
 import networkx as nx
+
+# Typed telemetry step types the adversary simulator may emit. Anything else is rejected.
+ATTACK_STEP_TYPES = {
+    "process_start", "file_modification_burst", "network_connection", "auth_anomaly",
+    "session_created", "authorization_failure", "config_modification", "security_detection",
+}
 
 ASSETS = [
     {"id": "internet", "name": "Internet Gateway", "asset_type": "gateway", "zone": "external", "posture": 0.4, "pos": [-8.5, 1.4, -4.5], "vulnerabilities": ["exposed_surface"]},
@@ -54,8 +61,33 @@ ALLOWED_ACTIONS = {
 
 
 class DigitalTwin:
-    def __init__(self) -> None:
+    def __init__(self, asset_defs: list[dict] | None = None, edge_defs: list[tuple] | None = None) -> None:
+        self.asset_defs = copy.deepcopy(asset_defs) if asset_defs is not None else copy.deepcopy(ASSETS)
+        self.edge_defs = list(edge_defs) if edge_defs is not None else list(EDGES)
         self.reset()
+
+    @classmethod
+    def from_dict(cls, assets: list[dict], connections: list[dict]) -> "DigitalTwin":
+        """Build a twin from a user-designed definition (Twin Designer)."""
+        defs = []
+        for i, a in enumerate(assets):
+            pos = a.get("pos") or [0, 1, 0]
+            if len(pos) != 3:
+                raise ValueError(f"asset {a.get('id')}: pos must be [x, y, z]")
+            defs.append({"id": a["id"], "name": a.get("name", a["id"]), "asset_type": a.get("asset_type", "workstation"),
+                         "zone": a.get("zone", "custom"), "posture": float(a.get("posture", 0.7)),
+                         "pos": [float(pos[0]), float(pos[1]), float(pos[2])],
+                         "vulnerabilities": list(a.get("vulnerabilities", []))})
+        ids = [d["id"] for d in defs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate asset ids")
+        edges = []
+        for c in connections:
+            s, t = c["source"], c["target"]
+            if s not in ids or t not in ids:
+                raise ValueError(f"connection references unknown asset: {s}->{t}")
+            edges.append((s, t, c.get("trust", "medium"), bool(c.get("traversable", True)), list(c.get("types", ["network"]))))
+        return cls(defs, edges)
 
     def reset(self) -> None:
         self.graph = nx.Graph()
@@ -63,35 +95,38 @@ class DigitalTwin:
         self.isolated: dict[str, bool] = {}
         self.service_disabled: dict[str, bool] = {}
         self.vulns: dict[str, list[str]] = {}
-        for a in ASSETS:
+        for a in self.asset_defs:
             self.graph.add_node(a["id"])
             self.status[a["id"]] = "exposed" if a["id"] in ("internet", "web-server") else "healthy"
             self.isolated[a["id"]] = False
             self.service_disabled[a["id"]] = False
             self.vulns[a["id"]] = list(a["vulnerabilities"])
         self.edge_active: dict[frozenset, bool] = {}
-        for s, t, trust, trav, types in EDGES:
+        for s, t, trust, trav, types in self.edge_defs:
             self.graph.add_edge(s, t, trust=trust, traversable=trav, types=types)
             self.edge_active[frozenset((s, t))] = True
         self.identities = {
             "admin-01": {"asset": "admin-workstation", "session_active": False, "compromised": False, "credential_version": 1},
             "employee-01": {"asset": "employee-workstation", "session_active": True, "compromised": False, "credential_version": 1},
         }
+        # keep only identities whose asset exists in this twin
+        self.identities = {k: v for k, v in self.identities.items() if v["asset"] in self.graph} or {
+            "user-01": {"asset": self.asset_defs[0]["id"], "session_active": True, "compromised": False, "credential_version": 1}}
         self.containment: list[str] = []
 
     # --- introspection -------------------------------------------------
     def asset_ids(self) -> list[str]:
-        return [a["id"] for a in ASSETS]
+        return [a["id"] for a in self.asset_defs]
 
     def to_dict(self) -> dict:
         assets = []
-        for a in ASSETS:
+        for a in self.asset_defs:
             aid = a["id"]
             assets.append({**a, "status": self.status[aid], "isolated": self.isolated[aid],
                            "service_disabled": self.service_disabled[aid], "vulnerabilities": list(self.vulns[aid]),
                            "connected": sorted(self.graph.neighbors(aid))})
         conns = []
-        for s, t, trust, trav, types in EDGES:
+        for s, t, trust, trav, types in self.edge_defs:
             conns.append({"source": s, "target": t, "trust": trust, "traversable": trav, "types": types,
                           "active": self.edge_active[frozenset((s, t))] and not self.isolated[s] and not self.isolated[t]})
         return {"assets": assets, "connections": conns,
@@ -112,6 +147,8 @@ class DigitalTwin:
 
     def clone(self) -> "DigitalTwin":
         c = DigitalTwin.__new__(DigitalTwin)
+        c.asset_defs = copy.deepcopy(self.asset_defs)
+        c.edge_defs = list(self.edge_defs)
         c.graph = self.graph.copy()
         c.restore(self.snapshot())
         return c
@@ -150,7 +187,7 @@ class DigitalTwin:
     def legitimate_disrupted(self, baseline: "DigitalTwin") -> int:
         disrupted = 0
         for s, t in LEGITIMATE_PAIRS:
-            if baseline.reachable(s, t) and not self.reachable(s, t):
+            if s in self.graph and t in self.graph and baseline.reachable(s, t) and not self.reachable(s, t):
                 disrupted += 1
         return disrupted
 
@@ -208,10 +245,13 @@ class DigitalTwin:
     # --- attack simulation -------------------------------------------------
     def apply_attack(self, scenario: dict, seed: int = 42) -> list[dict]:
         """Typed scenario steps only. Mutates twin to attacked state; returns telemetry."""
-        rng = random.Random(seed + hash(scenario["id"]) % 1000)
+        # stable cross-process seed (builtin hash() is randomized per process)
+        rng = random.Random(seed + zlib.crc32(scenario["id"].encode()) % 1000)
         events: list[dict] = []
         src, tgt = scenario["source_asset"], scenario["target_asset"]
         for i, step in enumerate(scenario["attack_steps"]):
+            if step["type"] not in ATTACK_STEP_TYPES:
+                raise ValueError(f"attack step type not in allowlist: {step['type']}")
             asset = step["asset"]
             if asset in self.status and self.status[asset] not in ("contained",):
                 self.status[asset] = "suspicious" if i < len(scenario["attack_steps"]) - 1 else "compromised"

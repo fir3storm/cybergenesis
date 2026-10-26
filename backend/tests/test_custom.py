@@ -1,0 +1,90 @@
+import os
+import sys
+
+os.environ["SIM_STEP_DELAY_MS"] = "0"
+os.environ["OFFLINE_MODE"] = "true"
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
+from app.orchestration.orchestrator import run_experiment  # noqa: E402
+from app.simulation.twin import DigitalTwin  # noqa: E402
+
+client = TestClient(app)
+
+CUSTOM_TWIN = {
+    "name": "Test Lab Twin", "description": "small custom topology",
+    "assets": [
+        {"id": "ws-1", "name": "Lab Workstation", "asset_type": "workstation", "zone": "endpoints", "pos": [-3, 1, 2]},
+        {"id": "fs-1", "name": "Lab File Server", "asset_type": "file_server", "zone": "internal", "pos": [0, 1, 3]},
+        {"id": "db-1", "name": "Lab DB", "asset_type": "database", "zone": "data", "pos": [3, 1, -2]},
+    ],
+    "connections": [
+        {"source": "ws-1", "target": "fs-1", "traversable": True, "types": ["smb"]},
+        {"source": "fs-1", "target": "db-1", "traversable": True, "types": ["sql"]},
+    ],
+}
+
+
+def test_from_dict_and_stable_seed():
+    t = DigitalTwin.from_dict(CUSTOM_TWIN["assets"], CUSTOM_TWIN["connections"])
+    assert t.reachable("ws-1", "db-1")
+    t2 = DigitalTwin.from_dict(CUSTOM_TWIN["assets"], CUSTOM_TWIN["connections"])
+    sc = {"id": "x", "source_asset": "ws-1", "target_asset": "fs-1",
+          "attack_steps": [{"type": "file_modification_burst", "asset": "ws-1", "description": "burst"}]}
+    assert t.apply_attack(sc, seed=42) == t2.apply_attack(sc, seed=42)
+    with pytest.raises(ValueError):
+        DigitalTwin.from_dict(CUSTOM_TWIN["assets"], [{"source": "ws-1", "target": "nope"}])
+    with pytest.raises(ValueError):
+        t.apply_attack({**sc, "attack_steps": [{"type": "run_shellcode", "asset": "ws-1", "description": "x"}]})
+
+
+def test_library_catalog():
+    lib = client.get("/api/library").json()
+    assert len(lib["asset_types"]) == 9 and len(lib["attack_steps"]) == 8 and len(lib["defense_actions"]) == 7
+
+
+def test_custom_twin_crud_and_validation():
+    r = client.post("/api/twins/custom", json=CUSTOM_TWIN)
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    assert client.get(f"/api/twins/custom/{tid}").json()["name"] == "Test Lab Twin"
+    bad = client.post("/api/twins/custom", json={**CUSTOM_TWIN, "assets": [
+        {"id": "a", "name": "A", "asset_type": "teleporter", "zone": "x"}]})
+    assert bad.status_code == 422
+    act = client.post(f"/api/twins/custom/{tid}/activate")
+    assert act.status_code == 200 and len(act.json()["twin"]["assets"]) == 3
+    client.post("/api/twins/builtin/activate")
+    assert client.delete(f"/api/twins/custom/{tid}").status_code == 200
+    assert client.get(f"/api/twins/custom/{tid}").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_custom_scenario_experiment_end_to_end():
+    tid = client.post("/api/twins/custom", json=CUSTOM_TWIN).json()["id"]
+    sc = client.post("/api/scenarios/custom", json={
+        "name": "Lab Ransomware", "source_asset": "ws-1", "target_asset": "fs-1", "severity": "critical",
+        "invariant": "ws-1 cannot reach fs-1", "verification_kind": "reachability",
+        "attack_steps": [{"type": "file_modification_burst", "asset": "ws-1", "description": "Synthetic burst on lab workstation"}],
+        "expected_defense": [{"action_type": "isolate_asset", "asset_id": "ws-1", "params": {}}]})
+    assert sc.status_code == 201, sc.text
+    sid = sc.json()["id"]
+    listed = client.get("/api/scenarios/custom")  # must not be shadowed by /api/scenarios/{id}
+    assert listed.status_code == 200 and any(r["id"] == sid for r in listed.json())
+    assert client.get(f"/api/scenarios/custom/{sid}").json()["name"] == "Lab Ransomware"
+    bad = client.post("/api/scenarios/custom", json={
+        "name": "Bad", "source_asset": "ws-1", "target_asset": "fs-1",
+        "attack_steps": [{"type": "detonate_payload", "asset": "ws-1", "description": "x"}], "expected_defense": []})
+    assert bad.status_code == 422  # step type not in allowlist
+    exp = client.post("/api/experiments/custom", json={"custom_twin_id": tid, "custom_scenario_id": sid, "seed": 42})
+    assert exp.status_code == 201, exp.text
+    rid = exp.json()["id"]
+    await run_experiment(rid)
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert res["run"]["state"] == "COMPLETED", res
+    assert res["verification"]["outcome"] == "PASS", res
+    client.post("/api/twins/builtin/activate")
+    client.delete(f"/api/scenarios/custom/{sid}")
+    client.delete(f"/api/twins/custom/{tid}")

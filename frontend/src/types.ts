@@ -16,4 +16,9 @@ export interface RunResult {
   executions: { action_type: string; asset_id: string; success: boolean; transition: Record<string, unknown> }[];
 }
 export interface ModelStatus { configured: boolean; reachable: boolean; model: string; mode: string; detail: string }
-export type View = 'welcome' | 'twin' | 'experiment' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings'
+export type View = 'welcome' | 'twin' | 'experiment' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library'
+
+export interface LibraryItem { id: string; label: string; description: string; params_contract?: string; default_posture?: number; default_zone?: string }
+export interface Library { asset_types: LibraryItem[]; attack_steps: LibraryItem[]; defense_actions: LibraryItem[]; verification_kinds: string[]; zones: string[] }
+export interface CustomTwinDef { id: string; name: string; description: string; assets: { id: string; name: string; asset_type: string; zone: string; posture?: number; pos: number[]; vulnerabilities?: string[] }[]; connections: { source: string; target: string; trust?: string; traversable?: boolean; types?: string[] }[]; created_at: string }
+export interface CustomScenarioDef { id: string; name: string; description: string; definition: Record<string, unknown>; created_at: string }

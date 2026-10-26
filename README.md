@@ -62,6 +62,9 @@ cd frontend; npm test; npm run build
 
 Extras: toggleable **Demo Commentary** narration panel, human-readable Markdown report (`/api/experiments/{id}/report/markdown`, Download Report .md), live Meta token meter in the header, Replay-with-Seed-42 telemetry-identity proof, keyboard shortcuts (Space/R/1–4).
 
+## Design your own (Twin Designer + Attack Playbook + Library)
+Open **Twin Designer** to build a custom topology from the component palette (drag assets, click two to connect, save, activate), **Attack Playbook** to compose a custom scenario from the allowlisted step/defense libraries and run it, and **Library** to browse every asset type, attack step, and defense action the policy engine accepts (`GET /api/library`). Custom runs use the identical Observe → Reason → Policy → Act → Verify loop and evidence store.
+
 All data is synthetic. No real targets, scanning, exploitation, or credential harvesting — see `docs/threat-model.md`.
 
 ## Docs

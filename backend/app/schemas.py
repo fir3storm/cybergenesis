@@ -153,3 +153,12 @@ class CustomScenarioResponse(BaseModel):
     description: str
     definition: dict
     created_at: str
+
+
+class CreateCustomExperiment(BaseModel):
+    """Run an experiment with a custom scenario and/or custom twin (either may be builtin)."""
+
+    custom_scenario_id: str | None = None
+    scenario_id: str | None = None  # builtin scenario id, used when custom_scenario_id is null
+    custom_twin_id: str | None = None
+    seed: int = 42
