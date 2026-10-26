@@ -7,16 +7,16 @@ from collections import deque
 import networkx as nx
 
 ASSETS = [
-    {"id": "internet", "name": "Internet Gateway", "asset_type": "gateway", "zone": "external", "posture": 0.4, "pos": [-7, 1.5, -3], "vulnerabilities": ["exposed_surface"]},
-    {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-5, 1.2, -3], "vulnerabilities": []},
-    {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.65, "pos": [-2.8, 1.4, -3.5], "vulnerabilities": ["exposed_service"]},
-    {"id": "app-server", "name": "Application Server", "asset_type": "app_server", "zone": "internal", "posture": 0.75, "pos": [0, 1.2, -2], "vulnerabilities": ["overprivileged_service_account"]},
-    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [4.2, 1.2, -3], "vulnerabilities": []},
-    {"id": "identity-provider", "name": "Identity Provider", "asset_type": "identity", "zone": "identity", "posture": 0.9, "pos": [0, 3.0, 1.8], "vulnerabilities": []},
-    {"id": "admin-workstation", "name": "Admin Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.8, "pos": [4.8, 1.0, 2.6], "vulnerabilities": []},
-    {"id": "employee-workstation", "name": "Employee Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.55, "pos": [-4.8, 0.8, 2.6], "vulnerabilities": ["unpatched_client"]},
-    {"id": "file-server", "name": "File Server", "asset_type": "file_server", "zone": "internal", "posture": 0.7, "pos": [-1.2, 0.9, 4.2], "vulnerabilities": ["open_share"]},
-    {"id": "security-sensor", "name": "Security Sensor", "asset_type": "sensor", "zone": "security", "posture": 0.95, "pos": [3.2, 3.0, 0.8], "vulnerabilities": []},
+    {"id": "internet", "name": "Internet Gateway", "asset_type": "gateway", "zone": "external", "posture": 0.4, "pos": [-8.5, 1.4, -4.5], "vulnerabilities": ["exposed_surface"]},
+    {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-6, 1.2, -1.2], "vulnerabilities": []},
+    {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.65, "pos": [-4.4, 1.5, -5.2], "vulnerabilities": ["exposed_service"]},
+    {"id": "app-server", "name": "Application Server", "asset_type": "app_server", "zone": "internal", "posture": 0.75, "pos": [0.2, 1.2, -0.8], "vulnerabilities": ["overprivileged_service_account"]},
+    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": []},
+    {"id": "identity-provider", "name": "Identity Provider", "asset_type": "identity", "zone": "identity", "posture": 0.9, "pos": [1.1, 3.0, 3.2], "vulnerabilities": []},
+    {"id": "admin-workstation", "name": "Admin Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.8, "pos": [5.5, 1.0, 2.8], "vulnerabilities": []},
+    {"id": "employee-workstation", "name": "Employee Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.55, "pos": [-6.2, 0.8, 3.2], "vulnerabilities": ["unpatched_client"]},
+    {"id": "file-server", "name": "File Server", "asset_type": "file_server", "zone": "internal", "posture": 0.7, "pos": [-1.2, 0.9, 5.2], "vulnerabilities": ["open_share"]},
+    {"id": "security-sensor", "name": "Security Sensor", "asset_type": "sensor", "zone": "security", "posture": 0.95, "pos": [2.6, 2.9, 1.0], "vulnerabilities": []},
 ]
 
 # source, target, trust, traversable (attack/data path), types

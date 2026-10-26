@@ -9,6 +9,6 @@ describe('App', () => {
     render(<App />)
     expect(await screen.findByText('The Autonomous Self-Defending Digital Twin')).toBeTruthy()
     expect(screen.getAllByText(/Created by Dr\. Abhirup Guha/).length).toBeGreaterThan(0)
-    expect(screen.getByText(/OFFLINE SIMULATION/)).toBeTruthy()
+    expect(screen.getAllByText(/OFFLINE SIMULATION/).length).toBeGreaterThan(0)
   })
 })

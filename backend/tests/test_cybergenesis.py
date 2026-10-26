@@ -118,6 +118,31 @@ def test_api_validation_and_health():
     assert client.get("/api/twin").status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_live_proposal_retries_with_policy_feedback(monkeypatch):
+    """Regression: live model first proposed block_connection without params (rejected),
+    then corrected after policy feedback. Verified live on 2026-10-26."""
+    from app.agents import agents
+    from app.schemas import IncidentHypothesis
+
+    calls = {"n": 0}
+
+    async def fake_chat(system, user, run_id=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"actions": [{"action_type": "block_connection", "asset_id": "employee-workstation", "params": {}}],
+                    "justification": "block it", "confidence": 0.5}, {}
+        assert "REJECTED by policy" in user
+        return {"actions": [{"action_type": "isolate_asset", "asset_id": "employee-workstation", "params": {}}],
+                "justification": "isolate source", "confidence": 0.9}, {}
+
+    monkeypatch.setattr(agents.meta_client, "chat_json", fake_chat)
+    hyp = IncidentHypothesis(hypothesis="synthetic ransomware", affected_assets=["employee-workstation"], confidence=0.8)
+    p = await agents.propose_defense(SCENARIOS["ransomware_activity"], hyp, "test-run", twin=DigitalTwin())
+    assert calls["n"] == 2 and p.mode == "live"
+    assert p.actions[0].action_type == "isolate_asset"
+
+
 def test_manual_action_policy_gate():
     client.post("/api/twin/reset")
     bad = client.post("/api/twin/action", json={"action_type": "run_shell", "asset_id": "employee-workstation", "params": {}})

@@ -116,9 +116,14 @@ async def run_experiment(run_id: str) -> None:
         await _delay()
 
         await set_state("DEFENSE_PROPOSED", "Defense strategist proposing countermeasure", "defense_strategist")
-        proposal = await agents.propose_defense(scenario, hyp, run_id)
+        proposal = await agents.propose_defense(scenario, hyp, run_id, twin=TWIN)
         db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
-                                      justification=proposal.justification, confidence=proposal.confidence, mode=proposal.mode)); db.commit()
+                                      justification=proposal.justification, confidence=proposal.confidence, mode=proposal.mode))
+        db.add(models.AgentDecision(run_id=run_id, agent="defense_strategist",
+                                    decision=", ".join(f"{a.action_type}:{a.asset_id}" for a in proposal.actions),
+                                    justification=proposal.justification, confidence=proposal.confidence,
+                                    model=proposal.model, mode=proposal.mode, evidence_refs=proposal.evidence_refs,
+                                    asset_ids=[a.asset_id for a in proposal.actions])); db.commit()
         _emit(db, run_id, "agent_decision", proposal.justification, agent="defense_strategist", payload=proposal.model_dump())
 
         await set_state("POLICY_VALIDATING", "Deterministic policy engine validating proposal", "defense_executor")

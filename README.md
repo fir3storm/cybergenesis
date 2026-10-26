@@ -6,8 +6,9 @@ CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies
 
 A closed-loop autonomous cybersecurity digital twin: AI agents observe a synthetic enterprise, a controlled adversary introduces incidents, Meta Muse Spark investigates and proposes defenses, a deterministic policy engine approves only allowlisted actions, the twin applies them, and an independent Verification Scientist replays the identical attack to prove — with computed before/after evidence — whether it now fails.
 
-![Landing](docs/screenshots/landing.png)
-![Completed experiment](docs/screenshots/experiment-completed.png)
+![Welcome — LIVE META AI](docs/screenshots/01-welcome.png)
+![Living Twin](docs/screenshots/02-living-twin.png)
+![Verification Lab](docs/screenshots/05-verification-lab.png)
 
 ## Quick start (local, no Docker required)
 
@@ -51,7 +52,7 @@ docker compose up --build
 cd backend;  python -m pytest -q;  python -m ruff check app tests
 cd frontend; npm test; npm run build
 ```
-12 backend tests cover all 3 scenarios end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, and honest provider failure. The live Meta integration test is opt-in only (`RUN_META_INTEGRATION=1` + key) — not part of the default suite.
+13 backend tests cover all 3 scenarios end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, live-proposal policy-feedback retry (mocked), and honest provider failure. Test runs force `OFFLINE_MODE=true` for hermetic results. Frontend: Vitest + a Playwright smoke test (`npm run test:e2e`, Edge, requires servers running). Live Meta was verified on 2026-10-27: all 3 scenarios PASS with real Muse Spark decisions (see `docs/evaluation.md`).
 
 ## The three scenarios
 1. **Ransomware-like activity** — synthetic file-modification burst → isolate workstation → replay proves file server unreachable.

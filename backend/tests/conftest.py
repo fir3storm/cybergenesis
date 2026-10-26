@@ -2,6 +2,7 @@ import os
 import sys
 
 os.environ["SIM_STEP_DELAY_MS"] = "0"
+os.environ["OFFLINE_MODE"] = "true"  # hermetic tests: never call the live provider by default
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app import models  # noqa: E402

@@ -1,10 +1,17 @@
-import { Component, useEffect, useRef, type ReactNode } from 'react'
+import { Component, Suspense, lazy, useEffect, useRef, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, Database, Download, FlaskConical, Globe, Play, RotateCcw, Route,
+  Activity, Bot, Bug, Database, Download, FlaskConical, Globe, KeyRound, Play, RotateCcw, Route,
   Settings as SettingsIcon, Shield, ShieldCheck, Siren, Home, Network, FileText,
 } from 'lucide-react'
-import TwinScene, { STATUS_COLOR } from './components/TwinScene'
+import { STATUS_COLOR } from './components/status'
+
+const TwinScene = lazy(() => import('./components/TwinScene'))
+const SCENARIO_ICONS: Record<string, ReactNode> = {
+  ransomware_activity: <Bug size={13} className="inline text-red-300" />,
+  compromised_identity: <KeyRound size={13} className="inline text-amber-300" />,
+  lateral_movement: <Route size={13} className="inline text-orange-300" />,
+}
 import { api, WS } from './services/api'
 import { useStore } from './stores/store'
 import type { Asset, Twin, View } from './types'
@@ -38,6 +45,16 @@ function Twin2D({ twin }: { twin: Twin }) {
         </button>
       ))}
     </div>
+  )
+}
+
+function TwinView({ twin }: { twin: Twin }) {
+  return (
+    <SceneBoundary fallback={<div><p className="p-3 text-amber-300 text-sm">3D unavailable (WebGL) — 2D fallback shown. All functions remain available.</p><Twin2D twin={twin} /></div>}>
+      <Suspense fallback={<Twin2D twin={twin} />}>
+        <TwinScene twin={twin} />
+      </Suspense>
+    </SceneBoundary>
   )
 }
 
@@ -157,14 +174,18 @@ export default function App() {
           <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="text-6xl md:text-8xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300">CYBERGENESIS</motion.h1>
           <p className="mt-4 text-xl text-slate-300">The Autonomous Self-Defending Digital Twin</p>
           <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">Observe → Reason → Propose → Validate → Act → Retest → Prove. A closed-loop autonomous defense experiment on a synthetic enterprise twin — every result computed, replayed, and evidenced. Synthetic data only; no real targets.</p>
+          <div className={`mx-auto mt-6 w-fit rounded-full border px-4 py-2 font-mono text-sm ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
+            <span className="animate-pulse">●</span> {live ? 'LIVE META AI — Muse Spark is reasoning on this twin' : 'OFFLINE SIMULATION — deterministic mode (set MODEL_API_KEY for LIVE META AI)'}
+          </div>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button onClick={() => s.set({ view: 'twin' })} className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Enter the Digital Twin</button>
             <button onClick={() => void runDemo('ransomware_activity')} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-slate-950 hover:bg-emerald-400"><Play size={16} /> Run Autonomous Defense Demo</button>
             <button onClick={() => s.set({ view: 'agents' })} className="rounded-lg border border-cyan-700 px-5 py-3 hover:bg-slate-800">Explore Architecture</button>
+            <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-5 py-3 disabled:opacity-40" title={s.runId ? 'Download evidence report' : 'Run an experiment first'}><Download size={15} className="inline" /> Download Report</button>
           </div>
           <p className="mt-10 text-xs font-mono text-slate-500">Powered by Meta Muse Spark · Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026</p>
           <div className="mx-auto mt-8 h-[380px] max-w-5xl rounded-2xl border border-cyan-900 overflow-hidden">
-            {s.twin ? <SceneBoundary fallback={<Twin2D twin={s.twin} />}><TwinScene twin={s.twin} /></SceneBoundary> : <div className="p-8 text-slate-400">Loading twin… (backend on :8000 required)</div>}
+            {s.twin ? <TwinView twin={s.twin} /> : <div className="p-8 text-slate-400">Loading twin… (backend on :8000 required)</div>}
           </div>
         </main>
       )}
@@ -183,7 +204,7 @@ export default function App() {
             <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
               <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Siren size={13} /> SCENARIOS</h2>
               {s.scenarios.map((sc) => (
-                <button key={sc.id} onClick={() => s.set({ scenarioId: sc.id })} className={`block w-full rounded p-2 text-left text-xs mb-1 ${s.scenarioId === sc.id ? 'bg-cyan-500/20 border border-cyan-600' : 'bg-slate-800/60'}`}>{sc.name} <span className="text-amber-300">({sc.severity})</span></button>
+                <button key={sc.id} onClick={() => s.set({ scenarioId: sc.id })} className={`block w-full rounded p-2 text-left text-xs mb-1 ${s.scenarioId === sc.id ? 'bg-cyan-500/20 border border-cyan-600' : 'bg-slate-800/60'}`}>{SCENARIO_ICONS[sc.id]} {sc.name} <span className="text-amber-300">({sc.severity})</span></button>
               ))}
               <button onClick={() => void runDemo()} className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-emerald-500 py-2 text-xs font-bold text-slate-950"><Play size={13} /> RUN SIMULATION</button>
               <button onClick={() => void resetAll()} className="mt-1 flex w-full items-center justify-center gap-1 rounded border border-slate-600 py-2 text-xs"><RotateCcw size={13} /> RESET TWIN</button>
@@ -198,9 +219,7 @@ export default function App() {
           <section className="col-span-12 lg:col-span-7">
             <div className="h-[520px] rounded-2xl border border-cyan-900 overflow-hidden bg-slate-950">
               {s.twin
-                ? s.viewMode === '3d'
-                  ? <SceneBoundary fallback={<div><p className="p-3 text-amber-300 text-sm">3D unavailable (WebGL) — 2D fallback shown. All functions remain available.</p><Twin2D twin={s.twin} /></div>}><TwinScene twin={s.twin} /></SceneBoundary>
-                  : <Twin2D twin={s.twin} />
+                ? s.viewMode === '3d' ? <TwinView twin={s.twin} /> : <Twin2D twin={s.twin} />
                 : <div className="p-6 text-slate-400">Loading twin…</div>}
             </div>
             <div className="mt-2 flex gap-2 text-xs">
@@ -253,6 +272,8 @@ export default function App() {
                       <div>{d.decision}</div>
                       <div className="text-slate-400 mt-1">{d.justification}</div>
                       <div className="font-mono text-[10px] mt-1 text-slate-500">confidence {(d.confidence * 100).toFixed(0)}% · {d.model} · mode={d.mode}</div>
+                      <details className="mt-1"><summary className="cursor-pointer text-cyan-300">Raw decision JSON</summary>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[10px] text-slate-400">{JSON.stringify(d, null, 2)}</pre></details>
                     </div>
                   ))}
                 </motion.section>
@@ -276,7 +297,7 @@ export default function App() {
               <p>Baseline path: {((s.results?.verification?.metrics.baseline_path as string[] | null)?.join(' → ')) ?? 'run experiment first'}</p>
               <p className="text-emerald-300">Invariant: {scenario.invariant}</p>
               <p className="text-slate-400 text-xs">Segmentation is applied only through the policy-gated allowlist (block_connection / isolate_asset / session revocation). Verification replays the identical objective.</p>
-              <div className="h-[360px] rounded-xl border border-cyan-900 overflow-hidden">{s.twin && <TwinScene twin={s.twin} />}</div>
+              <div className="h-[360px] rounded-xl border border-cyan-900 overflow-hidden">{s.twin && <TwinView twin={s.twin} />}</div>
             </div>
           ) : <p className="text-slate-400">Select a scenario first.</p>}
         </main>
@@ -309,6 +330,10 @@ export default function App() {
                 <li key={c.name} className={c.passed ? 'text-emerald-300' : 'text-red-300'}>{c.passed ? '✓' : '✗'} {c.name} — <span className="text-slate-300">{c.detail}</span></li>))}
               </ul>
               <p className="mt-4 text-slate-300 font-semibold">CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button onClick={() => void runDemo(s.scenarioId)} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><RotateCcw size={13} /> Replay with Seed 42</button>
+                <span className="text-xs text-slate-400">Deterministic replay: identical seed produces identical telemetry (proven in backend tests); compare the event timeline run-to-run.</span>
+              </div>
             </div>
           )}
         </main>

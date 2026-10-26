@@ -13,9 +13,24 @@ INVESTIGATOR_SYSTEM = (
 )
 STRATEGIST_SYSTEM = (
     "You are the Defense Strategist in CYBERGENESIS, a defensive simulation on synthetic data only. "
-    "Allowed actions ONLY: isolate_asset, block_connection, revoke_session, rotate_credential, apply_patch, disable_service, restore_connectivity. "
+    "Allowed actions ONLY, with exact parameter contracts: "
+    "isolate_asset{asset_id} (isolates that asset, cutting all its connections); "
+    "block_connection{asset_id=source, params:{source, target}} (both params REQUIRED, source/target must be a listed connection); "
+    "revoke_session{asset_id: identity-provider or workstation, params:{identity}}; "
+    "rotate_credential{asset_id: identity-provider or workstation, params:{identity}}; "
+    "apply_patch{asset_id} (removes vulnerabilities but does NOT stop active spread or block paths); "
+    "disable_service{asset_id: web-server/app-server only}; restore_connectivity{asset_id}. "
+    "Your action MUST actually achieve the stated invariant (block the attack path / deny the session), not merely patch. "
     "Return ONLY JSON: {\"actions\": [{\"action_type\": str, \"asset_id\": str, \"params\": {}}], \"justification\": str, "
     "\"expected_effectiveness\": str, \"operational_impact\": str, \"confidence\": float}. Prefer least disruptive effective action."
+)
+
+ACTION_SEMANTICS = (
+    "Topology connections (source-target, traversable ones carry attack/data paths) and the current attack path "
+    "are given below. For ransomware-like spread, isolating the compromised source asset is the least disruptive "
+    "action that blocks the path. For lateral movement, block_connection on the final edge into the protected "
+    "target (with both source and target params) is the choke point. For compromised identity, revoke_session AND "
+    "rotate_credential on identity-provider for the named identity."
 )
 
 
@@ -59,15 +74,32 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str) -> Inc
             evidence_refs=obs.event_ids, confidence=0.86, model="deterministic-offline", mode="offline")
 
 
-async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str) -> DefenseProposal:
+async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None) -> DefenseProposal:
+    context = f"Incident: {hyp.hypothesis}. Affected: {hyp.affected_assets}. Invariant to achieve: {scenario['invariant']}."
+    if twin is not None:
+        edges = [f"{c['source']}->{c['target']}" for c in twin.to_dict()["connections"] if c["traversable"]]
+        path = twin.find_path(scenario["source_asset"], scenario["target_asset"])
+        context += (f" Source={scenario['source_asset']} Target={scenario['target_asset']} Identity={scenario.get('identity')}. "
+                    f"Traversable connections: {edges}. Current attack path: {path}. {ACTION_SEMANTICS}")
     try:
-        data, _ = await meta_client.chat_json(
-            STRATEGIST_SYSTEM,
-            f"Incident: {hyp.hypothesis}. Affected: {hyp.affected_assets}. Scenario expected containment context: {scenario['invariant']}.", run_id)
-        p = DefenseProposal(**{**data, "model": meta_client.model, "mode": "live", "evidence_refs": hyp.evidence_refs})
-        if not p.actions:
-            raise ValueError("empty actions")
-        return p
+        from app.policies.engine import evaluate as _evaluate
+
+        feedback = ""
+        for _attempt in range(2):
+            data, _ = await meta_client.chat_json(STRATEGIST_SYSTEM, context + feedback, run_id)
+            p = DefenseProposal(**{**data, "model": meta_client.model, "mode": "live", "evidence_refs": hyp.evidence_refs})
+            if not p.actions:
+                raise ValueError("empty actions")
+            if twin is None:
+                return p
+            verdicts = [_evaluate(a.action_type, a.asset_id, a.params, twin) for a in p.actions]
+            if any(v.approved for v in verdicts):
+                return p
+            # bounded retry with deterministic policy feedback — still the model's decision
+            feedback = (" Your previous proposal was REJECTED by policy: "
+                        + "; ".join(f"{v.action_type} on {v.asset_id}: {', '.join(v.reasons)}" for v in verdicts)
+                        + ". Propose a corrected allowlisted action that achieves the invariant.")
+        raise ValueError("live proposal rejected by policy twice")
     except Exception:  # noqa: BLE001 - honest offline fallback below
         actions = scenario["expected_defense"]
         return DefenseProposal(
