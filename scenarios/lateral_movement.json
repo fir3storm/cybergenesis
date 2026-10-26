@@ -1,0 +1,20 @@
+{
+  "id": "lateral_movement",
+  "name": "Lateral Movement",
+  "description": "Exposed application service creates a graph attack path from the DMZ toward the protected database. Simulation tests a segmentation choke point. No exploitation toolkit — graph reachability only.",
+  "severity": "high",
+  "source_asset": "web-server",
+  "target_asset": "database",
+  "identity": null,
+  "verification_kind": "reachability",
+  "objectives": ["reach_database_from_web"],
+  "attack_steps": [
+    {"type": "network_connection", "asset": "web-server", "description": "Exposed synthetic service on web server probed"},
+    {"type": "network_connection", "asset": "app-server", "description": "Simulated pivot attempt from web server to application server"},
+    {"type": "network_connection", "asset": "database", "description": "Simulated attempt to reach protected database from application server"}
+  ],
+  "expected_defense": [
+    {"action_type": "block_connection", "asset_id": "app-server", "params": {"source": "app-server", "target": "database"}}
+  ],
+  "invariant": "Database is unreachable from the web server through the segmented path"
+}

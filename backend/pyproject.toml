@@ -1,0 +1,17 @@
+[project]
+name = "cybergenesis-backend"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115", "uvicorn>=0.32", "pydantic>=2.10", "pydantic-settings>=2.6",
+  "sqlalchemy>=2.0", "networkx>=3.3", "httpx>=0.28",
+]
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8"]
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 140
+[tool.ruff.lint]
+ignore = ["E702"]  # compact twin state assignments are intentional

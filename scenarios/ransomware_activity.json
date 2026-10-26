@@ -1,0 +1,21 @@
+{
+  "id": "ransomware_activity",
+  "name": "Ransomware-Like Activity",
+  "description": "Synthetic high-volume file modifications on an employee workstation with spreading risk toward the file server. No real ransomware — typed simulation events only.",
+  "severity": "critical",
+  "source_asset": "employee-workstation",
+  "target_asset": "file-server",
+  "identity": null,
+  "verification_kind": "reachability",
+  "objectives": ["reach_file_server", "modify_shared_files"],
+  "attack_steps": [
+    {"type": "process_start", "asset": "employee-workstation", "description": "Synthetic suspicious process starts on employee workstation"},
+    {"type": "file_modification_burst", "asset": "employee-workstation", "description": "High-volume synthetic file modifications detected (240 files/min, synthetic)"},
+    {"type": "network_connection", "asset": "employee-workstation", "description": "Workstation attempts repeated connections to file server share"},
+    {"type": "file_modification_burst", "asset": "file-server", "description": "Synthetic file modifications begin appearing on shared drive"}
+  ],
+  "expected_defense": [
+    {"action_type": "isolate_asset", "asset_id": "employee-workstation", "params": {}}
+  ],
+  "invariant": "Suspicious workstation cannot reach the file server and containment is active"
+}

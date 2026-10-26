@@ -1,0 +1,8 @@
+# Meta AI Integration
+
+- **Model:** Meta Muse Spark, default `muse-spark-1.3`, via Meta Model API (`MODEL_API_BASE_URL=https://api.meta.ai/v1`, OpenAI-compatible `/chat/completions`), key from `MODEL_API_KEY` env only.
+- **Client:** `MetaModelClient` (`backend/app/integrations/meta_client.py`) — async httpx, configurable timeout (`MODEL_TIMEOUT_SECONDS`-style setting `model_timeout_seconds`), up to 2 retries, JSON-object extraction, token/latency accounting persisted to `model_usage`, prompt version `cybergenesis-v1` tracked per call.
+- **Where AI reasons:** Incident Investigator (hypothesis, confirmed vs speculation, confidence) and Defense Strategist (allowlisted action proposal, justification, expected effectiveness, operational impact). System prompts constrain outputs to JSON schemas validated by Pydantic (`IncidentHypothesis`, `DefenseProposal`); malformed output is rejected, never executed.
+- **Where AI never acts:** execution. The deterministic policy engine (`policies/engine.py`) re-validates every proposed action against the allowlist, asset existence, and preconditions, independent of the LLM. LLM text is data, never commands — agents have no shell.
+- **Honesty contract:** no key / provider error / `OFFLINE_MODE=true` → deterministic offline reasoning derived from the actual twin telemetry, labelled `mode=offline` in every stored decision and shown as an **OFFLINE SIMULATION** badge in the UI. Live runs show **LIVE META AI**. `GET /api/models/status` exposes configured/reachable/mode without ever returning the key.
+- **Judges:** set `MODEL_API_KEY`, restart backend, badge flips to LIVE; run any scenario and inspect Agent Collaboration cards — live decisions carry `model=muse-spark-1.3, mode=live` and token usage in the report.

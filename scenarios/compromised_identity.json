@@ -1,0 +1,22 @@
+{
+  "id": "compromised_identity",
+  "name": "Compromised Credential",
+  "description": "Synthetic administrative identity used in a suspicious session with unauthorized access attempts against the database. Synthetic credentials only.",
+  "severity": "high",
+  "source_asset": "admin-workstation",
+  "target_asset": "database",
+  "identity": "admin-01",
+  "verification_kind": "identity_access",
+  "objectives": ["admin_access_to_database"],
+  "attack_steps": [
+    {"type": "auth_anomaly", "asset": "identity-provider", "description": "Admin identity authenticates from unusual synthetic context"},
+    {"type": "session_created", "asset": "admin-workstation", "description": "Suspicious synthetic admin session established"},
+    {"type": "authorization_failure", "asset": "database", "description": "Unauthorized access attempts against database using admin session"},
+    {"type": "authorization_failure", "asset": "file-server", "description": "Unauthorized access attempts against file server using admin session"}
+  ],
+  "expected_defense": [
+    {"action_type": "revoke_session", "asset_id": "identity-provider", "params": {"identity": "admin-01"}},
+    {"action_type": "rotate_credential", "asset_id": "identity-provider", "params": {"identity": "admin-01"}}
+  ],
+  "invariant": "Replayed unauthorized access with the compromised identity is denied"
+}
