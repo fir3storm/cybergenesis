@@ -1,8 +1,8 @@
-import { Component, Suspense, lazy, useEffect, useRef, type ReactNode } from 'react'
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, Bug, Database, Download, FlaskConical, Globe, KeyRound, Play, RotateCcw, Route,
-  Settings as SettingsIcon, Shield, ShieldCheck, Siren, Home, Network, FileText,
+  Activity, Bot, Bug, Database, Download, FlaskConical, Globe, KeyRound, MessageSquareText, Play, RotateCcw, Route,
+  Settings as SettingsIcon, Share2, Shield, ShieldCheck, Siren, Home, Network, FileText,
 } from 'lucide-react'
 import { STATUS_COLOR } from './components/status'
 
@@ -11,6 +11,7 @@ const SCENARIO_ICONS: Record<string, ReactNode> = {
   ransomware_activity: <Bug size={13} className="inline text-red-300" />,
   compromised_identity: <KeyRound size={13} className="inline text-amber-300" />,
   lateral_movement: <Route size={13} className="inline text-orange-300" />,
+  data_exfiltration: <Share2 size={13} className="inline text-rose-300" />,
 }
 import { api, WS } from './services/api'
 import { useStore } from './stores/store'
@@ -76,6 +77,7 @@ function AssetPanel({ asset }: { asset: Asset }) {
 
 export default function App() {
   const s = useStore()
+  const [commentaryOn, setCommentaryOn] = useState(true)
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
 
@@ -93,11 +95,25 @@ export default function App() {
       const r = await api.results(id)
       s.set({ results: r, runState: r.run.state })
       const t = await api.twin(); s.set({ twin: t })
-      if (r.run.state === 'COMPLETED' || r.run.state === 'FAILED') stopPoll()
+      if (r.run.state === 'COMPLETED' || r.run.state === 'FAILED') {
+        stopPoll()
+        const base = useStore.getState().replayBaseline
+        if (base) {
+          const evs = await api.events(id)
+          const tele = evs.filter((e) => e.event_type === 'telemetry').map((e) => e.message)
+          s.set({ replayVerdict: JSON.stringify(tele) === JSON.stringify(base)
+            ? `Replay proof: telemetry identical to the previous run (${tele.length} events, same seed 42). Same seed → same result.`
+            : `Replay proof: telemetry differs from the previous run (${tele.length} vs ${base.length} events) — investigate before trusting determinism.` })
+        }
+      }
     } catch { /* polling is best-effort; WS is primary */ }
   }
 
-  async function runDemo(scenarioId = s.scenarioId) {
+  async function runDemo(scenarioId = s.scenarioId, replay = false) {
+    if (replay) {
+      const tele = s.events.filter((e) => e.event_type === 'telemetry').map((e) => e.message)
+      s.set({ replayBaseline: tele.length ? tele : null, replayVerdict: null })
+    }
     s.set({ error: null, events: [], results: null, runState: 'SCENARIO_SELECTED', view: 'experiment', scenarioId })
     try {
       await api.reset()
@@ -127,6 +143,15 @@ export default function App() {
     catch (e) { s.set({ error: (e as Error).message }) }
   }
 
+  function downloadMarkdown() {
+    if (!s.runId) return
+    api.reportMarkdown(s.runId).then((md) => {
+      const blob = new Blob([md], { type: 'text/markdown' })
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+      a.download = `cybergenesis-report-${s.runId}.md`; a.click()
+    }).catch((e) => s.set({ error: (e as Error).message }))
+  }
+
   function exportReport() {
     if (!s.runId) return
     api.report(s.runId).then((r) => {
@@ -135,6 +160,46 @@ export default function App() {
       a.download = `cybergenesis-report-${s.runId}.json`; a.click()
     }).catch((e) => s.set({ error: (e as Error).message }))
   }
+
+  // Keyboard shortcuts: Space=run, R=reset, 1-4=select scenario (ignored while typing)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return
+      const st = useStore.getState()
+      if (e.key === ' ') { e.preventDefault(); if (st.view === 'twin' || st.view === 'experiment') void runDemo(st.scenarioId) }
+      else if (e.key.toLowerCase() === 'r') void resetAll()
+      else if (['1', '2', '3', '4'].includes(e.key)) {
+        const sc = st.scenarios[Number(e.key) - 1]
+        if (sc) st.set({ scenarioId: sc.id })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const scenarioDef = s.scenarios.find((x) => x.id === s.scenarioId)
+  const commentary = ((): string => {
+    const scName = scenarioDef?.name ?? 'the selected scenario'
+    const lastDecision = [...s.events].reverse().find((e) => e.event_type === 'agent_decision')
+    switch (s.runState) {
+      case 'IDLE': return 'Ready. Press Space (or Run) to introduce a synthetic incident into the twin. Everything is simulated and isolated.'
+      case 'SCENARIO_SELECTED': return `Scenario selected: ${scName}. Saving a baseline snapshot so the defense can be measured against it.`
+      case 'ATTACK_SIMULATING': return `Introducing synthetic ${scName.toLowerCase()} activity. Watch the red attack path — particles flow toward the target asset.`
+      case 'TELEMETRY_COLLECTED': return `The Observer has collected the synthetic telemetry: ${lastDecision?.message ?? 'anomaly pattern matched against real twin state.'}`
+      case 'INVESTIGATING': return `${s.modelStatus?.mode === 'live' ? 'Meta Muse Spark is investigating' : 'The Investigator (offline deterministic mode) is analysing'} the evidence — hypothesis, affected assets, confidence.`
+      case 'DEFENSE_PROPOSED': return `Defense proposed: ${lastDecision?.message ?? 'countermeasure ready for policy review.'}`
+      case 'POLICY_VALIDATING': return 'The deterministic policy engine — independent of the AI — checks the proposal against the allowlist and preconditions.'
+      case 'DEFENSE_APPLYING': return 'Applying the approved simulated defense. Watch the node change state and gain a containment ring in the twin.'
+      case 'VERIFYING': return 'The Verification Scientist now replays the identical attack against the modified twin. Same objective, same seed.'
+      case 'COMPLETED': return s.results?.verification
+        ? `Verification ${s.results.verification.outcome}: ${s.results.verification.invariant}. Effectiveness ${String(s.results.verification.metrics.defense_effectiveness_pct)}%, at a cost of ${String(s.results.verification.metrics.operational_impact_disrupted_legit_paths)} disrupted legitimate paths. That is computed proof, not a claim.`
+        : 'Experiment complete. Open the Verification Lab for before/after proof.'
+      case 'FAILED': return `Experiment failed honestly${s.results?.run.error ? `: ${s.results.run.error}` : ''}. No fake success — inspect the timeline and evidence.`
+      default: return `Workflow stage: ${s.runState}.`
+    }
+  })()
 
   const selected = s.twin?.assets.find((a) => a.id === s.selectedAsset) ?? null
   const scenario = s.scenarios.find((x) => x.id === s.scenarioId)
@@ -158,6 +223,11 @@ export default function App() {
           {live ? '● LIVE META AI' : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
         </span>
         <span className="text-[11px] text-slate-400 font-mono">{s.modelStatus?.detail}</span>
+        {s.results?.usage && s.results.usage.calls > 0 && (
+          <span className="text-[11px] font-mono px-2 py-1 rounded-full border border-violet-500/60 text-violet-300" title="Real Meta Model API usage for the current run">
+            Meta tokens: {s.results.usage.prompt_tokens} in + {s.results.usage.completion_tokens} out · {s.results.usage.calls} calls
+          </span>
+        )}
         <nav className="ml-auto flex flex-wrap gap-1" aria-label="Primary">
           {nav.map((n) => (
             <button key={n.id} onClick={() => s.set({ view: n.id })}
@@ -213,6 +283,14 @@ export default function App() {
               <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">WORKFLOW</h2>
               <div className="text-[11px] font-mono text-slate-300">{s.runState}</div>
               <div className="mt-1 h-2 rounded bg-slate-800"><div className="h-2 rounded bg-cyan-400 transition-all" style={{ width: `${Math.max(4, (STAGES.indexOf(s.runState) + 1) / STAGES.length * 100)}%` }} /></div>
+              <p className="mt-2 text-[10px] text-slate-500">Shortcuts: Space = run · R = reset · 1–4 = scenario</p>
+            </section>
+            <section className="rounded-xl border border-violet-800/60 bg-violet-950/30 p-3" aria-live="polite">
+              <h2 className="mb-1 flex items-center justify-between text-xs font-bold tracking-wider text-violet-300">
+                <span className="flex items-center gap-1"><MessageSquareText size={13} /> DEMO COMMENTARY</span>
+                <button onClick={() => setCommentaryOn(!commentaryOn)} className="text-[10px] text-slate-400 underline">{commentaryOn ? 'hide' : 'show'}</button>
+              </h2>
+              {commentaryOn && <p className="text-xs leading-relaxed text-slate-200">{commentary}</p>}
             </section>
           </aside>
 
@@ -331,9 +409,11 @@ export default function App() {
               </ul>
               <p className="mt-4 text-slate-300 font-semibold">CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <button onClick={() => void runDemo(s.scenarioId)} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><RotateCcw size={13} /> Replay with Seed 42</button>
-                <span className="text-xs text-slate-400">Deterministic replay: identical seed produces identical telemetry (proven in backend tests); compare the event timeline run-to-run.</span>
+                <button onClick={() => void runDemo(s.scenarioId, true)} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><RotateCcw size={13} /> Replay with Seed 42</button>
+                <button onClick={() => void downloadMarkdown()} className="flex items-center gap-1 rounded border border-slate-600 px-3 py-2 text-xs"><Download size={13} /> Download Report (.md)</button>
+                <span className="text-xs text-slate-400">Deterministic replay: identical seed produces identical telemetry (proven in backend tests).</span>
               </div>
+              {s.replayVerdict && <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">{s.replayVerdict}</p>}
             </div>
           )}
         </main>

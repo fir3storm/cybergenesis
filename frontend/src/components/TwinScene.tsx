@@ -20,31 +20,91 @@ const SHORT_LABEL: Record<string, string> = {
 /** Front-row labels go below their node, back-row above — prevents centre pile-up. */
 const LABEL_BELOW = new Set(['employee-workstation', 'file-server', 'admin-workstation', 'app-server'])
 
+function NodeShape({ a, color, selected }: { a: Asset; color: string; selected: boolean }) {
+  const mat = <meshStandardMaterial color={color} emissive={color} emissiveIntensity={selected ? 2.4 : 1.25} metalness={0.65} roughness={0.22} />
+  switch (a.asset_type) {
+    case 'database': // disk stack
+      return <group>{[-0.24, 0, 0.24].map((y) => (
+        <mesh key={y} position={[0, y, 0]}><cylinderGeometry args={[0.42, 0.42, 0.18, 24]} />{mat}</mesh>))}</group>
+    case 'firewall': // router cone / shield wedge
+      return <mesh><coneGeometry args={[0.52, 0.85, 5]} />{mat}</mesh>
+    case 'gateway':
+      return <mesh><torusGeometry args={[0.42, 0.16, 12, 28]} />{mat}</mesh>
+    case 'identity': // orb
+      return <mesh><sphereGeometry args={[0.42, 24, 24]} />{mat}</mesh>
+    case 'sensor': // radar tetra
+      return <mesh><tetrahedronGeometry args={[0.55]} />{mat}</mesh>
+    case 'workstation': // terminal block + screen slab
+      return <group>
+        <mesh><boxGeometry args={[0.62, 0.42, 0.5]} />{mat}</mesh>
+        <mesh position={[0, 0.38, -0.08]} rotation={[-0.25, 0, 0]}><boxGeometry args={[0.55, 0.34, 0.05]} />{mat}</mesh>
+      </group>
+    case 'file_server':
+      return <mesh><boxGeometry args={[0.5, 0.72, 0.5]} />{mat}</mesh>
+    case 'web_server':
+    case 'app_server':
+      return <mesh><octahedronGeometry args={[0.46]} />{mat}</mesh>
+    default:
+      return <mesh><octahedronGeometry args={[0.44]} />{mat}</mesh>
+  }
+}
+
 function Node({ a }: { a: Asset }) {
-  const ref = useRef<THREE.Mesh>(null)
+  const ref = useRef<THREE.Group>(null)
+  const shellRef = useRef<THREE.Mesh>(null)
+  const lightRef = useRef<THREE.PointLight>(null)
+  const pulseRef = useRef<THREE.Mesh>(null)
   const [hovered, setHovered] = useState(false)
   const set = useStore((s) => s.set)
   const selected = useStore((s) => s.selectedAsset === a.id)
   const color = STATUS_COLOR[a.status] ?? '#22d3ee'
   const expanded = selected || hovered
   const below = LABEL_BELOW.has(a.id)
+  const compromised = a.status === 'compromised' || a.status === 'suspicious'
   useFrame(({ clock }) => {
+    const t = clock.elapsedTime
     if (ref.current && !REDUCED_MOTION) {
-      ref.current.position.y = a.pos[1] + Math.sin(clock.elapsedTime * 1.2 + a.pos[0]) * 0.08
-      ref.current.rotation.y = clock.elapsedTime * 0.25
+      ref.current.position.y = a.pos[1] + Math.sin(t * 1.2 + a.pos[0]) * 0.08
+      ref.current.rotation.y = t * 0.25
+    }
+    if (shellRef.current) { // holographic shell breathes; expands on hover/select
+      const target = expanded ? 1.45 : 1.12
+      const cur = shellRef.current.scale.x
+      const next = REDUCED_MOTION ? target : cur + (target - cur) * 0.12
+      shellRef.current.scale.setScalar(next)
+    }
+    if (lightRef.current) { // per-node glow; compromised nodes pulse hard
+      lightRef.current.intensity = compromised && !REDUCED_MOTION ? 9 + Math.sin(t * 5) * 5 : selected ? 12 : 6
+    }
+    if (pulseRef.current) { // expanding alarm ring on compromised/suspicious
+      if (compromised && !REDUCED_MOTION) {
+        const s = 1 + (t % 1.4) / 1.4 * 1.6
+        pulseRef.current.scale.setScalar(s)
+        const m = pulseRef.current.material as THREE.MeshBasicMaterial
+        m.opacity = Math.max(0, 0.65 - (t % 1.4) / 1.4 * 0.65)
+      }
     }
   })
   return (
     <group position={a.pos}>
-      <mesh ref={ref}
+      <pointLight ref={lightRef} color={color} intensity={6} distance={5.5} decay={1.8} />
+      <group ref={ref}
         onClick={(e) => { e.stopPropagation(); set({ selectedAsset: a.id }) }}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true) }}
         onPointerOut={() => setHovered(false)}>
-        {a.asset_type === 'database' ? <cylinderGeometry args={[0.4, 0.4, 0.66, 24]} />
-          : a.asset_type === 'firewall' || a.asset_type === 'gateway' ? <boxGeometry args={[0.7, 0.7, 0.7]} />
-          : <octahedronGeometry args={[0.44]} />}
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={selected ? 2.2 : 1.1} metalness={0.6} roughness={0.25} />
+        <NodeShape a={a} color={color} selected={selected} />
+      </group>
+      {/* holographic wireframe shell */}
+      <mesh ref={shellRef}>
+        <icosahedronGeometry args={[0.72, 1]} />
+        <meshBasicMaterial color={color} wireframe transparent opacity={expanded ? 0.5 : 0.22} />
       </mesh>
+      {compromised && (
+        <mesh ref={pulseRef} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.85, 0.02, 8, 48]} />
+          <meshBasicMaterial color="#ef4444" transparent opacity={0.6} />
+        </mesh>
+      )}
       {(a.status === 'contained' || a.status === 'remediated') && (
         <mesh rotation={[Math.PI / 2.4, 0, 0]}>
           <torusGeometry args={[0.8, 0.035, 10, 48]} />
@@ -69,22 +129,36 @@ function Node({ a }: { a: Asset }) {
   )
 }
 
-function Traffic({ from, to, active, attack }: { from: [number, number, number]; to: [number, number, number]; active: boolean; attack: boolean }) {
+const PARTICLES_PER_EDGE = 4
+
+function TrafficParticle({ a, b, offset, attack }: { a: THREE.Vector3; b: THREE.Vector3; offset: number; attack: boolean }) {
   const ref = useRef<THREE.Mesh>(null)
-  const a = useMemo(() => new THREE.Vector3(...from), [from])
-  const b = useMemo(() => new THREE.Vector3(...to), [to])
   useFrame(({ clock }) => {
     if (ref.current) {
-      const t = REDUCED_MOTION ? 0.5 : (clock.elapsedTime * 0.35 + from[0] * 0.1) % 1
-      ref.current.position.lerpVectors(a, b, t)
+      const t = REDUCED_MOTION ? (offset + 0.2) % 1 : (clock.elapsedTime * (attack ? 0.55 : 0.3) + offset) % 1
+      ref.current.position.lerpVectors(a, b, t) // direction: source -> target (attack flows toward the target)
+      const s = attack ? 1 + Math.sin(clock.elapsedTime * 6 + offset * 9) * 0.35 : 1
+      ref.current.scale.setScalar(REDUCED_MOTION ? 1 : s)
     }
   })
-  if (!active) return null
   return (
     <mesh ref={ref}>
-      <sphereGeometry args={[0.09, 10, 10]} />
+      <sphereGeometry args={[attack ? 0.11 : 0.075, 10, 10]} />
       <meshBasicMaterial color={attack ? '#ef4444' : '#22d3ee'} />
     </mesh>
+  )
+}
+
+function Traffic({ from, to, active, attack }: { from: [number, number, number]; to: [number, number, number]; active: boolean; attack: boolean }) {
+  const a = useMemo(() => new THREE.Vector3(...from), [from])
+  const b = useMemo(() => new THREE.Vector3(...to), [to])
+  if (!active) return null
+  return (
+    <group>
+      {Array.from({ length: PARTICLES_PER_EDGE }, (_, i) => (
+        <TrafficParticle key={i} a={a} b={b} offset={i / PARTICLES_PER_EDGE + from[0] * 0.03} attack={attack} />
+      ))}
+    </group>
   )
 }
 
@@ -92,6 +166,7 @@ export const ATTACK_PATHS: Record<string, string[]> = {
   ransomware_activity: ['employee-workstation', 'file-server'],
   compromised_identity: ['admin-workstation', 'database'],
   lateral_movement: ['internet', 'firewall', 'web-server', 'app-server', 'database'],
+  data_exfiltration: ['database', 'app-server', 'web-server', 'firewall', 'internet'],
 }
 
 /** Keyboard nav: arrows orbit, +/- zoom, Enter selects most severe asset, Esc clears.

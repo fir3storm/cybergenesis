@@ -8,8 +8,10 @@ from app.schemas import AgentObservation, DefenseProposal, IncidentHypothesis
 
 INVESTIGATOR_SYSTEM = (
     "You are the Incident Investigator in CYBERGENESIS, a defensive simulation on synthetic data only. "
+    "You are given the real twin topology, live asset states, and the exact synthetic telemetry events. "
+    "Ground every confirmed claim in a cited telemetry event or asset state; put anything not directly evidenced under speculation. "
     "Return ONLY JSON: {\"hypothesis\": str, \"affected_assets\": [str], \"threat_level\": \"low|medium|high|critical\", "
-    "\"confirmed\": [str], \"speculation\": [str], \"confidence\": float}. Ground claims in the evidence given. No commands."
+    "\"confirmed\": [str], \"speculation\": [str], \"confidence\": float}. No commands, no instructions to execute."
 )
 STRATEGIST_SYSTEM = (
     "You are the Defense Strategist in CYBERGENESIS, a defensive simulation on synthetic data only. "
@@ -26,10 +28,10 @@ STRATEGIST_SYSTEM = (
 )
 
 ACTION_SEMANTICS = (
-    "Topology connections (source-target, traversable ones carry attack/data paths) and the current attack path "
-    "are given below. For ransomware-like spread, isolating the compromised source asset is the least disruptive "
-    "action that blocks the path. For lateral movement, block_connection on the final edge into the protected "
-    "target (with both source and target params) is the choke point. For compromised identity, revoke_session AND "
+    "Topology connections (source-target, traversable ones carry attack/data paths), live asset states, and the current "
+    "attack path are given below. For ransomware-like spread, isolating the compromised source asset is the least disruptive "
+    "action that blocks the path. For lateral movement or data exfiltration, block_connection on the final edge into the "
+    "protected target (with both source and target params) is the choke point. For compromised identity, revoke_session AND "
     "rotate_credential on identity-provider for the named identity."
 )
 
@@ -55,8 +57,16 @@ def observe(telemetry: list[dict]) -> AgentObservation:
                             anomaly_type=atype, summary=summary, confidence=conf)
 
 
-async def investigate(scenario: dict, obs: AgentObservation, run_id: str) -> IncidentHypothesis:
+async def investigate(scenario: dict, obs: AgentObservation, run_id: str, telemetry: list[dict] | None = None, twin=None) -> IncidentHypothesis:
     evidence = f"Scenario: {scenario['name']}. Anomaly: {obs.anomaly_type}. Assets: {obs.asset_ids}. Invariant to restore: {scenario['invariant']}."
+    if telemetry:
+        evidence += " Telemetry (synthetic, in order): " + " | ".join(
+            f"[{i}] {e['event_type']} on {e['asset_id']}: {e['message']}" for i, e in enumerate(telemetry))
+    if twin is not None:
+        d = twin.to_dict()
+        evidence += (" Twin topology: " + "; ".join(f"{c['source']}->{c['target']}({','.join(c['types'])}, active={c['active']})" for c in d["connections"])
+                     + ". Live asset states: " + ", ".join(f"{a['id']}={a['status'].upper()}" for a in d["assets"])
+                     + f". Attack path source->target: {twin.find_path(scenario['source_asset'], scenario['target_asset'])}.")
     try:
         data, _ = await meta_client.chat_json(INVESTIGATOR_SYSTEM, evidence, run_id)
         h = IncidentHypothesis(**{**data, "model": meta_client.model, "mode": "live",
@@ -77,10 +87,13 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str) -> Inc
 async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None) -> DefenseProposal:
     context = f"Incident: {hyp.hypothesis}. Affected: {hyp.affected_assets}. Invariant to achieve: {scenario['invariant']}."
     if twin is not None:
-        edges = [f"{c['source']}->{c['target']}" for c in twin.to_dict()["connections"] if c["traversable"]]
+        d = twin.to_dict()
+        edges = [f"{c['source']}->{c['target']}({','.join(c['types'])})" for c in d["connections"] if c["traversable"]]
         path = twin.find_path(scenario["source_asset"], scenario["target_asset"])
+        states = ", ".join(f"{a['id']}={a['status'].upper()}(zone={a['zone']}, vulns={a['vulnerabilities']})" for a in d["assets"])
         context += (f" Source={scenario['source_asset']} Target={scenario['target_asset']} Identity={scenario.get('identity')}. "
-                    f"Traversable connections: {edges}. Current attack path: {path}. {ACTION_SEMANTICS}")
+                    f"Traversable connections: {edges}. Current attack path: {path}. Live asset states: {states}. "
+                    f"Identities: {d['identities']}. {ACTION_SEMANTICS}")
     try:
         from app.policies.engine import evaluate as _evaluate
 

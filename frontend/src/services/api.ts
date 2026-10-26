@@ -22,5 +22,10 @@ export const api = {
   events: (id: string) => j<SimEvent[]>(`/api/experiments/${id}/events`),
   evidence: (id: string) => j<{ id: string; kind: string; ref: string; summary: string }[]>(`/api/experiments/${id}/evidence`),
   report: (id: string) => j<Record<string, unknown>>(`/api/experiments/${id}/report`),
+  reportMarkdown: async (id: string): Promise<string> => {
+    const r = await fetch(`${API}/api/experiments/${id}/report/markdown`)
+    if (!r.ok) throw new Error(`report/markdown -> HTTP ${r.status}`)
+    return r.text()
+  },
   experiments: () => j<{ id: string; scenario_id: string; state: string; mode: string; created_at: string }[]>('/api/experiments'),
 }

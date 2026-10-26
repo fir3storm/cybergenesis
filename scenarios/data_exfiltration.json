@@ -1,0 +1,21 @@
+{
+  "id": "data_exfiltration",
+  "name": "Data Exfiltration",
+  "description": "Synthetic bulk data staging from the database through the application tier toward the internet. No real data — synthetic record counts only; defense cuts the egress path at the DMZ choke point.",
+  "severity": "critical",
+  "source_asset": "database",
+  "target_asset": "internet",
+  "identity": null,
+  "verification_kind": "reachability",
+  "objectives": ["exfiltrate_to_internet"],
+  "attack_steps": [
+    {"type": "process_start", "asset": "app-server", "description": "Synthetic staging process starts on application server"},
+    {"type": "network_connection", "asset": "database", "description": "Bulk synthetic record reads from database (10,000 synthetic rows)"},
+    {"type": "network_connection", "asset": "web-server", "description": "Staged synthetic data forwarded to web server for egress"},
+    {"type": "network_connection", "asset": "internet", "description": "Attempted synthetic egress to internet gateway"}
+  ],
+  "expected_defense": [
+    {"action_type": "block_connection", "asset_id": "web-server", "params": {"source": "web-server", "target": "firewall"}}
+  ],
+  "invariant": "Database cannot reach the internet; the egress path through the DMZ is segmented"
+}

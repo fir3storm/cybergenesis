@@ -14,6 +14,8 @@ interface State {
   modelStatus: ModelStatus | null
   error: string | null
   viewMode: '3d' | '2d'
+  replayBaseline: string[] | null
+  replayVerdict: string | null
   set: (p: Partial<State>) => void
 }
 
@@ -30,5 +32,7 @@ export const useStore = create<State>((set) => ({
   modelStatus: null,
   error: null,
   viewMode: '3d',
+  replayBaseline: null,
+  replayVerdict: null,
   set: (p) => set(p),
 }))

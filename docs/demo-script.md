@@ -1,6 +1,6 @@
 # 3-Minute Demo Script
 
-**0:00–0:20 — The Living Twin.** Land on Welcome. "This is CYBERGENESIS: a living digital twin of an enterprise — gateway, firewall, web, app, database, identity, workstations, file server, sensor — glowing in real time. Cyan healthy, amber exposed. Everything you will see is synthetic and isolated."
+**0:00–0:20 — The Living Twin.** Land on Welcome. Turn on **Demo Commentary** (on by default in the Experiment view) — it narrates each stage so judges can follow without reading dashboards. "This is CYBERGENESIS: a living digital twin of an enterprise — gateway, firewall, web, app, database, identity, workstations, file server, sensor — glowing holographic nodes in real time. Cyan healthy, amber exposed. Everything you will see is synthetic and isolated."
 
 **0:20–0:40 — Choose the incident.** Click **Run Autonomous Defense Demo** (ransomware-like activity, seeded & reproducible). "We introduce a controlled, synthetic incident. No real malware — typed simulation events only."
 

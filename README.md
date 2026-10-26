@@ -54,10 +54,13 @@ cd frontend; npm test; npm run build
 ```
 13 backend tests cover all 3 scenarios end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, live-proposal policy-feedback retry (mocked), and honest provider failure. Test runs force `OFFLINE_MODE=true` for hermetic results. Frontend: Vitest + a Playwright smoke test (`npm run test:e2e`, Edge, requires servers running). Live Meta was verified on 2026-10-27: all 3 scenarios PASS with real Muse Spark decisions (see `docs/evaluation.md`).
 
-## The three scenarios
+## The four scenarios
 1. **Ransomware-like activity** — synthetic file-modification burst → isolate workstation → replay proves file server unreachable.
 2. **Compromised credential** — suspicious admin session → revoke session + rotate synthetic credential → replayed access denied.
 3. **Lateral movement** — graph attack path web→app→database → segmentation at the choke point → replay proves database unreachable.
+4. **Data exfiltration** — synthetic bulk staging database→app→web→internet → egress segmentation at the DMZ → replay proves database cannot reach the internet.
+
+Extras: toggleable **Demo Commentary** narration panel, human-readable Markdown report (`/api/experiments/{id}/report/markdown`, Download Report .md), live Meta token meter in the header, Replay-with-Seed-42 telemetry-identity proof, keyboard shortcuts (Space/R/1–4).
 
 All data is synthetic. No real targets, scanning, exploitation, or credential harvesting — see `docs/threat-model.md`.
 

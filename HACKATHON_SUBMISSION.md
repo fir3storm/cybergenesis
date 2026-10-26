@@ -7,7 +7,7 @@
 Security tools overwhelmingly stop at detection: logs, alerts, dashboards, and human toil. Nobody proves a defense actually works before a real adversary tests it.
 
 ## Solution
-An autonomous closed loop on a living 3D digital twin of an enterprise: **Observe → Reason → Propose → Validate → Act → Retest → Prove.** Six agents (Observer, Adversary Simulator, Incident Investigator, Defense Strategist, Defense Executor, Verification Scientist) run three complete incidents — ransomware-like activity, compromised credential, lateral movement — end to end.
+An autonomous closed loop on a living 3D digital twin of an enterprise: **Observe → Reason → Propose → Validate → Act → Retest → Prove.** Six agents (Observer, Adversary Simulator, Incident Investigator, Defense Strategist, Defense Executor, Verification Scientist) run four complete incidents — ransomware-like activity, compromised credential, lateral movement, data exfiltration — end to end. A toggleable Demo Commentary panel narrates the loop for judges, and every run exports a human-readable Markdown evidence report.
 
 ## Innovation
 - Autonomous **defense validation**, not detection: the identical attack is replayed after remediation and the outcome is computed (reachability, session denial), never asserted.

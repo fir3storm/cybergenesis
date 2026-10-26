@@ -19,7 +19,7 @@ client = TestClient(app)
 
 
 def test_scenarios_load():
-    assert set(SCENARIOS) == {"ransomware_activity", "compromised_identity", "lateral_movement"}
+    assert set(SCENARIOS) == {"ransomware_activity", "compromised_identity", "lateral_movement", "data_exfiltration"}
     for s in SCENARIOS.values():
         assert s["expected_defense"] and s["invariant"] and s["attack_steps"]
 
@@ -141,6 +141,19 @@ async def test_live_proposal_retries_with_policy_feedback(monkeypatch):
     p = await agents.propose_defense(SCENARIOS["ransomware_activity"], hyp, "test-run", twin=DigitalTwin())
     assert calls["n"] == 2 and p.mode == "live"
     assert p.actions[0].action_type == "isolate_asset"
+
+
+@pytest.mark.asyncio
+async def test_markdown_report_and_usage():
+    c = client.post("/api/experiments", json={"scenario_id": "data_exfiltration", "seed": 42})
+    rid = c.json()["id"]
+    await run_experiment(rid)
+    md = client.get(f"/api/experiments/{rid}/report/markdown")
+    assert md.status_code == 200 and "text/markdown" in md.headers["content-type"]
+    assert "# CYBERGENESIS Experiment Report" in md.text and "Data Exfiltration" in md.text
+    assert "Outcome: PASS" in md.text and "APPROVED" in md.text
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert "usage" in res and res["usage"]["calls"] >= 0  # 0 in offline tests, >0 live
 
 
 def test_manual_action_policy_gate():

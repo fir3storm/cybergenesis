@@ -106,7 +106,7 @@ async def run_experiment(run_id: str) -> None:
         _emit(db, run_id, "agent_decision", obs.summary, agent="observer", payload=obs.model_dump())
 
         await set_state("INVESTIGATING", "Meta Muse Spark investigating evidence" if mode == "live" else "Investigating evidence (OFFLINE deterministic mode — no Meta inference)", "incident_investigator")
-        hyp = await agents.investigate(scenario, obs, run_id)
+        hyp = await agents.investigate(scenario, obs, run_id, telemetry=telemetry, twin=TWIN)
         run.mode = hyp.mode; db.commit()
         db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp.hypothesis,
                                     justification="; ".join(hyp.confirmed), confidence=hyp.confidence,

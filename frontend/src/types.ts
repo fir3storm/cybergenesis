@@ -9,6 +9,7 @@ export interface Scenario { id: string; name: string; description: string; sever
 export interface SimEvent { event_type: string; run_id?: string; agent?: string | null; asset_id?: string | null; message: string; payload?: Record<string, unknown>; seq?: number; timestamp?: string; twin?: Twin }
 export interface RunResult {
   run: { id: string; scenario_id: string; seed: number; state: string; mode: string; error: string | null; metrics: Record<string, unknown> };
+  usage?: { prompt_tokens: number; completion_tokens: number; calls: number; models: string[] };
   verification: { outcome: string; invariant: string; checks: { name: string; passed: boolean; detail: string }[]; metrics: Record<string, unknown> } | null;
   decisions: { agent: string; decision: string; justification: string; confidence: number; model: string; mode: string; asset_ids: string[] }[];
   policy: { action_type: string; asset_id: string; approved: boolean; reasons: string[] }[];

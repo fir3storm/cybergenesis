@@ -20,6 +20,15 @@
 - [x] Playwright smoke test (`frontend/e2e/smoke.e2e.ts`, Edge channel) — passes; headless screenshot pipeline (`frontend/scripts/screenshots.mjs`) produced 6 screenshots
 - [x] LIVE Meta verified: provider HTTP 200; all 3 scenarios COMPLETED + verification PASS with muse-spark-1.3 decisions. First live run honestly FAILED (model under-specified block_connection → policy rejection); fixed via action contracts in Strategist prompt + bounded policy-feedback retry (mocked regression test added). Tests forced OFFLINE_MODE for hermetic CI.
 
+## Enhancement pass (judge-impact menu, 2026-10-27)
+- [x] 3D overhaul: per-node glow lights (compromised pulse), holographic wireframe shells (expand on hover), 4 staggered traffic particles/edge flowing toward target, node-shape variety (disk-stack DB, cone firewall, orb IdP, radar sensor, terminal workstations), alarm rings
+- [x] Demo Commentary narration panel (toggle, stage-aware, uses live event/decision text)
+- [x] Human-readable Markdown report endpoint + Download Report (.md); JSON report kept
+- [x] Deepened Meta prompts: full topology, live asset states, telemetry sequence fed to Investigator; states/identities to Strategist
+- [x] Bundle: manualChunks (three/motion/vendor) — initial JS ~190 KB, Three.js lazy
+- [x] Replay Proof: Replay-with-Seed-42 now compares telemetry event-by-event and displays the verdict
+- [x] Tier-3: live token-usage meter in header, keyboard shortcuts (Space/R/1–4), 4th scenario Data Exfiltration (live PASS verified). Skipped: light theme (dark is the design language), PDF (Markdown report instead)
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.
