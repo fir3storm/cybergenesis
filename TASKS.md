@@ -37,6 +37,13 @@
 - [x] Frontend: Twin Designer (drag/click-connect SVG canvas, palette, saved twins), Attack Playbook (step/defense composer + run), Component Library browser — all lazy-loaded views
 - [x] Found & fixed route shadowing: `/api/scenarios/{id}` captured `/api/scenarios/custom` (regression test added). 18 backend tests pass; custom end-to-end (custom twin + scenario → verification PASS) covered
 
+## Visual modernization + distinct views (2026-10-27)
+- [x] Living Twin and Experiment are now different screens (was the same layout): Twin = inspection (assets/topology/context, no run controls); Experiment Console = scenario cards, stage stepper, commentary, agent decisions, outcome
+- [x] Bloom post-processing (EffectComposer + Bloom + Vignette), smooth 0.5s status colour lerp, containment-ring expand animation, label glow shadows, shader-based traveling energy wave on attack edges, per-asset-type Lucide icons
+- [x] UI: Space Grotesk/Inter/JetBrains Mono, CSS palette variables, glassmorphism panels, skeleton loaders for the 3D canvas
+- [x] Agents are clickable (mouse + keyboard) with an inspector: responsibilities, input/output contract, event/decision activity
+- [x] Commentary shows demo-clock timestamps per stage
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.

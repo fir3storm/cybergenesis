@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Html, Line, OrbitControls } from '@react-three/drei'
+import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import type { Asset, Twin } from '../types'
 import { useStore } from '../stores/store'
@@ -54,6 +55,10 @@ function Node({ a }: { a: Asset }) {
   const shellRef = useRef<THREE.Mesh>(null)
   const lightRef = useRef<THREE.PointLight>(null)
   const pulseRef = useRef<THREE.Mesh>(null)
+  const ringRef = useRef<THREE.Mesh>(null)
+  const ringStart = useRef(-1)
+  const curColor = useRef(new THREE.Color(STATUS_COLOR[a.status] ?? '#22d3ee'))
+  useEffect(() => { ringStart.current = -1 }, [a.status])
   const [hovered, setHovered] = useState(false)
   const set = useStore((s) => s.set)
   const selected = useStore((s) => s.selectedAsset === a.id)
@@ -63,6 +68,25 @@ function Node({ a }: { a: Asset }) {
   const compromised = a.status === 'compromised' || a.status === 'suspicious'
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
+    // smooth status colour transition (~0.5s lerp toward target)
+    curColor.current.lerp(new THREE.Color(color), REDUCED_MOTION ? 1 : 0.08)
+    if (ref.current) {
+      ref.current.traverse((o) => {
+        const mesh = o as THREE.Mesh
+        const m = mesh.material as THREE.MeshStandardMaterial | undefined
+        if (mesh.isMesh && m && 'emissive' in m) { m.color.copy(curColor.current); m.emissive.copy(curColor.current) }
+      })
+    }
+    if (shellRef.current) {
+      const sm = shellRef.current.material as THREE.MeshBasicMaterial
+      sm.color.copy(curColor.current)
+    }
+    if (ringRef.current) { // containment ring: expands 0.6 -> 1.25 -> 1 on becoming contained/remediated
+      if (ringStart.current < 0) ringStart.current = t
+      const p = Math.min((t - ringStart.current) / 1.1, 1)
+      const s = REDUCED_MOTION ? 1 : 0.6 + Math.sin(p * Math.PI * 0.72) * 0.65 * (1 - p * 0.35)
+      ringRef.current.scale.setScalar(Math.max(s, 0.6))
+    }
     if (ref.current && !REDUCED_MOTION) {
       ref.current.position.y = a.pos[1] + Math.sin(t * 1.2 + a.pos[0]) * 0.08
       ref.current.rotation.y = t * 0.25
@@ -106,7 +130,7 @@ function Node({ a }: { a: Asset }) {
         </mesh>
       )}
       {(a.status === 'contained' || a.status === 'remediated') && (
-        <mesh rotation={[Math.PI / 2.4, 0, 0]}>
+        <mesh ref={ringRef} rotation={[Math.PI / 2.4, 0, 0]}>
           <torusGeometry args={[0.8, 0.035, 10, 48]} />
           <meshStandardMaterial color="#34d399" emissive="#34d399" emissiveIntensity={1.6} transparent opacity={0.85} />
         </mesh>
@@ -120,6 +144,8 @@ function Node({ a }: { a: Asset }) {
           pointerEvents: 'none', whiteSpace: 'nowrap', background: 'rgba(2,6,23,0.78)',
           border: `1px solid ${expanded ? color : 'rgba(100,116,139,0.45)'}`,
           borderRadius: 999, padding: expanded ? '3px 8px' : '2px 6px', lineHeight: 1.35,
+          boxShadow: `0 0 ${expanded ? 16 : 9}px ${color}66, inset 0 0 8px ${color}22`,
+          backdropFilter: 'blur(3px)',
         }}>
           <span style={{ color }}>●</span> {SHORT_LABEL[a.id] ?? a.name}
           {expanded && <><br /><span style={{ color, fontSize: 9 }}>{a.status.toUpperCase()} · {a.zone}</span></>}
@@ -159,6 +185,35 @@ function Traffic({ from, to, active, attack }: { from: [number, number, number];
         <TrafficParticle key={i} a={a} b={b} offset={i / PARTICLES_PER_EDGE + from[0] * 0.03} attack={attack} />
       ))}
     </group>
+  )
+}
+
+const WAVE_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+const WAVE_FRAG = `uniform float uTime; uniform vec3 uColor; varying vec2 vUv;
+void main(){
+  float wave = pow(0.5 + 0.5 * sin((vUv.y * 14.0 - uTime * 4.5) * 6.2831), 3.0);
+  float edge = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.75, vUv.y);
+  gl_FragColor = vec4(uColor * (0.35 + wave * 1.6), (0.12 + wave * 0.75) * edge);
+}`
+
+/** Animated energy wave travelling source -> target along an attack-path edge. */
+function WaveEdge({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
+  const { mid, len, quat, mat } = useMemo(() => {
+    const a = new THREE.Vector3(...from); const b = new THREE.Vector3(...to)
+    const dir = b.clone().sub(a); const length = dir.length()
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize())
+    const m = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color('#ef4444') } },
+      vertexShader: WAVE_VERT, fragmentShader: WAVE_FRAG,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    })
+    return { mid: a.add(b).multiplyScalar(0.5), len: length, quat: q, mat: m }
+  }, [from, to])
+  useFrame(({ clock }) => { mat.uniforms.uTime.value = REDUCED_MOTION ? 0.4 : clock.elapsedTime })
+  return (
+    <mesh position={mid} quaternion={quat} material={mat}>
+      <cylinderGeometry args={[0.09, 0.09, len, 10, 1, true]} />
+    </mesh>
   )
 }
 
@@ -220,7 +275,8 @@ export default function TwinScene({ twin }: { twin: Twin }) {
         const col = !c.active ? '#334155' : attack ? '#ef4444' : c.traversable ? '#155e75' : '#1e3a5f'
         return (
           <group key={`${c.source}-${c.target}`}>
-            <Line points={[pos[c.source], pos[c.target]]} color={col} lineWidth={attack ? 3 : 1.2} transparent opacity={c.active ? 0.95 : 0.35} />
+            <Line points={[pos[c.source], pos[c.target]]} color={col} lineWidth={attack ? 3.5 : 1.2} transparent opacity={c.active ? 0.95 : 0.35} />
+            {attack && c.active && <WaveEdge from={pos[c.source]} to={pos[c.target]} />}
             <Traffic from={pos[c.source]} to={pos[c.target]} active={c.active} attack={attack} />
           </group>
         )
@@ -228,6 +284,12 @@ export default function TwinScene({ twin }: { twin: Twin }) {
       {twin.assets.map((a) => <Node key={a.id} a={a} />)}
       <KeyboardNav twin={twin} />
       <OrbitControls enableDamping makeDefault />
+      <EffectComposer>
+        <>
+          <Bloom intensity={0.85} luminanceThreshold={0.18} luminanceSmoothing={0.32} mipmapBlur />
+          <Vignette eskil={false} offset={0.22} darkness={0.62} />
+        </>
+      </EffectComposer>
     </Canvas>
   )
 }

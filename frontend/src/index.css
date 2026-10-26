@@ -1,7 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 @import "tailwindcss";
 
-body { background: #020617; }
+:root {
+  --cyber-cyan: #22d3ee;
+  --cyber-blue: #2563eb;
+  --cyber-amber: #f59e0b;
+  --cyber-orange: #fb923c;
+  --cyber-red: #ef4444;
+  --cyber-green: #34d399;
+  --cyber-violet: #a78bfa;
+  --cyber-bg: #020617;
+  --cyber-panel: rgba(15, 23, 42, 0.62);
+}
+
+body {
+  background: var(--cyber-bg);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+h1, h2, .font-display { font-family: 'Space Grotesk', 'Inter', sans-serif; }
+code, .font-mono, [class*="font-mono"] { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+.glass-panel {
+  background: var(--cyber-panel);
+  backdrop-filter: blur(10px) saturate(1.3);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(148, 197, 255, 0.07), 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.skeleton {
+  position: relative; overflow: hidden; background: rgba(30, 41, 59, 0.7); border-radius: 0.75rem;
+}
+.skeleton::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(34, 211, 238, 0.13) 50%, transparent 70%);
+  animation: skeleton-sweep 1.4s infinite;
+}
+@keyframes skeleton-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
-:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--cyber-cyan); outline-offset: 2px; }

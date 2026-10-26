@@ -1,9 +1,17 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, Boxes, Bug, Database, Download, FlaskConical, Globe, KeyRound, MessageSquareText, PenTool, Play, RotateCcw, Route,
-  Settings as SettingsIcon, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText,
+  Activity, Bot, Boxes, Bug, Cpu, Database, Download, FlaskConical, Folder, Globe, KeyRound, MessageSquareText, Monitor, PenTool, Play, Radar, RotateCcw, Route,
+  Settings as SettingsIcon, Server, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText,
 } from 'lucide-react'
+
+export const ASSET_TYPE_ICON: Record<string, ReactNode> = {
+  gateway: <Globe size={12} className="inline" />, firewall: <Shield size={12} className="inline" />,
+  web_server: <Server size={12} className="inline" />, app_server: <Cpu size={12} className="inline" />,
+  database: <Database size={12} className="inline" />, identity: <KeyRound size={12} className="inline" />,
+  workstation: <Monitor size={12} className="inline" />, file_server: <Folder size={12} className="inline" />,
+  sensor: <Radar size={12} className="inline" />,
+}
 import { STATUS_COLOR } from './components/status'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
@@ -21,14 +29,19 @@ import { useStore } from './stores/store'
 import type { Asset, Twin, View } from './types'
 
 const AGENTS = [
-  { id: 'observer', name: 'Observer', desc: 'Deterministic telemetry anomaly detection' },
-  { id: 'adversary_simulator', name: 'Adversary Simulator', desc: 'Typed, bounded synthetic scenario actions' },
-  { id: 'incident_investigator', name: 'Incident Investigator', desc: 'Meta Muse Spark evidence-grounded reasoning' },
-  { id: 'defense_strategist', name: 'Defense Strategist', desc: 'Meta Muse Spark countermeasure proposals' },
-  { id: 'defense_executor', name: 'Defense Executor', desc: 'Deterministic policy gate + allowlisted execution' },
-  { id: 'verification_scientist', name: 'Verification Scientist', desc: 'Independent replay & invariant checking' },
+  { id: 'observer', name: 'Observer', desc: 'Deterministic telemetry anomaly detection', engine: 'Deterministic', input: 'SimulationEvents (telemetry)', output: 'AgentObservation', duties: ['Consume synthetic telemetry', 'Detect anomaly patterns (file bursts, auth failures, network paths)', 'Emit structured observation with confidence'] },
+  { id: 'adversary_simulator', name: 'Adversary Simulator', desc: 'Typed, bounded synthetic scenario actions', engine: 'Deterministic', input: 'Scenario definition (JSON)', output: 'AttackScenarioPlan + telemetry', duties: ['Execute predefined typed attack steps only', 'Mutate twin to attacked state', 'Never generates payloads or commands'] },
+  { id: 'incident_investigator', name: 'Incident Investigator', desc: 'Meta Muse Spark evidence-grounded reasoning', engine: 'Meta Muse Spark (offline fallback labelled)', input: 'AgentObservation + telemetry + topology', output: 'IncidentHypothesis', duties: ['Correlate evidence across assets', 'Separate confirmed facts from speculation', 'Estimate threat level with confidence'] },
+  { id: 'defense_strategist', name: 'Defense Strategist', desc: 'Meta Muse Spark countermeasure proposals', engine: 'Meta Muse Spark (offline fallback labelled)', input: 'IncidentHypothesis + live twin state', output: 'DefenseProposal', duties: ['Propose allowlisted countermeasures', 'Prefer least disruptive effective action', 'Retry once with policy feedback if rejected'] },
+  { id: 'defense_executor', name: 'Defense Executor', desc: 'Deterministic policy gate + allowlisted execution', engine: 'Deterministic', input: 'DefenseProposal', output: 'PolicyDecision + DefenseExecutionResult', duties: ['Validate every action against the deterministic policy engine', 'Apply approved actions to the twin only', 'Record exact state transitions'] },
+  { id: 'verification_scientist', name: 'Verification Scientist', desc: 'Independent replay & invariant checking', engine: 'Deterministic replay', input: 'Scenario + modified twin', output: 'VerificationResult (PASS/FAIL)', duties: ['Replay the identical attack objective', 'Compare before/after reachability or access', 'Compute effectiveness + operational cost'] },
 ]
 const STAGES = ['SCENARIO_SELECTED', 'ATTACK_SIMULATING', 'TELEMETRY_COLLECTED', 'INVESTIGATING', 'DEFENSE_PROPOSED', 'POLICY_VALIDATING', 'DEFENSE_APPLYING', 'VERIFYING', 'COMPLETED']
+const DEMO_CLOCK: Record<string, string> = {
+  IDLE: '0:00', SCENARIO_SELECTED: '0:20', ATTACK_SIMULATING: '0:40', TELEMETRY_COLLECTED: '0:55',
+  INVESTIGATING: '1:00', DEFENSE_PROPOSED: '1:30', POLICY_VALIDATING: '1:45', DEFENSE_APPLYING: '1:55',
+  VERIFYING: '2:05', COMPLETED: '2:30', FAILED: '—',
+}
 
 class SceneBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
   state = { failed: false }
@@ -52,10 +65,18 @@ function Twin2D({ twin }: { twin: Twin }) {
   )
 }
 
+export function SkeletonTwin() {
+  return (
+    <div className="grid h-full grid-cols-3 gap-3 p-4" aria-label="Loading 3D twin" role="status">
+      {Array.from({ length: 9 }, (_, i) => <div key={i} className="skeleton min-h-16" />)}
+    </div>
+  )
+}
+
 function TwinView({ twin }: { twin: Twin }) {
   return (
     <SceneBoundary fallback={<div><p className="p-3 text-amber-300 text-sm">3D unavailable (WebGL) — 2D fallback shown. All functions remain available.</p><Twin2D twin={twin} /></div>}>
-      <Suspense fallback={<Twin2D twin={twin} />}>
+      <Suspense fallback={<SkeletonTwin />}>
         <TwinScene twin={twin} />
       </Suspense>
     </SceneBoundary>
@@ -81,6 +102,7 @@ function AssetPanel({ asset }: { asset: Asset }) {
 export default function App() {
   const s = useStore()
   const [commentaryOn, setCommentaryOn] = useState(true)
+  const [selectedAgent, setSelectedAgent] = useState('incident_investigator')
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
 
@@ -289,37 +311,33 @@ export default function App() {
         </main>
       )}
 
-      {(s.view === 'twin' || s.view === 'experiment') && (
+      {s.view === 'twin' && (
         <main className="grid grid-cols-12 gap-3 p-3">
           <aside className="col-span-12 lg:col-span-2 space-y-3">
-            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+            <section className="rounded-xl border border-slate-800 glass-panel p-3">
               <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Network size={13} /> ASSETS</h2>
               {s.twin?.assets.map((a) => (
                 <button key={a.id} onClick={() => s.set({ selectedAsset: a.id })} className="block w-full text-left text-xs py-1 hover:text-cyan-200">
-                  <span style={{ color: STATUS_COLOR[a.status] }}>●</span> {a.name} <span className="text-slate-500">({a.status})</span>
+                  <span style={{ color: STATUS_COLOR[a.status] }}>●</span> <span style={{ color: STATUS_COLOR[a.status] }}>{ASSET_TYPE_ICON[a.asset_type]}</span> {a.name} <span className="text-slate-500">({a.status})</span>
                 </button>
               ))}
             </section>
-            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-              <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Siren size={13} /> SCENARIOS</h2>
-              {s.scenarios.map((sc) => (
-                <button key={sc.id} onClick={() => s.set({ scenarioId: sc.id })} className={`block w-full rounded p-2 text-left text-xs mb-1 ${s.scenarioId === sc.id ? 'bg-cyan-500/20 border border-cyan-600' : 'bg-slate-800/60'}`}>{SCENARIO_ICONS[sc.id]} {sc.name} <span className="text-amber-300">({sc.severity})</span></button>
-              ))}
-              <button onClick={() => void runDemo()} className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-emerald-500 py-2 text-xs font-bold text-slate-950"><Play size={13} /> RUN SIMULATION</button>
-              <button onClick={() => void resetAll()} className="mt-1 flex w-full items-center justify-center gap-1 rounded border border-slate-600 py-2 text-xs"><RotateCcw size={13} /> RESET TWIN</button>
+            <section className="rounded-xl border border-slate-800 glass-panel p-3">
+              <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">TOPOLOGY</h2>
+              <div className="text-xs text-slate-300">{s.twin?.assets.length ?? 0} assets · {s.twin?.connections.length ?? 0} connections</div>
+              <div className="text-xs text-slate-400 mt-1">{s.twin?.connections.filter((c) => c.active).length ?? 0} active · {s.twin?.connections.filter((c) => !c.active).length ?? 0} blocked/isolated</div>
+              <div className="text-xs text-slate-400">Containment: {s.twin?.containment.length ? s.twin.containment.join(', ') : 'none'}</div>
+              <div className="mt-2 space-y-0.5">
+                {s.twin?.assets.map((a) => (
+                  <div key={a.id} className="flex justify-between text-[11px]"><span className="text-slate-400">{a.name}</span><span style={{ color: STATUS_COLOR[a.status] }}>{a.status}</span></div>
+                ))}
+              </div>
             </section>
-            <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-              <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">WORKFLOW</h2>
-              <div className="text-[11px] font-mono text-slate-300">{s.runState}</div>
-              <div className="mt-1 h-2 rounded bg-slate-800"><div className="h-2 rounded bg-cyan-400 transition-all" style={{ width: `${Math.max(4, (STAGES.indexOf(s.runState) + 1) / STAGES.length * 100)}%` }} /></div>
-              <p className="mt-2 text-[10px] text-slate-500">Shortcuts: Space = run · R = reset · 1–4 = scenario</p>
-            </section>
-            <section className="rounded-xl border border-violet-800/60 bg-violet-950/30 p-3" aria-live="polite">
-              <h2 className="mb-1 flex items-center justify-between text-xs font-bold tracking-wider text-violet-300">
-                <span className="flex items-center gap-1"><MessageSquareText size={13} /> DEMO COMMENTARY</span>
-                <button onClick={() => setCommentaryOn(!commentaryOn)} className="text-[10px] text-slate-400 underline">{commentaryOn ? 'hide' : 'show'}</button>
-              </h2>
-              {commentaryOn && <p className="text-xs leading-relaxed text-slate-200">{commentary}</p>}
+            <section className="rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-3">
+              <h2 className="mb-1 text-xs font-bold tracking-wider text-emerald-300">RUN AN EXPERIMENT</h2>
+              <p className="text-[11px] text-slate-400">The Living Twin is for inspection. Attacks, agent reasoning and verification live in the Experiment console.</p>
+              <button onClick={() => s.set({ view: 'experiment' })} className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-emerald-500 py-2 text-xs font-bold text-slate-950"><Play size={13} /> Open Experiment Console</button>
+              <button onClick={() => void resetAll()} className="mt-1 flex w-full items-center justify-center gap-1 rounded border border-slate-600 py-2 text-xs"><RotateCcw size={13} /> Reset Twin State</button>
             </section>
           </aside>
 
@@ -333,7 +351,7 @@ export default function App() {
               <button onClick={() => s.set({ viewMode: s.viewMode === '3d' ? '2d' : '3d' })} className="rounded border border-slate-600 px-2 py-1">Toggle {s.viewMode === '3d' ? '2D (accessible)' : '3D'}</button>
               <span className="text-slate-500 py-1">Drag to orbit · scroll to zoom · click node to inspect · status also available as text in the asset list</span>
             </div>
-            <section className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-800 bg-slate-900/60 p-3" aria-label="Event timeline">
+            <section className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-800 glass-panel p-3" aria-label="Event timeline">
               <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Activity size={13} /> EVENT TIMELINE</h2>
               {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet. Run a simulation.</p>}
               {[...s.events].reverse().map((e, i) => (
@@ -347,7 +365,7 @@ export default function App() {
             </section>
           </section>
 
-          <aside className="col-span-12 lg:col-span-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+          <aside className="col-span-12 lg:col-span-3 rounded-xl border border-slate-800 glass-panel p-3">
             <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">CONTEXT</h2>
             {selected ? <AssetPanel asset={selected} /> : <p className="text-sm text-slate-400">Select a node in 3D, or an asset in the left list, to inspect posture, connections and evidence context.</p>}
             {scenario && <div className="mt-4 border-t border-slate-800 pt-3 text-sm"><b>{scenario.name}</b><p className="text-slate-400 text-xs mt-1">{scenario.description}</p><p className="text-xs mt-2 text-emerald-300">Invariant: {scenario.invariant}</p></div>}
@@ -361,6 +379,96 @@ export default function App() {
         </main>
       )}
 
+      {s.view === 'experiment' && (
+        <main className="p-3">
+          <div className="flex flex-wrap items-end justify-between gap-2 px-1">
+            <div>
+              <h1 className="text-2xl font-black text-cyan-200">Autonomous Experiment Console</h1>
+              <p className="text-xs text-slate-400">Select a scenario → run the closed loop → watch agents reason, policy gate, defend, and verify. Seed 42 (deterministic).</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => void runDemo()} className="flex items-center gap-1 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950"><Play size={14} /> RUN EXPERIMENT</button>
+              <button onClick={() => void resetAll()} className="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-2 text-sm"><RotateCcw size={14} /> Reset</button>
+              <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40"><Download size={14} className="inline" /> JSON</button>
+              <button onClick={() => downloadMarkdown()} disabled={!s.runId} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40"><Download size={14} className="inline" /> Report .md</button>
+            </div>
+          </div>
+
+          {/* stage stepper */}
+          <ol className="mt-3 flex flex-wrap gap-1" aria-label="Experiment stages">
+            {STAGES.map((st, i) => {
+              const cur = STAGES.indexOf(s.runState)
+              const done = i < cur || s.runState === 'COMPLETED'
+              const active = i === cur && s.runState !== 'COMPLETED'
+              return <li key={st} className={`rounded-full border px-2 py-1 font-mono text-[10px] ${done ? 'border-emerald-500 text-emerald-300' : active ? 'border-cyan-300 bg-cyan-500/20 text-cyan-200 animate-pulse' : 'border-slate-700 text-slate-500'}`}>{done ? '✓' : i + 1} {st.replaceAll('_', ' ')}</li>
+            })}
+          </ol>
+
+          {/* scenario picker */}
+          <section className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Select scenario">
+            {s.scenarios.map((sc) => (
+              <button key={sc.id} onClick={() => s.set({ scenarioId: sc.id })} className={`rounded-xl border p-3 text-left ${s.scenarioId === sc.id ? 'border-cyan-300 bg-cyan-500/15' : 'border-slate-800 glass-panel hover:border-slate-600'}`}>
+                <div className="text-sm font-bold">{SCENARIO_ICONS[sc.id]} {sc.name} <span className="text-amber-300 text-xs">({sc.severity})</span></div>
+                <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">{sc.description}</p>
+                <p className="mt-1 font-mono text-[10px] text-slate-500">{sc.source_asset} → {sc.target_asset}</p>
+              </button>
+            ))}
+          </section>
+
+          <div className="mt-3 grid grid-cols-12 gap-3">
+            <section className="col-span-12 lg:col-span-8">
+              <div className="h-[430px] rounded-2xl border border-cyan-900 overflow-hidden bg-slate-950">
+                {s.twin ? (s.viewMode === '3d' ? <TwinView twin={s.twin} /> : <Twin2D twin={s.twin} />) : <SkeletonTwin />}
+              </div>
+              <section className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-800 glass-panel p-3" aria-label="Live event timeline">
+                <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Activity size={13} /> LIVE EVENT TIMELINE <span className="font-mono text-slate-500">· state: {s.runState}</span></h2>
+                {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet — press RUN EXPERIMENT. (Space also runs, R resets, 1–4 pick a scenario.)</p>}
+                {[...s.events].reverse().map((e, i) => (
+                  <div key={i} className="border-b border-slate-800 py-1 text-xs">
+                    <span className="font-mono text-cyan-400">{e.event_type}</span>
+                    {e.agent && <span className="text-violet-300"> · {e.agent}</span>}
+                    {e.asset_id && <span className="text-amber-300"> · {e.asset_id}</span>}
+                    <span className="text-slate-300"> — {e.message}</span>
+                  </div>
+                ))}
+              </section>
+            </section>
+            <aside className="col-span-12 lg:col-span-4 space-y-3">
+              <section className="rounded-xl border border-violet-800/60 bg-violet-950/30 p-3" aria-live="polite">
+                <h2 className="mb-1 flex items-center justify-between text-xs font-bold tracking-wider text-violet-300">
+                  <span className="flex items-center gap-1"><MessageSquareText size={13} /> DEMO COMMENTARY</span>
+                  <button onClick={() => setCommentaryOn(!commentaryOn)} className="text-[10px] text-slate-400 underline">{commentaryOn ? 'hide' : 'show'}</button>
+                </h2>
+                {commentaryOn && <><p className="font-mono text-[10px] text-violet-400">DEMO {DEMO_CLOCK[s.runState] ?? ''} · stage {s.runState}</p><p className="mt-0.5 text-sm leading-relaxed text-slate-100">{commentary}</p></>}
+              </section>
+              <section className="rounded-xl border border-slate-800 glass-panel p-3">
+                <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">AGENT DECISIONS THIS RUN</h2>
+                {(s.results?.decisions.length ?? 0) === 0 && <p className="text-xs text-slate-500">Decisions appear here as agents act (also live in the timeline).</p>}
+                {s.results?.decisions.map((d, i) => (
+                  <div key={i} className="mb-1 rounded bg-slate-950/60 px-2 py-1.5 text-xs">
+                    <span className="text-violet-300">{d.agent}</span> <span className="text-slate-500">({d.model}/{d.mode}, {(d.confidence * 100).toFixed(0)}%)</span>
+                    <div className="text-slate-200">{d.decision}</div>
+                  </div>
+                ))}
+                {s.results?.policy.map((p, i) => (
+                  <div key={i} className={`text-xs ${p.approved ? 'text-emerald-300' : 'text-red-300'}`}>{p.approved ? '✓ POLICY APPROVED' : '✗ POLICY REJECTED'}: {p.action_type} on {p.asset_id}</div>
+                ))}
+              </section>
+              <section className="rounded-xl border border-slate-800 glass-panel p-3">
+                <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">OUTCOME</h2>
+                {s.results?.verification ? (
+                  <>
+                    <div className={`text-2xl font-black ${s.results.verification.outcome === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`}>{s.results.verification.outcome}</div>
+                    <p className="text-xs text-slate-400">Effectiveness {String(s.results.verification.metrics.defense_effectiveness_pct)}% · disrupted legit paths: {String(s.results.verification.metrics.operational_impact_disrupted_legit_paths)}</p>
+                    <button onClick={() => s.set({ view: 'verification' })} className="mt-1 text-xs text-cyan-300 underline">Open Verification Lab →</button>
+                  </>
+                ) : <p className="text-xs text-slate-500">No outcome yet. A failed or rejected defense will show FAIL here — honestly.</p>}
+              </section>
+            </aside>
+          </div>
+        </main>
+      )}
+
       {s.view === 'agents' && (
         <main className="p-6">
           <h1 className="text-2xl font-black text-cyan-200">Agent Collaboration</h1>
@@ -369,11 +477,15 @@ export default function App() {
             {AGENTS.map((a, i) => {
               const active = s.events.some((e) => e.agent === a.id)
               const decisions = s.results?.decisions.filter((d) => d.agent === a.id) ?? []
+              const isSel = selectedAgent === a.id
               return (
                 <motion.section key={a.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-                  className={`rounded-xl border p-4 ${active ? 'border-cyan-400 bg-cyan-950/40' : 'border-slate-800 bg-slate-900/60'}`}>
-                  <div className="flex items-center gap-2"><Bot className="text-cyan-300" size={18} /><b>{a.name}</b>{active && <span className="text-[10px] text-emerald-300 font-mono">ACTIVE</span>}</div>
+                  onClick={() => setSelectedAgent(a.id)} role="button" tabIndex={0} aria-pressed={isSel}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedAgent(a.id) } }}
+                  className={`cursor-pointer rounded-xl border p-4 transition hover:border-cyan-500 ${isSel ? 'border-cyan-300 bg-cyan-500/15 ring-1 ring-cyan-400' : active ? 'border-cyan-400 bg-cyan-950/40' : 'border-slate-800 glass-panel'}`}>
+                  <div className="flex items-center gap-2"><Bot className="text-cyan-300" size={18} /><b>{a.name}</b>{active && <span className="text-[10px] text-emerald-300 font-mono">ACTIVE</span>}<span className="ml-auto text-[10px] text-slate-500">{isSel ? 'inspecting ▾' : 'click to inspect'}</span></div>
                   <p className="mt-1 text-xs text-slate-400">{a.desc}</p>
+                  <p className="font-mono text-[10px] text-slate-500">{a.engine}</p>
                   {decisions.map((d, j) => (
                     <div key={j} className="mt-2 rounded bg-slate-950/70 p-2 text-xs">
                       <div>{d.decision}</div>
@@ -387,6 +499,33 @@ export default function App() {
               )
             })}
           </div>
+          {(() => {
+            const a = AGENTS.find((x) => x.id === selectedAgent) ?? AGENTS[0]
+            const agentEvents = s.events.filter((e) => e.agent === a.id)
+            const agentDecisions = s.results?.decisions.filter((d) => d.agent === a.id) ?? []
+            return (
+              <section className="mt-4 rounded-2xl border border-cyan-800 glass-panel p-5" aria-label="Agent inspector">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Bot className="text-cyan-300" /><h2 className="text-lg font-black">{a.name}</h2>
+                  <span className="rounded-full border border-slate-600 px-2 py-0.5 font-mono text-[10px] text-slate-300">{a.engine}</span>
+                  <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${agentEvents.length ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-500'}`}>{agentEvents.length ? `${agentEvents.length} events this run` : 'no activity yet — run an experiment'}</span>
+                </div>
+                <div className="mt-3 grid gap-4 md:grid-cols-3 text-sm">
+                  <div><h3 className="text-xs font-bold tracking-wider text-cyan-300">RESPONSIBILITIES</h3>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-slate-300">{a.duties.map((d) => <li key={d}>{d}</li>)}</ul></div>
+                  <div><h3 className="text-xs font-bold tracking-wider text-cyan-300">CONTRACT</h3>
+                    <p className="mt-1 text-xs text-slate-300">Input: <span className="font-mono">{a.input}</span></p>
+                    <p className="text-xs text-slate-300">Output: <span className="font-mono text-emerald-300">{a.output}</span></p>
+                    <p className="mt-1 text-[11px] text-slate-500">Output is schema-validated; the Executor/Verifier are deterministic and independent of the LLM.</p></div>
+                  <div><h3 className="text-xs font-bold tracking-wider text-cyan-300">LATEST ACTIVITY</h3>
+                    {agentEvents.length === 0 && agentDecisions.length === 0 && <p className="mt-1 text-xs text-slate-500">Nothing yet for this run.</p>}
+                    {agentDecisions.map((d, i) => <p key={i} className="mt-1 text-xs text-slate-200">{d.decision} <span className="text-slate-500">({(d.confidence * 100).toFixed(0)}% · {d.mode})</span></p>)}
+                    {agentEvents.slice(-4).map((e, i) => <p key={i} className="mt-1 font-mono text-[10px] text-slate-400">{e.event_type}: {e.message.slice(0, 110)}</p>)}
+                  </div>
+                </div>
+              </section>
+            )
+          })()}
         </main>
       )}
 
@@ -418,10 +557,10 @@ export default function App() {
               <div className={`mt-3 text-3xl font-black ${s.results.verification.outcome === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`}>{s.results.verification.outcome}</div>
               <p className="text-sm text-slate-300">{s.results.verification.invariant}</p>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <section className="rounded-xl border border-red-900/60 bg-slate-900/60 p-4"><h2 className="font-bold text-red-300">BEFORE DEFENSE</h2>
+                <section className="rounded-xl border border-red-900/60 glass-panel p-4"><h2 className="font-bold text-red-300">BEFORE DEFENSE</h2>
                   <p className="text-sm mt-2">Attack objective reachable/granted: {String(s.results.verification.metrics.baseline_reachable_or_granted)}</p>
                   <p className="text-xs text-slate-400">Path: {(s.results.verification.metrics.baseline_path as string[] | null)?.join(' → ') ?? 'identity session'}</p></section>
-                <section className="rounded-xl border border-emerald-900/60 bg-slate-900/60 p-4"><h2 className="font-bold text-emerald-300">AFTER DEFENSE</h2>
+                <section className="rounded-xl border border-emerald-900/60 glass-panel p-4"><h2 className="font-bold text-emerald-300">AFTER DEFENSE</h2>
                   <p className="text-sm mt-2">Attack objective reachable/granted: {String(s.results.verification.metrics.after_reachable_or_granted)}</p>
                   <p className="text-xs text-slate-400">Path: {(s.results.verification.metrics.after_path as string[] | null)?.join(' → ') ?? 'none / denied'}</p></section>
               </div>
@@ -430,7 +569,7 @@ export default function App() {
                   ['Time to detect', `${s.results.verification.metrics.time_to_detect_s}s`],
                   ['Time to contain', `${s.results.verification.metrics.time_to_contain_s ?? '—'}s`],
                   ['Legit paths disrupted', `${s.results.verification.metrics.operational_impact_disrupted_legit_paths}`]].map(([k, v]) => (
-                  <div key={k} className="rounded-xl border border-slate-800 bg-slate-900/60 p-3"><dt className="text-[11px] text-slate-400">{k}</dt><dd className="text-xl font-black text-cyan-200">{v}</dd></div>
+                  <div key={k} className="rounded-xl border border-slate-800 glass-panel p-3"><dt className="text-[11px] text-slate-400">{k}</dt><dd className="text-xl font-black text-cyan-200">{v}</dd></div>
                 ))}
               </dl>
               <ul className="mt-4 space-y-1 text-sm">{s.results.verification.checks.map((c) => (
@@ -455,7 +594,7 @@ export default function App() {
       {s.view === 'settings' && (
         <main className="p-6 max-w-2xl space-y-3 text-sm">
           <h1 className="text-2xl font-black text-cyan-200">System Settings</h1>
-          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-1">
+          <div className="rounded-xl border border-slate-800 glass-panel p-4 space-y-1">
             <div className="flex items-center gap-2"><Database size={15} /> Model: {s.modelStatus?.model} · Provider: Meta Model API</div>
             <div>Mode: <b>{s.modelStatus?.mode}</b> · Configured: {String(s.modelStatus?.configured)} · Reachable: {String(s.modelStatus?.reachable)}</div>
             <div className="text-slate-400">{s.modelStatus?.detail}</div>
@@ -488,7 +627,7 @@ function EvidenceView() {
         })} disabled={!s.runId} className="rounded border border-slate-600 px-3 py-1.5 text-xs disabled:opacity-40">Export report</button>
       </div>
       <div className="mt-4 space-y-1">{s.events.map((e, i) => (
-        <div key={i} className="rounded border border-slate-800 bg-slate-900/60 px-3 py-2 text-xs"><span className="font-mono text-cyan-300">{e.event_type}</span> <span className="text-slate-300">{e.message}</span></div>
+        <div key={i} className="rounded border border-slate-800 glass-panel px-3 py-2 text-xs"><span className="font-mono text-cyan-300">{e.event_type}</span> <span className="text-slate-300">{e.message}</span></div>
       ))}</div>
     </main>
   )

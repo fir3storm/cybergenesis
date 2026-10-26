@@ -19,14 +19,18 @@ await page.getByRole('button', { name: 'Living Twin' }).click()
 await page.waitForTimeout(2500)
 await shot('02-living-twin.png')
 
-await page.getByRole('button', { name: 'RUN SIMULATION' }).click()
-await page.getByText('EVENT TIMELINE').waitFor()
+await page.getByRole('button', { name: 'Open Experiment Console' }).click()
+await page.getByRole('button', { name: 'RUN EXPERIMENT' }).click()
+await page.getByText('LIVE EVENT TIMELINE').waitFor()
 await page.waitForTimeout(6000) // mid-attack: red path + telemetry streaming
 await shot('03-experiment-running.png')
-await page.getByText(/VERIFICATION: (PASS|FAIL)/).waitFor({ timeout: 90000 })
+await page.getByText('AGENT DECISIONS THIS RUN').waitFor()
+await page.waitForFunction(() => document.body.innerText.includes('Effectiveness'), null, { timeout: 90000 })
 
 await page.getByRole('button', { name: 'Agents' }).click()
-await page.waitForTimeout(800)
+await page.getByText('click to inspect').first().waitFor()
+await page.getByText('Defense Strategist').first().click()
+await page.waitForTimeout(700)
 await shot('04-agents.png')
 
 await page.getByRole('button', { name: 'Verification Lab' }).click()
