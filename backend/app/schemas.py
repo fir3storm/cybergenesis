@@ -91,3 +91,65 @@ class TwinActionRequest(BaseModel):
     action_type: str
     asset_id: str
     params: dict = {}
+
+
+class CustomTwinAsset(BaseModel):
+    id: str
+    name: str
+    asset_type: str
+    zone: str
+    posture: float = 0.7
+    pos: list[float] = [0, 1, 0]
+    vulnerabilities: list[str] = []
+
+
+class CustomTwinConnection(BaseModel):
+    source: str
+    target: str
+    trust: str = "medium"
+    traversable: bool = True
+    types: list[str] = ["network"]
+
+
+class CreateCustomTwin(BaseModel):
+    name: str
+    description: str = ""
+    assets: list[CustomTwinAsset] = []
+    connections: list[CustomTwinConnection] = []
+
+
+class CustomTwinResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    assets: list[dict]
+    connections: list[dict]
+    created_at: str
+
+
+class AttackStep(BaseModel):
+    type: str
+    asset: str
+    description: str
+
+
+class CreateCustomScenario(BaseModel):
+    name: str
+    description: str = ""
+    source_asset: str
+    target_asset: str
+    severity: str = "medium"
+    invariant: str = ""
+    objectives: list[str] = []
+    verification_kind: str = "reachability"
+    identity: str | None = None
+    attack_steps: list[AttackStep] = []
+    expected_defense: list[dict] = []
+
+
+class CustomScenarioResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    definition: dict
+    created_at: str

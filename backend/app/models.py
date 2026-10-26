@@ -170,3 +170,26 @@ class ModelUsage(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CustomTwinDefinition(Base):
+    """User-designed infrastructure twin (assets + connections)."""
+    __tablename__ = "custom_twin_definitions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text, default="")
+    assets: Mapped[list] = mapped_column(JSON, default=list)
+    connections: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CustomScenarioDefinition(Base):
+    """User-authored attack scenario (playbook)."""
+    __tablename__ = "custom_scenario_definitions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text, default="")
+    definition: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
