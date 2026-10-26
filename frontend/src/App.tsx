@@ -12,7 +12,7 @@ export const ASSET_TYPE_ICON: Record<string, ReactNode> = {
   workstation: <Monitor size={12} className="inline" />, file_server: <Folder size={12} className="inline" />,
   sensor: <Radar size={12} className="inline" />,
 }
-import { STATUS_COLOR } from './components/status'
+import { ATTACK_PATHS, STATUS_COLOR } from './components/status'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
 const TwinDesigner = lazy(() => import('./components/TwinDesigner'))
@@ -80,6 +80,47 @@ function TwinView({ twin }: { twin: Twin }) {
         <TwinScene twin={twin} />
       </Suspense>
     </SceneBoundary>
+  )
+}
+
+/** Plain-language attack chain: reads left-to-right without needing the 3D view. */
+function AttackChain() {
+  const s = useStore()
+  const path = ATTACK_PATHS[s.scenarioId] ?? []
+  const byId = Object.fromEntries((s.twin?.assets ?? []).map((a) => [a.id, a]))
+  const blocked = s.results?.verification?.metrics.after_reachable_or_granted === false
+  if (!path.length) return null
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-red-900/50 glass-panel px-3 py-2" aria-label="Attack path in plain language">
+      <span className="font-mono text-[10px] tracking-wider text-red-300">ATTACK PATH</span>
+      {path.map((id, i) => {
+        const a = byId[id]
+        const role = i === 0 ? 'SOURCE' : i === path.length - 1 ? 'TARGET' : `PIVOT ${i}`
+        return (
+          <span key={id} className="flex items-center gap-1.5">
+            {i > 0 && <span className={blocked && i === path.length - 1 ? 'text-emerald-300 font-bold' : 'text-red-400'}>{blocked && i === path.length - 1 ? '✕ blocked →' : '→'}</span>}
+            <button onClick={() => s.set({ selectedAsset: id })} className="rounded-full border px-2 py-1 text-[11px]"
+              style={{ borderColor: STATUS_COLOR[a?.status ?? 'healthy'], color: STATUS_COLOR[a?.status ?? 'healthy'] }}>
+              <b>{i + 1}</b> {a?.name ?? id} <span className="opacity-70">· {role} · {(a?.status ?? '—').toUpperCase()}</span>
+            </button>
+          </span>
+        )
+      })}
+      <span className={`ml-auto text-[11px] ${blocked ? 'text-emerald-300 font-bold' : 'text-slate-400'}`}>
+        {s.results?.verification ? (blocked ? '✓ Defense cut this path (verified)' : '✗ Path still open (verification failed)') : 'Run an experiment to test this path'}
+      </span>
+    </div>
+  )
+}
+
+function MapFocusToggle() {
+  const s = useStore()
+  return (
+    <div className="flex items-center gap-1 text-[11px]">
+      <span className="text-slate-500">Map:</span>
+      <button onClick={() => s.set({ mapFocus: true })} className={`rounded-full border px-2 py-0.5 ${s.mapFocus ? 'border-red-400 bg-red-500/20 text-red-200' : 'border-slate-700 text-slate-400'}`}>Attack path only</button>
+      <button onClick={() => s.set({ mapFocus: false })} className={`rounded-full border px-2 py-0.5 ${!s.mapFocus ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200' : 'border-slate-700 text-slate-400'}`}>Full topology</button>
+    </div>
   )
 }
 
@@ -347,10 +388,12 @@ export default function App() {
                 ? s.viewMode === '3d' ? <TwinView twin={s.twin} /> : <Twin2D twin={s.twin} />
                 : <div className="p-6 text-slate-400">Loading twin…</div>}
             </div>
-            <div className="mt-2 flex gap-2 text-xs">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
               <button onClick={() => s.set({ viewMode: s.viewMode === '3d' ? '2d' : '3d' })} className="rounded border border-slate-600 px-2 py-1">Toggle {s.viewMode === '3d' ? '2D (accessible)' : '3D'}</button>
+              <MapFocusToggle />
               <span className="text-slate-500 py-1">Drag to orbit · scroll to zoom · click node to inspect · status also available as text in the asset list</span>
             </div>
+            <AttackChain />
             <section className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-800 glass-panel p-3" aria-label="Event timeline">
               <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Activity size={13} /> EVENT TIMELINE</h2>
               {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet. Run a simulation.</p>}
@@ -420,6 +463,8 @@ export default function App() {
               <div className="h-[430px] rounded-2xl border border-cyan-900 overflow-hidden bg-slate-950">
                 {s.twin ? (s.viewMode === '3d' ? <TwinView twin={s.twin} /> : <Twin2D twin={s.twin} />) : <SkeletonTwin />}
               </div>
+              <div className="mt-2 flex items-center gap-2"><MapFocusToggle /><span className="text-[11px] text-slate-500">Focus mode dims everything except the attack path — switch to Full topology to inspect all connections.</span></div>
+              <AttackChain />
               <section className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-800 glass-panel p-3" aria-label="Live event timeline">
                 <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Activity size={13} /> LIVE EVENT TIMELINE <span className="font-mono text-slate-500">· state: {s.runState}</span></h2>
                 {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet — press RUN EXPERIMENT. (Space also runs, R resets, 1–4 pick a scenario.)</p>}

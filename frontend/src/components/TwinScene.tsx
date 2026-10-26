@@ -50,7 +50,7 @@ function NodeShape({ a, color, selected }: { a: Asset; color: string; selected: 
   }
 }
 
-function Node({ a }: { a: Asset }) {
+function Node({ a, dimmed = false }: { a: Asset; dimmed?: boolean }) {
   const ref = useRef<THREE.Group>(null)
   const shellRef = useRef<THREE.Mesh>(null)
   const lightRef = useRef<THREE.PointLight>(null)
@@ -66,6 +66,7 @@ function Node({ a }: { a: Asset }) {
   const expanded = selected || hovered
   const below = LABEL_BELOW.has(a.id)
   const compromised = a.status === 'compromised' || a.status === 'suspicious'
+  const showLabel = !dimmed || expanded // in focus mode only attack-path / hovered / selected nodes get labels
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
     // smooth status colour transition (~0.5s lerp toward target)
@@ -111,17 +112,17 @@ function Node({ a }: { a: Asset }) {
   })
   return (
     <group position={a.pos}>
-      <pointLight ref={lightRef} color={color} intensity={6} distance={5.5} decay={1.8} />
+      <pointLight ref={lightRef} color={color} intensity={dimmed ? 1.5 : 6} distance={5.5} decay={1.8} />
       <group ref={ref}
         onClick={(e) => { e.stopPropagation(); set({ selectedAsset: a.id }) }}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true) }}
         onPointerOut={() => setHovered(false)}>
         <NodeShape a={a} color={color} selected={selected} />
       </group>
-      {/* holographic wireframe shell */}
-      <mesh ref={shellRef}>
+      {/* holographic wireframe shell — faint in focus mode for non-path nodes */}
+      <mesh ref={shellRef} scale={dimmed ? 0.82 : 1}>
         <icosahedronGeometry args={[0.72, 1]} />
-        <meshBasicMaterial color={color} wireframe transparent opacity={expanded ? 0.5 : 0.22} />
+        <meshBasicMaterial color={color} wireframe transparent opacity={expanded ? 0.5 : dimmed ? 0.05 : 0.14} />
       </mesh>
       {compromised && (
         <mesh ref={pulseRef} rotation={[Math.PI / 2, 0, 0]}>
@@ -138,7 +139,7 @@ function Node({ a }: { a: Asset }) {
       {selected && (
         <mesh><sphereGeometry args={[1.0, 24, 24]} /><meshBasicMaterial color={color} wireframe transparent opacity={0.25} /></mesh>
       )}
-      <Html distanceFactor={18} position={[0, below ? -0.92 : 0.92, 0]} center zIndexRange={[10, 0]}>
+      {showLabel && <Html distanceFactor={18} position={[0, below ? -0.92 : 0.92, 0]} center zIndexRange={[10, 0]}>
         <div style={{
           color: '#e2e8f0', fontSize: expanded ? 11 : 9.5, fontFamily: 'monospace', textAlign: 'center',
           pointerEvents: 'none', whiteSpace: 'nowrap', background: 'rgba(2,6,23,0.78)',
@@ -150,7 +151,7 @@ function Node({ a }: { a: Asset }) {
           <span style={{ color }}>●</span> {SHORT_LABEL[a.id] ?? a.name}
           {expanded && <><br /><span style={{ color, fontSize: 9 }}>{a.status.toUpperCase()} · {a.zone}</span></>}
         </div>
-      </Html>
+      </Html>}
     </group>
   )
 }
@@ -217,12 +218,8 @@ function WaveEdge({ from, to }: { from: [number, number, number]; to: [number, n
   )
 }
 
-export const ATTACK_PATHS: Record<string, string[]> = {
-  ransomware_activity: ['employee-workstation', 'file-server'],
-  compromised_identity: ['admin-workstation', 'database'],
-  lateral_movement: ['internet', 'firewall', 'web-server', 'app-server', 'database'],
-  data_exfiltration: ['database', 'app-server', 'web-server', 'firewall', 'internet'],
-}
+export { ATTACK_PATHS } from './status'
+import { ATTACK_PATHS } from './status'
 
 /** Keyboard nav: arrows orbit, +/- zoom, Enter selects most severe asset, Esc clears.
  * Identical state is also available as text via the asset list (accessible alternative). */
@@ -257,6 +254,7 @@ function KeyboardNav({ twin }: { twin: Twin }) {
 
 export default function TwinScene({ twin }: { twin: Twin }) {
   const scenarioId = useStore((s) => s.scenarioId)
+  const mapFocus = useStore((s) => s.mapFocus)
   const pos = useMemo(() => Object.fromEntries(twin.assets.map((a) => [a.id, a.pos])), [twin])
   const path = ATTACK_PATHS[scenarioId] ?? []
   const onPath = (s: string, t: string) => {
@@ -273,15 +271,16 @@ export default function TwinScene({ twin }: { twin: Twin }) {
       {twin.connections.map((c) => {
         const attack = onPath(c.source, c.target)
         const col = !c.active ? '#334155' : attack ? '#ef4444' : c.traversable ? '#155e75' : '#1e3a5f'
+        const faded = mapFocus && !attack
         return (
           <group key={`${c.source}-${c.target}`}>
-            <Line points={[pos[c.source], pos[c.target]]} color={col} lineWidth={attack ? 3.5 : 1.2} transparent opacity={c.active ? 0.95 : 0.35} />
+            <Line points={[pos[c.source], pos[c.target]]} color={col} lineWidth={attack ? 3.5 : 1} transparent opacity={faded ? 0.1 : c.active ? 0.95 : 0.35} dashed={faded} dashSize={0.4} gapSize={0.3} />
             {attack && c.active && <WaveEdge from={pos[c.source]} to={pos[c.target]} />}
-            <Traffic from={pos[c.source]} to={pos[c.target]} active={c.active} attack={attack} />
+            <Traffic from={pos[c.source]} to={pos[c.target]} active={c.active && (!mapFocus || attack)} attack={attack} />
           </group>
         )
       })}
-      {twin.assets.map((a) => <Node key={a.id} a={a} />)}
+      {twin.assets.map((a) => <Node key={a.id} a={a} dimmed={mapFocus && !path.includes(a.id)} />)}
       <KeyboardNav twin={twin} />
       <OrbitControls enableDamping makeDefault />
       <EffectComposer>
