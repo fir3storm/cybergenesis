@@ -230,6 +230,20 @@ class ConfigCommit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class ArenaMatch(Base):
+    """One red-vs-blue Arena match (B4): result + full round payload."""
+
+    __tablename__ = "arena_matches"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    scenario_id: Mapped[str] = mapped_column(String, index=True)
+    winner: Mapped[str] = mapped_column(String, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    mode: Mapped[str] = mapped_column(String, default="ai")  # ai | learned | deterministic
+    rounds_played: Mapped[int] = mapped_column(Integer, default=0)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class CustomTwinDefinition(Base):
     """User-designed infrastructure twin (assets + connections)."""
     __tablename__ = "custom_twin_definitions"
@@ -251,3 +265,4 @@ class CustomScenarioDefinition(Base):
     definition: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+

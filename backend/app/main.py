@@ -1,13 +1,17 @@
 import asyncio
+import html
 import json
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app import models
+from app.core.config import settings
 from app.agents.generative import architect_twin, author_scenario
 from app.db import get_db, init_db
 from app.integrations.meta_client import meta_client
@@ -212,6 +216,151 @@ def deny_exp(run_id: str, db: Session = Depends(get_db)):
     return {"recorded": True, "approved": False, "run_id": run_id}
 
 
+def _lan_base_url() -> str:
+    if settings.public_base_url:
+        return settings.public_base_url.rstrip("/")
+    import socket
+
+    ip = "127.0.0.1"
+    try:  # UDP connect sends no packets; it only selects the outbound interface
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+        s.close()
+    except OSError:
+        pass
+    return f"http://{ip}:8000"
+
+
+@app.get("/api/experiments/{run_id}/approval")
+def approval_status(run_id: str, db: Session = Depends(get_db)):
+    if not db.get(models.SimulationRun, run_id):
+        raise HTTPException(404, "experiment not found")
+    p = orchestrator.pending_approval(run_id)
+    if not p:
+        return {"pending": False}
+    return {"pending": True, "label": p["label"], "actions": p["actions"], "disrupted": p["disrupted"],
+            "expires_in_s": max(0, int(p["expires_at"] - time.time())),
+            "mobile_url": f"{_lan_base_url()}/m/approve/{run_id}?t={p['token']}"}
+
+
+class MobileApproval(BaseModel):
+    t: str
+    approved: bool
+
+
+@app.post("/api/m/approve/{run_id}")
+def mobile_approve(run_id: str, body: MobileApproval):
+    if not orchestrator.resolve_approval_token(run_id, body.t, body.approved):
+        raise HTTPException(403, "approval link is invalid, already used, or expired")
+    return {"recorded": True, "approved": body.approved, "via": "mobile"}
+
+
+@app.get("/m/approve/{run_id}", response_class=HTMLResponse)
+def mobile_approve_page(run_id: str, t: str = ""):
+    """Minimal phone page. Wrong/expired tokens get 403; the token is also single-use on submit."""
+    import secrets as _secrets
+
+    p = orchestrator.pending_approval(run_id)
+    if not p:
+        if t:
+            return HTMLResponse(_MOBILE_PAGE.replace("{{BODY}}", "<p class=warn>Approval link is invalid, already used, or expired.</p>"), status_code=403)
+        return HTMLResponse(_MOBILE_PAGE.replace("{{BODY}}", "<p class=muted>No approval is pending (it was already decided or expired).</p>"))
+    if not t or not _secrets.compare_digest(str(p["token"]), str(t)):
+        return HTMLResponse(_MOBILE_PAGE.replace("{{BODY}}", "<p class=warn>Approval link is invalid, already used, or expired.</p>"), status_code=403)
+    acts = "".join(f"<li>{html.escape(a['action_type'])} on <b>{html.escape(a['asset_id'])}</b></li>" for a in p["actions"])
+    body = (f"<h2>{html.escape(p['label'])}</h2><ul>{acts}</ul>"
+            f"<p class=warn>Disrupts {p['disrupted']} legitimate path(s) in the synthetic twin.</p>"
+            "<button id=ok>Approve defense</button><button id=no class=no>Reject</button><p id=msg class=muted></p>"
+            "<script>const send=a=>fetch(location.pathname.replace('/m/','/api/m/'),{method:'POST',headers:{'Content-Type':'application/json'},"
+            f"body:JSON.stringify({{t:{json.dumps(t)},approved:a}})}}).then(r=>r.ok?'Recorded — you can close this page.':'Link invalid, used or expired.')"
+            ".then(m=>{document.getElementById('msg').textContent=m;document.querySelectorAll('button').forEach(b=>b.disabled=true)});"
+            "document.getElementById('ok').onclick=()=>send(true);document.getElementById('no').onclick=()=>send(false);</script>")
+    return HTMLResponse(_MOBILE_PAGE.replace("{{BODY}}", body))
+
+
+_MOBILE_PAGE = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>CYBERGENESIS approval</title><style>body{font-family:system-ui;background:#020617;color:#e2e8f0;padding:20px;max-width:480px;margin:auto}
+h1{color:#67e8f9;font-size:18px;letter-spacing:.2em}h2{font-size:17px}.warn{color:#fcd34d}.muted{color:#94a3b8;font-size:13px}
+button{display:block;width:100%;padding:14px;margin:10px 0;border:0;border-radius:10px;font-weight:700;font-size:16px;background:#10b981;color:#022c22}
+button.no{background:transparent;border:1px solid #f87171;color:#fca5a5}button:disabled{opacity:.4}</style></head>
+<body><h1>CYBERGENESIS</h1><p class=muted>Human approval gate · synthetic simulation only</p>{{BODY}}</body></html>"""
+
+
+class ArenaMatchRequest(BaseModel):
+    scenario_id: str = "red_vs_blue_battle"
+    mode: str = "ai"
+    max_rounds: int | None = None
+    seed: int = 42
+    custom_twin_id: str | None = None
+
+
+@app.post("/api/arena/matches")
+async def arena_play(body: ArenaMatchRequest, db: Session = Depends(get_db)):
+    from app.arena.service import ArenaError, play_and_store
+
+    try:
+        return await play_and_store(db, body.scenario_id, mode=body.mode, max_rounds=body.max_rounds,
+                                    seed=body.seed, custom_twin_id=body.custom_twin_id)
+    except ArenaError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/arena/matches")
+def arena_matches(db: Session = Depends(get_db)):
+    rows = db.query(models.ArenaMatch).order_by(models.ArenaMatch.created_at.desc()).limit(100).all()
+    return [{"id": r.id, "scenario_id": r.scenario_id, "winner": r.winner, "reason": r.reason, "mode": r.mode,
+             "rounds_played": r.rounds_played, "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
+
+
+@app.get("/api/arena/matches/{match_id}")
+def arena_match(match_id: str, db: Session = Depends(get_db)):
+    r = db.get(models.ArenaMatch, match_id)
+    if not r:
+        raise HTTPException(404, "arena match not found")
+    return {"id": r.id, "scenario_id": r.scenario_id, "winner": r.winner, "mode": r.mode,
+            "created_at": r.created_at.isoformat() if r.created_at else None, **r.payload}
+
+
+@app.get("/api/arena/matches/{match_id}/certificate")
+def arena_certificate(match_id: str, db: Session = Depends(get_db)):
+    from app.arena.service import ArenaError, build_arena_certificate
+
+    try:
+        return build_arena_certificate(db, match_id)
+    except ArenaError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/arena/memory")
+def arena_memory():
+    from app.arena.learning import ArenaMemory
+
+    return ArenaMemory.load(settings.arena_memory_path).summary()
+
+
+@app.get("/api/arena/league")
+def arena_league(db: Session = Depends(get_db)):
+    from app.arena.service import league
+
+    return league(db)
+
+
+class ForkRequest(BaseModel):
+    at_event: str = "attacked"
+    choose_candidate: int | str
+
+
+@app.post("/api/experiments/{run_id}/fork")
+def fork_experiment(run_id: str, body: ForkRequest, db: Session = Depends(get_db)):
+    from app.simulation.counterfactual import ForkError, fork_run
+
+    try:
+        return fork_run(db, run_id, body.choose_candidate, body.at_event)
+    except ForkError as e:
+        raise HTTPException(404 if "not found" in str(e) else 422, str(e))
+
+
 @app.post("/api/experiments/{run_id}/cancel")
 def cancel_exp(run_id: str, db: Session = Depends(get_db)):
     if not db.get(models.SimulationRun, run_id):
@@ -252,6 +401,38 @@ def exp_evidence(run_id: str, db: Session = Depends(get_db)):
     rows = db.query(models.EvidenceRecord).filter_by(run_id=run_id).all()
     return [{"id": e.id, "kind": e.kind, "ref": e.ref, "summary": e.summary, "data": e.data,
              "timestamp": e.created_at.isoformat() if e.created_at else None} for e in rows]
+
+
+@app.get("/api/experiments/{run_id}/certificate")
+def exp_certificate(run_id: str, db: Session = Depends(get_db)):
+    from app.simulation.scenarios import SCENARIOS as _SC
+    from app.simulation.twin import DigitalTwin as _DT
+    from app.verification.certificate import build_certificate
+
+    r = db.get(models.SimulationRun, run_id)
+    if not r:
+        raise HTTPException(404, "experiment not found")
+    vers = db.query(models.VerificationResultRow).filter_by(run_id=run_id).all()
+    if not vers:
+        raise HTTPException(409, "no verification yet for this run")
+    if r.custom_scenario_id:
+        srow = db.get(models.CustomScenarioDefinition, r.custom_scenario_id)
+        scenario = {**srow.definition, "id": srow.id, "name": srow.name}
+    else:
+        scenario = _SC[r.scenario_id]
+    snaps = {s.label: s.snapshot for s in db.query(models.AssetStateSnapshot).filter_by(run_id=run_id).all()}
+    baseline = _DT()
+    if "baseline" in snaps:
+        baseline.restore(snaps["baseline"])
+    final = orchestrator.TWIN.clone()
+    if "post_remediation" in snaps:
+        final.restore(snaps["post_remediation"])
+    executions = [{"action_type": e.action_type, "asset_id": e.asset_id, "success": e.success, "transition": e.transition}
+                  for e in db.query(models.DefenseExecution).filter_by(run_id=run_id).all()]
+    verifications = [{"outcome": v.outcome, "invariant": v.invariant, "checks": v.checks, "metrics": v.metrics} for v in vers]
+    events = [{"event_type": e.event_type, "agent": e.agent, "asset_id": e.asset_id, "message": e.message, "seq": e.seq}
+              for e in db.query(models.SimulationEvent).filter_by(run_id=run_id).order_by(models.SimulationEvent.seq).all()]
+    return build_certificate(r, scenario, baseline, final, executions, verifications, events)
 
 
 @app.get("/api/experiments/{run_id}/report")

@@ -8,6 +8,67 @@ import { autoHostname, portsFromManifest, validateConnection, type PortInfo } fr
 interface DAsset { id: string; name: string; asset_type: string; zone: string; posture: number; pos: [number, number, number]; vulnerabilities: string[]; device_id?: string }
 interface DConn { source: string; target: string; trust: string; traversable: boolean; types: string[] }
 
+export interface TemplateAsset { id: string; name: string; asset_type: string; device_id: string }
+
+/**
+ * Starter templates built from real catalog devices (ids verified against
+ * GET /api/devices/catalog / backend catalog.csv). Flagship switches:
+ * cisco-catalyst-9300-48p (enterprise core) and arista-7050x3 (DC spine).
+ */
+export const TEMPLATES: Record<string, { assets: TemplateAsset[]; links: [number, number][] }> = {
+  'Small office': {
+    assets: [
+      { id: 'internet', name: 'Internet', asset_type: 'gateway', device_id: 'synthetic-internet-cloud' },
+      { id: 'firewall', name: 'Firewall', asset_type: 'firewall', device_id: 'fortinet-fortigate-200f' },
+      { id: 'ws-1', name: 'Workstation', asset_type: 'workstation', device_id: 'dell-latitude-7440-windows-11-enterprise' },
+      { id: 'fs-1', name: 'File Server', asset_type: 'file_server', device_id: 'microsoft-windows-server-2022-file-server' },
+    ],
+    links: [[0, 1], [1, 2], [2, 3]],
+  },
+  'Three-tier enterprise': {
+    assets: [
+      { id: 'internet', name: 'Internet', asset_type: 'gateway', device_id: 'synthetic-internet-cloud' },
+      { id: 'firewall', name: 'Firewall', asset_type: 'firewall', device_id: 'fortinet-fortigate-200f' },
+      { id: 'core-sw', name: 'Core Switch', asset_type: 'app_server', device_id: 'cisco-catalyst-9300-48p' },
+      { id: 'web', name: 'Web', asset_type: 'web_server', device_id: 'hpe-proliant-dl380-gen11-ubuntu-server-24-04-web' },
+      { id: 'app', name: 'App', asset_type: 'app_server', device_id: 'canonical-ubuntu-server-22-04' },
+      { id: 'db', name: 'Database', asset_type: 'database', device_id: 'lenovo-sr650-rhel-9-postgresql' },
+    ],
+    links: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+  },
+  'Data-centre spine-leaf': {
+    assets: [
+      { id: 'spine', name: 'Spine', asset_type: 'app_server', device_id: 'arista-7050x3' },
+      { id: 'leaf-a', name: 'Leaf A', asset_type: 'app_server', device_id: 'cisco-catalyst-9300-48p' },
+      { id: 'leaf-b', name: 'Leaf B', asset_type: 'app_server', device_id: 'juniper-ex4400' },
+      { id: 'db', name: 'Database', asset_type: 'database', device_id: 'lenovo-sr650-rhel-9-postgresql' },
+      { id: 'fs', name: 'Storage', asset_type: 'file_server', device_id: 'microsoft-windows-server-2022-file-server' },
+    ],
+    links: [[0, 1], [0, 2], [1, 3], [2, 4]],
+  },
+  'Hybrid cloud': {
+    assets: [
+      { id: 'internet', name: 'Internet', asset_type: 'gateway', device_id: 'synthetic-internet-cloud' },
+      { id: 'firewall', name: 'Firewall', asset_type: 'firewall', device_id: 'palo-alto-pa-3410' },
+      { id: 'app', name: 'Cloud App', asset_type: 'app_server', device_id: 'vmware-esxi-8-host' },
+      { id: 'idp', name: 'Identity', asset_type: 'identity', device_id: 'okta-okta-workforce-identity' },
+    ],
+    links: [[0, 1], [1, 2], [2, 3]],
+  },
+  'Factory OT (Purdue)': {
+    assets: [
+      { id: 'internet', name: 'Internet', asset_type: 'gateway', device_id: 'synthetic-internet-cloud' },
+      { id: 'firewall', name: 'OT Firewall', asset_type: 'firewall', device_id: 'fortinet-fortigate-200f' },
+      { id: 'plc', name: 'PLC Cell', asset_type: 'sensor', device_id: 'siemens-s7-1500-plc-hmi' },
+      { id: 'hmi', name: 'HMI', asset_type: 'workstation', device_id: 'rockwell-panelview-plus-7-hmi' },
+    ],
+    links: [[0, 1], [1, 2], [2, 3]],
+  },
+}
+
+/** Catalog flagship switch ids used by the enterprise / data-centre templates. */
+export const FLAGSHIP_SWITCH_IDS = ['cisco-catalyst-9300-48p', 'arista-7050x3', 'juniper-ex4400', 'hpe-aruba-cx-6300'] as const
+
 const sx = (x: number) => ((x + 9) / 18) * 720
 const sy = (z: number) => ((z + 6) / 12) * 400
 const wx = (px: number) => (px / 720) * 18 - 9
@@ -123,22 +184,15 @@ export default function TwinDesigner() {
     setPicker(null)
   }
 
-  const TEMPLATES: Record<string, { assets: [string, string, string][]; links: [number, number][] }> = {
-    'Small office': { assets: [['internet', 'Internet', 'gateway'], ['firewall', 'Firewall', 'firewall'], ['ws-1', 'Workstation', 'workstation'], ['fs-1', 'File Server', 'file_server']],
-      links: [[0, 1], [1, 2], [2, 3]] },
-    'Three-tier enterprise': { assets: [['internet', 'Internet', 'gateway'], ['firewall', 'Firewall', 'firewall'], ['web', 'Web', 'web_server'], ['app', 'App', 'app_server'], ['db', 'Database', 'database']],
-      links: [[0, 1], [1, 2], [2, 3], [3, 4]] },
-    'Data-centre spine-leaf': { assets: [['spine', 'Spine', 'app_server'], ['leaf-a', 'Leaf A', 'app_server'], ['leaf-b', 'Leaf B', 'app_server'], ['db', 'Database', 'database'], ['fs', 'Storage', 'file_server']],
-      links: [[0, 1], [0, 2], [1, 3], [2, 4]] },
-    'Hybrid cloud': { assets: [['internet', 'Internet', 'gateway'], ['firewall', 'Firewall', 'firewall'], ['app', 'Cloud App', 'app_server'], ['idp', 'Identity', 'identity']],
-      links: [[0, 1], [1, 2], [2, 3]] },
-    'Factory OT (Purdue)': { assets: [['internet', 'Internet', 'gateway'], ['firewall', 'OT Firewall', 'firewall'], ['plc', 'PLC Cell', 'sensor'], ['hmi', 'HMI', 'workstation']],
-      links: [[0, 1], [1, 2], [2, 3]] },
-  }
+  // Templates reference real catalog devices (GET /api/devices/catalog):
+  // every asset carries its catalog `device_id` into the designer, so port
+  // pickers and faceplates resolve the real manifest. The enterprise and
+  // data-centre templates include a flagship switch (Catalyst 9300-48P /
+  // Arista 7050X3).
   function loadTemplate(nameTpl: string) {
     const t = TEMPLATES[nameTpl]
-    const made: DAsset[] = t.assets.map(([id, label, type], i) => ({ id, name: label, asset_type: type, zone: 'template', posture: 0.7,
-      vulnerabilities: [], pos: [(i % 3) * 3.6 - 3.6, 1.1, Math.floor(i / 3) * 3 - 1.5] }))
+    const made: DAsset[] = t.assets.map((tpl, i) => ({ id: tpl.id, name: tpl.name, asset_type: tpl.asset_type, zone: 'template', posture: 0.7,
+      vulnerabilities: [], device_id: tpl.device_id, pos: [(i % 3) * 3.6 - 3.6, 1.1, Math.floor(i / 3) * 3 - 1.5] }))
     commit(made, t.links.map(([a, b]) => ({ source: made[a].id, target: made[b].id, trust: 'medium', traversable: true, types: ['network'] })))
     setName(nameTpl)
     setMsg(`Template "${nameTpl}" loaded with valid cables and default configs. Save to persist.`)
@@ -271,6 +325,10 @@ export default function TwinDesigner() {
             if (raw) { const d = JSON.parse(raw) as { id: string; vendor: string; category: string }; addFromCatalog(d.id, d.vendor, d.category); return }
             const f = e.dataTransfer.files?.[0]; if (f) handleImageFile(f)
           }}>
+          {/* Canvas wrapper: the minimap is positioned against this wrapper
+              only, so it can never overlap the port picker / action buttons
+              rendered below the canvas. */}
+          <div className="relative">
           <svg ref={svgRef} viewBox="0 0 720 400" className="w-full rounded-xl border border-cyan-900 bg-[#04101f]"
             onPointerMove={onMove} onPointerUp={() => { drag.current = null }} role="img" aria-label="Twin design canvas. Assets are also listed as text on the left.">
             {Array.from({ length: 13 }, (_, i) => <line key={`v${i}`} x1={i * 60} y1={0} x2={i * 60} y2={400} stroke="#0e2a3f" />)}
@@ -286,9 +344,10 @@ export default function TwinDesigner() {
                 onPointerUp={() => { if (portDragFrom && portDragFrom !== a.id) { void openPicker(portDragFrom, a.id); setPortDragFrom(null) } }}
                 onDoubleClick={() => window.dispatchEvent(new CustomEvent('open-device', { detail: a.id }))}
                 style={{ cursor: 'grab' }}>
+                <title>{`${a.name} (${a.id})${a.device_id ? ` · device ${a.device_id}` : ''}`}</title>
                 <circle r={17} fill={connectFrom === a.id ? '#f59e0b' : '#0e7490'} stroke="#22d3ee" strokeWidth={connectFrom === a.id ? 3 : 1.5} />
-                <text textAnchor="middle" dy={4} fill="#e0f2fe" fontSize={9} fontFamily="monospace">{a.id.slice(0, 10)}</text>
-                <text textAnchor="middle" dy={30} fill="#94a3b8" fontSize={9}>{a.name}</text>
+                <text textAnchor="middle" dy={4} fill="#e0f2fe" fontSize={a.id.length > 12 ? 7.5 : 9} fontFamily="monospace">{a.id}</text>
+                <text textAnchor="middle" dy={30} fill="#cbd5e1" fontSize={9}>{a.name}</text>
                 <circle cx={21} cy={0} r={5.5} fill="#22d3ee" stroke="#083344" style={{ cursor: 'crosshair' }}
                   onPointerDown={(e) => { e.stopPropagation(); setPortDragFrom(a.id); setMsg(`Drag from ${a.id}'s port handle onto another device…`) }}>
                   <title>Drag to another device to cable</title>
@@ -303,7 +362,8 @@ export default function TwinDesigner() {
             })}
             {assets.map((a) => <circle key={a.id} cx={sx(a.pos[0])} cy={sy(a.pos[2])} r={9} fill="#22d3ee" />)}
           </svg>
-          <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-500"><MousePointer2 size={11} /> Drag nodes to arrange · <Waypoints size={11} /> click one node, then another, to connect (port picker opens)</p>
+          </div>
+          <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-300"><MousePointer2 size={11} /> Drag nodes to arrange · <Waypoints size={11} /> click one node, then another, to connect (port picker opens)</p>
           {picker && (
             <div className="mt-2 rounded-xl border border-cyan-700 bg-slate-950 p-3 text-xs">
               <b>Cable {picker.a} ↔ {picker.b}</b>

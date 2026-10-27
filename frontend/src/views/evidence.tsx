@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useStore } from '../stores/store'
 import type { Asset, RunResult, Twin, View } from '../types'
+import { ProofCard } from './proof'
 export function EvidenceView() {
   const s = useStore()
   const [rows, setRows] = useState<{ id: string; kind: string; ref: string; summary: string }[] | null>(null)
@@ -31,6 +32,7 @@ export function EvidenceView() {
           }} />
         </label>
       </div>
+      <ProofCard runId={s.runId} outcome={s.results?.verification?.outcome} />
       {s.highlightRef && <p className="mt-2 text-xs text-cyan-300">Highlighting citation: <span className="font-mono">{s.highlightRef}</span></p>}
       <div className="mt-4 space-y-1">
         {(rows ?? s.events.map((e) => ({ id: '', kind: e.event_type, ref: '', summary: e.message }))).map((e, i) => (

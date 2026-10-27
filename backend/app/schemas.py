@@ -106,6 +106,7 @@ class CustomTwinAsset(BaseModel):
     posture: float = 0.7
     pos: list[float] = [0, 1, 0]
     vulnerabilities: list[str] = []
+    device_id: str | None = None
 
 
 class CustomTwinConnection(BaseModel):

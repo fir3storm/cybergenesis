@@ -8,6 +8,7 @@ import type { Asset, Conn, Twin } from '../types'
 import { useStore } from '../stores/store'
 import { ATTACK_PATHS, STATUS_COLOR, activeAttackPath, blockedEdgeIndex } from './status'
 import { NODE_LAYOUT, ZONES, ZONE_OF, layoutFor } from './zones'
+import { computeLabelOffsets } from './labelLayout'
 
 export { ATTACK_PATHS } from './status'
 export { STATUS_COLOR } from './status'
@@ -58,9 +59,12 @@ interface NodeProps {
   dimmed: boolean
   protectedTarget: boolean
   links: string[]
+  /** deterministic same-zone stagger from computeLabelOffsets (labelLayout.ts) */
+  labelOffset: number
+  labelTier: number
 }
 
-function Node({ a, dimmed, protectedTarget, links }: NodeProps) {
+function Node({ a, dimmed, protectedTarget, links, labelOffset, labelTier }: NodeProps) {
   const set = useStore((s) => s.set)
   const selected = useStore((s) => s.selectedAsset === a.id)
   const [hovered, setHovered] = useState(false)
@@ -129,6 +133,13 @@ function Node({ a, dimmed, protectedTarget, links }: NodeProps) {
       <pointLight ref={lightRef} position={[0, 1.3, 0]} color={color} intensity={3.5} distance={5} decay={1.8} />
       <group ref={iconRef} position={[0, topY + 0.35, 0]}
         onClick={(e) => { e.stopPropagation(); set({ selectedAsset: a.id }) }}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          set({ selectedAsset: a.id })
+          // Same window-manager event Twin2D / the designer use; App.tsx
+          // listens and opens the device window via useOpenDevice().
+          window.dispatchEvent(new CustomEvent('open-device', { detail: a.id }))
+        }}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true) }}
         onPointerOut={() => setHovered(false)}>
         <NodeIcon type={a.asset_type} color={color} />
@@ -138,7 +149,7 @@ function Node({ a, dimmed, protectedTarget, links }: NodeProps) {
           <div style={{ background: '#22c55e', color: '#04160a', borderRadius: 999, width: 18, height: 18, fontSize: 12, fontWeight: 900, textAlign: 'center', lineHeight: '18px', pointerEvents: 'none', boxShadow: '0 0 10px #22c55e88' }}>✓</div>
         </Html>
       )}
-      <Html distanceFactor={17} position={[0, topY + 1.05, 0]} center occlude zIndexRange={[15, 0]}>
+      <Html distanceFactor={17} position={[0, topY + 1.05 + labelOffset, 0]} center occlude zIndexRange={[15 + labelTier * 2, 0]}>
         <div style={{
           color: '#e2e8f0', fontSize: expanded ? 11 : 9.5, fontFamily: 'monospace', textAlign: 'center', pointerEvents: 'none',
           whiteSpace: 'nowrap', background: 'rgba(2,6,23,0.8)', border: `1px solid ${color}`, borderRadius: 999,
@@ -150,13 +161,14 @@ function Node({ a, dimmed, protectedTarget, links }: NodeProps) {
         </div>
       </Html>
       {hovered && (
-        <Html position={[0, topY + 1.85, 0]} center zIndexRange={[30, 0]}>
+        <Html position={[0, topY + 1.85 + labelOffset, 0]} center zIndexRange={[30, 0]}>
           <div style={{ background: 'rgba(2,6,23,0.94)', border: '1px solid #155e75', borderRadius: 10, padding: '8px 10px', color: '#e2e8f0', fontSize: 11, fontFamily: 'monospace', width: 210, pointerEvents: 'none' }}>
             <b>{a.name}</b><br />
             Role: {a.asset_type} · Zone: {ZONE_OF[a.id] ?? a.zone}<br />
             Status: <span style={{ color }}>{a.status}</span> · Posture {(a.posture * 100).toFixed(0)}%<br />
             Vulnerabilities: {a.vulnerabilities.length ? a.vulnerabilities.join(', ') : 'none'}<br />
-            Connections: {links.join(', ') || 'none'}
+            Connections: {links.join(', ') || 'none'}<br />
+            <span style={{ color: '#7dd3fc' }}>Double-click to open device</span>
           </div>
         </Html>
       )}
@@ -429,6 +441,12 @@ export default function TwinScene({ twin }: { twin: Twin }) {
   const zoom = (dir: 1 | -1) => setZoomCmd((prev) => ({ dir, n: (prev?.n ?? 0) + 1 }))
 
   const positions = useMemo(() => new Map(twin.assets.map((a) => [a.id, layoutFor(a.id, a.pos)] as [string, [number, number, number]])), [twin])
+  // Label collision avoidance (F8c #5): deterministic same-zone stagger —
+  // see labelLayout.ts for the approach notes. Labels are never hidden.
+  const labelPlacements = useMemo(
+    () => computeLabelOffsets(twin.assets.map((a) => ({ id: a.id, zone: ZONE_OF[a.id] ?? a.zone, pos: layoutFor(a.id, a.pos) }))),
+    [twin],
+  )
   // Follow the ACTIVE run (round path / verified after+baseline path); the
   // static table is only a fallback. Without run data, recompute the live
   // path from the twin's current connections as before.
@@ -497,10 +515,14 @@ export default function TwinScene({ twin }: { twin: Twin }) {
             })}
             {flowChain.length >= 2 && <AttackFlow chain={flowChain} positions={positions} stopPoint={null} />}
             {stopPoint && <BurstAtCut point={stopPoint} />}
-            {twin.assets.map((a) => (
-              <Node key={a.id} a={a} dimmed={mapFocus && !pathNodes.has(a.id)}
-                protectedTarget={targetProtected && a.id === chain[chain.length - 1]} links={linksOf(a)} />
-            ))}
+            {twin.assets.map((a) => {
+              const placement = labelPlacements.get(a.id) ?? { offset: 0, tier: 0 }
+              return (
+                <Node key={a.id} a={a} dimmed={mapFocus && !pathNodes.has(a.id)}
+                  protectedTarget={targetProtected && a.id === chain[chain.length - 1]} links={linksOf(a)}
+                  labelOffset={placement.offset} labelTier={placement.tier} />
+              )
+            })}
           </group>
         </Bounds>
         <CameraRig positions={positions} resetNonce={resetNonce} zoomCmd={zoomCmd} chain={displayChain} />

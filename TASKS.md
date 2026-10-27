@@ -58,6 +58,25 @@
 - [x] Benchmark: 50 seeded pairs, `scripts/benchmark.py` + `docs/benchmark.md` (none 0%, offline/simulate 100%, mean gap 0.16)
 - [x] UX: cinematic mode, replay player + timeline scrubber over stored snapshots, 1×/2×/4× speed (server step-delay param)
 
+## F8d-finish — Proof certificate in the UI (2026-10-28)
+- [x] `api.getCertificate(runId)`; ProofCard in Experiment Console, Verification Lab + Evidence (PASS only, `certificate-<runId>.json`, signature/hash-chain short, campaigns replayed, verify-locally hint); README "Proof-carrying defense"; Playwright asserts the downloaded file's signature + `unreachable_proof`; backend `test_f8d` valid/tampered
+
+## F8e — Counterfactual time machine (2026-10-28)
+- [x] `POST /api/experiments/{id}/fork {at_event, choose_candidate}` restores the attacked snapshot, re-applies the alternative candidate through the same policy engine + verifier as a new recorded run (original unchanged, deterministic); fork payload carries both twins, both timelines and metric deltas (disruption, risk, rounds, verdict); Compare view renders two timelines + two twins side by side with a Δ column; backend + Playwright tests cover different-candidate outcome
+
+## F8f — Approve from your phone (2026-10-28)
+- [x] Approval card shows a QR code (LAN URL, auto-detected or `PUBLIC_BASE_URL`) for `/m/approve/{run_id}?t=<one-time token>`; the phone page lists actions + impact with Approve/Reject through the same gate, audited as `approval_mobile` ("approved via mobile"); reused, UI-decided and expired tokens all return 403 (token dies with the approval window); tests: backend single-use/expiry/UI-decision + Playwright phone flow + QR unit tests
+
+## Arena (red vs blue, self-learning) — design locked 2026-10-28
+Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks among validated moves, deterministic score memory biases later rounds). Scope: any twin+scenario, live spectate.
+- [x] B1 core engine (`app/arena/engine.py`): round loop (validated red path → policy-gated blue candidate → replay check), injected strategies, deterministic defaults, caller twin never mutated; 6 tests (blue holds, red breaks/no-defense, survival, identity, determinism)
+- [x] B2 learning memory (`app/arena/learning.py`): persistent JSON score memory, learned red/blue choosers (blocking first, then learned rate, then disruption); 5 tests
+- [x] B3 Meta AI choosers (`app/arena/ai.py` + async engine): AI picks only among validated paths/candidates, unknown picks and provider failures fall back labelled offline; 3 mocked tests
+- [x] B4 API + persistence: `POST/GET /api/arena/matches`, `GET /api/arena/memory|league`, `ArenaMatch` rows, memory saved across matches; 3 tests
+- [x] B5 spectate UI (`views/arena.tsx`): scenario/strategy/rounds controls, league scoreboard, spectate replay of rounds, final twin, learned-memory and past-match panels
+- [x] B6 winner proof: `GET /api/arena/matches/{id}/certificate` (HMAC, winner + final twin), `verify_cert.py` recomputes the objective; tamper → INVALID; deterministic replay test
+- [x] B7 league table (UI + API), Playwright arena test (play → spectate → winner proof file), README Arena section
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.

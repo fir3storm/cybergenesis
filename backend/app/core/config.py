@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     auto_approve: bool = False
     max_tokens_per_run: int = 20000
     run_timeout_s: float = 180
+    # base URL phones on the LAN use for mobile approval; empty = auto-detect LAN IP:8000
+    public_base_url: str = ""
+    # Arena self-learning memory (B2/B4): JSON score memory across matches
+    arena_memory_path: str = "./arena_memory.json"
 
 
 settings = Settings()

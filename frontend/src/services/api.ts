@@ -1,4 +1,4 @@
-import type { CustomScenarioDef, CustomTwinDef, Library, ModelStatus, RunResult, Scenario, SimEvent, Twin } from '../types'
+import type { ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, RunResult, Scenario, SimEvent, Twin } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
@@ -66,5 +66,17 @@ export const api = {
   evalLatest: () => j<{ available: boolean; result?: { n: number; mode: string; agents: Record<string, Record<string, unknown>>; calibration: Record<string, { bucket: string; n: number; accuracy: number | null }[]> } }>('/api/agents/eval/latest'),
   learningCurve: () => j<{ points: { run_id: string; scenario_id: string; mode: string; outcome: string; optimality_gap: number | null }[]; runs: number }>('/api/learning/curve'),
   calibration: () => j<{ buckets: { bucket: string; n: number; passes: number; pass_rate_pct: number | null }[] }>('/api/benchmark/calibration'),
+  getCertificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
+  certificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
+  fork: (id: string, choose_candidate: number | string, at_event = 'attacked') =>
+    j<ForkResult>(`/api/experiments/${id}/fork`, { method: 'POST', body: JSON.stringify({ choose_candidate, at_event }) }),
+  approvalStatus: (id: string) => j<{ pending: boolean; label?: string; disrupted?: number; expires_in_s?: number; mobile_url?: string }>(`/api/experiments/${id}/approval`),
   fromText: (prompt_text: string, name: string) => j<CustomScenarioDef>('/api/scenarios/from-text', { method: 'POST', body: JSON.stringify({ prompt_text, name }) }),
+  arenaPlay: (scenario_id: string, mode: string, max_rounds?: number) =>
+    j<ArenaMatch>('/api/arena/matches', { method: 'POST', body: JSON.stringify({ scenario_id, mode, max_rounds: max_rounds ?? null }) }),
+  arenaMatches: () => j<{ id: string; scenario_id: string; winner: string; mode: string; rounds_played: number }[]>('/api/arena/matches'),
+  arenaMatch: (id: string) => j<ArenaMatch>(`/api/arena/matches/${id}`),
+  arenaMemory: () => j<ArenaMemorySummary>('/api/arena/memory'),
+  arenaLeague: () => j<ArenaLeague>('/api/arena/league'),
+  arenaCertificate: (id: string) => j<Record<string, unknown>>(`/api/arena/matches/${id}/certificate`),
 }

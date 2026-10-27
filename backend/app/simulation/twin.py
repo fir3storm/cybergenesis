@@ -78,6 +78,7 @@ class DigitalTwin:
             defs.append({"id": a["id"], "name": a.get("name", a["id"]), "asset_type": a.get("asset_type", "workstation"),
                          "zone": a.get("zone", "custom"), "posture": float(a.get("posture", 0.7)),
                          "pos": [float(pos[0]), float(pos[1]), float(pos[2])],
+                         "device_id": a.get("device_id"),
                          "vulnerabilities": list(a.get("vulnerabilities") or ["legacy_unpatched"])})
         ids = [d["id"] for d in defs]
         if len(ids) != len(set(ids)):
@@ -165,7 +166,7 @@ class DigitalTwin:
                                   sessions=[_Sess(id="svc-app-sess", active=True, compromised=False)],
                                   credential_version=1))
             weak = list(a["vulnerabilities"])
-            cfg = DeviceConfig(hostname=aid.upper().replace("-", "")[:10] + "-01", device_id=BUILTIN_DEVICE_MAP.get(aid, "generic"),
+            cfg = DeviceConfig(hostname=aid.upper().replace("-", "")[:10] + "-01", device_id=a.get("device_id") or BUILTIN_DEVICE_MAP.get(aid, "generic"),
                                interfaces=ifaces, services=svc_by_type.get(a["asset_type"], []), users=users,
                                weaknesses=weak,
                                mgmt=Mgmt(telnet="telnet_enabled" in weak, snmp_community="public" if "snmp_public_community" in weak else None))
@@ -344,7 +345,7 @@ class DigitalTwin:
         devices = []
         for a in self.asset_defs:
             aid = a["id"]
-            dev_id = BUILTIN_DEVICE_MAP.get(aid)
+            dev_id = a.get("device_id") or BUILTIN_DEVICE_MAP.get(aid)
             manifest = BY_ID.get(dev_id or "")
             links = []
             for s, t, *_ in self.edge_defs:
@@ -356,7 +357,7 @@ class DigitalTwin:
             devices.append({"asset_id": aid, "device_id": dev_id, "model": manifest.model if manifest else aid,
                             "vendor": manifest.vendor if manifest else "Synthetic",
                             "ports": [f"{p['prefix']}{p['start'] + i}" for p in (manifest.hardware.model_dump()["ports"] if manifest else [])
-                                      for i in range(p["count"])][:8],
+                                      for i in range(p["count"])],
                             "links": links, "config_hash": self.config_hash()})
         return {"assets": assets, "connections": conns, "devices": devices,
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}

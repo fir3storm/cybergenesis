@@ -1,14 +1,75 @@
-# CYBERGENESIS — The Autonomous Self-Defending Digital Twin
+# CYBERGENESIS
+
+### The Autonomous Self-Defending Digital Twin
 
 [![CI](https://github.com/fir3storm/cybergenesis/actions/workflows/ci.yml/badge.svg)](https://github.com/fir3storm/cybergenesis/actions/workflows/ci.yml)
 
-**Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026 · Powered by Meta Muse Spark**
+> **Built for the Meta Global AI Developer Hackathon 2026**
+> Created by **Dr. Abhirup Guha** · Powered by **Meta Muse Spark**
+>
+> *CYBERGENESIS does not merely detect cyberattacks. It tests defenses — and proves resilience.*
 
 ![CYBERGENESIS battle loop](docs/battle.gif)
 
-> **Why Meta AI is essential:** Muse Spark plays *both* sides. As the blue team it investigates synthetic telemetry and proposes defenses from the live graph (no per-scenario instructions — it works it out, and since the credibility pass it still passes live with an optimality gap of 0). As the red team it chooses among policy-validated alternate attack paths and adapts for up to 5 rounds while the twin hardens itself. With no key, the app says so and runs a labelled deterministic red team instead — Meta AI is the difference between a scripted demo and an adaptive adversary. Its multimodal vision also turns a whiteboard photo into a working twin (Twin Designer → "Try sample").
+---
 
-## Benchmark (50 seeded pairs — `python scripts/benchmark.py`)
+## What is CYBERGENESIS?
+
+CYBERGENESIS is a closed-loop, autonomous cybersecurity digital twin. AI agents watch over a **synthetic** enterprise network. A controlled red team introduces incidents. Meta Muse Spark investigates the telemetry, works out a defense from the live network graph — no per-scenario instructions, it reasons it out — and proposes countermeasures. A deterministic policy engine (independent of the LLM) approves only allowlisted actions. The twin applies them. Then an independent Verification Scientist replays the identical attack to **prove, with computed before/after evidence, whether it now fails**.
+
+Everything is synthetic. No real targets, no scanning, no exploitation, no credential harvesting. See the [threat model](docs/threat-model.md).
+
+## Why Meta AI is essential
+
+Muse Spark plays **both sides**:
+
+- **Blue team** — investigates evidence-cited telemetry and proposes defenses from the live graph. Live-verified on every builtin scenario with an optimality gap of 0 against the NetworkX minimum cut.
+- **Red team** — in the Arena and battle rounds, it chooses among policy-validated attack paths and adapts while the twin hardens itself.
+- **Vision** — its multimodal capability turns a whiteboard photo into a working digital twin (Twin Designer).
+
+With no API key, the app says so honestly and runs a clearly labelled deterministic simulation instead. Meta AI is the difference between a scripted demo and an adaptive adversary. Provider failure is always reported — fake success is treated as a test failure.
+
+![Welcome — LIVE META AI](docs/screenshots/01-welcome.png)
+![Living Twin](docs/screenshots/02-living-twin.png)
+![Verification Lab](docs/screenshots/05-verification-lab.png)
+
+---
+
+## The Arena — red vs blue, self-learning until someone wins
+
+The newest battleground. Pick any twin and scenario, choose a strategy, and spectate:
+
+- **Red wins** by reaching the protected target after a defense. **Blue wins** by leaving Red no validated path, or by surviving every round.
+- Each round: Red picks a validated attack path → Blue picks a candidate defense through the same policy gate → the replay check decides the round.
+- **The AI picks, the scores learn.** Muse Spark chooses only among validated moves (an invalid pick is rejected, never applied), and a deterministic score memory — persisted across matches — records what blocked and what reached, biasing both sides in the next match.
+- Every match is stored, a league table tracks Red/Blue wins per scenario, and the winner receives a **signed winner-proof certificate**, verifiable offline.
+
+Strategy modes: **AI + learning** · **Learning only** · **Deterministic**.
+
+## Proof-carrying defense
+
+When a run's verdict is **PASS**, CYBERGENESIS hands you a proof instead of asking for trust: a self-contained, HMAC-signed certificate (event hash chain, campaigns replayed, per-campaign unreachable-proof with the blocking rule for every frontier arc, embedded final twin). Anyone can verify it offline — no LLM, no database:
+
+```powershell
+python scripts/verify_cert.py certificate-<runId>.json
+# VALID — or INVALID, with the exact reason
+```
+
+A FAIL run gets no proof button. There is nothing to certify.
+
+## Counterfactual time machine
+
+Finished a run and wondered *"what if Blue had chosen differently?"* Fork the run at its decision point with an alternative candidate. The fork replays through the same policy gate and verifier as a brand-new recorded run — **the original is never changed** — and the Compare view shows both timelines and both twins side by side, with metric deltas for disruption, risk, rounds, and verdict.
+
+## Approve from your phone
+
+Some defenses disrupt legitimate paths, so they wait for a human. The approval card shows a **QR code**: scan it on the same Wi-Fi and your phone gets the action list, the impact, and Approve/Reject buttons. The link carries a one-time token that dies with the approval — reused, expired, or already-decided tokens all return **403** — and the decision joins the same audit trail, recorded as *approved via mobile*.
+
+---
+
+## Benchmark
+
+50 seeded attacker/defender pairs (`python scripts/benchmark.py`, details in [docs/benchmark.md](docs/benchmark.md) and the in-app Benchmark page):
 
 | Defender | Verification PASS | Mean effectiveness | Mean optimality gap | Mean legit paths disrupted |
 |---|---|---|---|---|
@@ -16,19 +77,28 @@
 | offline | 50/50 (100%) | 100.0% | 0.16 | 0.00 |
 | simulate | 50/50 (100%) | 100.0% | 0.16 | 0.00 |
 
-Live Muse Spark spot-check: all 5 builtin scenarios (incl. the 3-round Red vs Blue Battle) pass end-to-end. Details: `docs/benchmark.md`, Benchmark page in the app.
+## The scenarios
 
-CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.
+1. **Ransomware-like activity** — synthetic file-modification burst → isolate the workstation → replay proves the file server unreachable.
+2. **Compromised credential** — suspicious admin session → revoke session + rotate the synthetic credential → replayed access denied.
+3. **Lateral movement** — graph attack path web → app → database → segmentation at the choke point → replay proves the database unreachable.
+4. **Data exfiltration** — synthetic bulk staging database → app → web → internet → egress segmentation at the DMZ → replay proves the database cannot reach the internet.
+5. **Red vs Blue Battle** — the adaptive adversary retries over multiple rounds while the twin hardens; the seed of the Arena.
 
-A closed-loop autonomous cybersecurity digital twin: AI agents observe a synthetic enterprise, a controlled adversary introduces incidents, Meta Muse Spark investigates and proposes defenses, a deterministic policy engine approves only allowlisted actions, the twin applies them, and an independent Verification Scientist replays the identical attack to prove — with computed before/after evidence — whether it now fails.
+## Design your own
 
-![Welcome — LIVE META AI](docs/screenshots/01-welcome.png)
-![Living Twin](docs/screenshots/02-living-twin.png)
-![Verification Lab](docs/screenshots/05-verification-lab.png)
+- **Twin Designer** — build a custom topology from the component palette (drag assets, click two to connect, save, activate), or photograph a whiteboard and let Muse Spark vision generate the twin.
+- **Attack Playbook** — compose a custom scenario from the allowlisted step/defense libraries and run it through the identical loop.
+- **Component Library** — browse every asset type, attack step, and defense action the policy engine accepts (`GET /api/library`).
+
+Extras: Demo Commentary narration, human-readable Markdown reports, a live Meta token meter, Replay-with-Seed-42 telemetry-identity proof, keyboard shortcuts (Space / R / 1–4), and a full 3D living twin with a 2D accessibility fallback.
+
+---
 
 ## Quick start (local, no Docker required)
 
 Backend (Python 3.12+):
+
 ```powershell
 cd backend
 pip install -e .   # or use an existing env with fastapi/uvicorn/sqlalchemy/networkx/httpx
@@ -36,27 +106,30 @@ python -m uvicorn app.main:app --port 8000
 ```
 
 Frontend (Node 20+):
+
 ```powershell
 cd frontend
 npm install
 npm run dev        # http://localhost:5173
 ```
 
-Open http://localhost:5173 → **Run Autonomous Defense Demo**.
+Open <http://localhost:5173> → **Run Autonomous Defense Demo** — then visit the **Arena** and start a match.
 
-## Meta AI (live mode)
+### Meta AI (live mode)
 
-Without a key the app runs in clearly-labelled **OFFLINE SIMULATION** mode (deterministic, evidence-derived — never presented as Meta inference). For live inference:
+Without a key, the app runs in clearly labelled **OFFLINE SIMULATION** mode (deterministic, evidence-derived — never presented as Meta inference). For live inference:
 
 ```powershell
 $env:MODEL_API_KEY = "<your key>"   # backend env only, never committed or displayed
 $env:META_MODEL = "muse-spark-1.3"
 ```
+
 Restart the backend; the header badge switches to **LIVE META AI** and `/api/models/status` reports provider reachability.
 
-## Docker
+### Docker
 
 Docker was not available on the development machine, so the Compose stack is provided but locally unverified:
+
 ```bash
 cp .env.example .env   # fill MODEL_API_KEY if desired
 docker compose up --build
@@ -66,22 +139,15 @@ docker compose up --build
 
 ```powershell
 cd backend;  python -m pytest -q;  python -m ruff check app tests
-cd frontend; npm test; npm run build
+cd frontend; npm test; npm run build; npm run test:e2e   # Playwright, requires servers running
 ```
-13 backend tests cover all 3 scenarios end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, live-proposal policy-feedback retry (mocked), and honest provider failure. Test runs force `OFFLINE_MODE=true` for hermetic results. Frontend: Vitest + a Playwright smoke test (`npm run test:e2e`, Edge, requires servers running). Live Meta was verified on 2026-10-27: all 3 scenarios PASS with real Muse Spark decisions (see `docs/evaluation.md`).
 
-## The four scenarios
-1. **Ransomware-like activity** — synthetic file-modification burst → isolate workstation → replay proves file server unreachable.
-2. **Compromised credential** — suspicious admin session → revoke session + rotate synthetic credential → replayed access denied.
-3. **Lateral movement** — graph attack path web→app→database → segmentation at the choke point → replay proves database unreachable.
-4. **Data exfiltration** — synthetic bulk staging database→app→web→internet → egress segmentation at the DMZ → replay proves database cannot reach the internet.
+**140 backend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
 
-Extras: toggleable **Demo Commentary** narration panel, human-readable Markdown report (`/api/experiments/{id}/report/markdown`, Download Report .md), live Meta token meter in the header, Replay-with-Seed-42 telemetry-identity proof, keyboard shortcuts (Space/R/1–4).
+## Documentation
 
-## Design your own (Twin Designer + Attack Playbook + Library)
-Open **Twin Designer** to build a custom topology from the component palette (drag assets, click two to connect, save, activate), **Attack Playbook** to compose a custom scenario from the allowlisted step/defense libraries and run it, and **Library** to browse every asset type, attack step, and defense action the policy engine accepts (`GET /api/library`). Custom runs use the identical Observe → Reason → Policy → Act → Verify loop and evidence store.
+[Architecture](docs/architecture.md) · [Meta integration](docs/meta-integration.md) · [Evaluation](docs/evaluation.md) · [Demo script](docs/demo-script.md) · [Threat model](docs/threat-model.md) · [Hackathon submission](HACKATHON_SUBMISSION.md)
 
-All data is synthetic. No real targets, scanning, exploitation, or credential harvesting — see `docs/threat-model.md`.
+---
 
-## Docs
-`docs/architecture.md` · `docs/meta-integration.md` · `docs/evaluation.md` · `docs/demo-script.md` · `docs/threat-model.md` · `HACKATHON_SUBMISSION.md`
+*Built with Meta Muse Spark for the Meta Global AI Developer Hackathon 2026. All data is synthetic; the twin defends only itself.*

@@ -1,4 +1,5 @@
 *.db
+arena_memory.json
 .env
 __pycache__/
 .pytest_cache/

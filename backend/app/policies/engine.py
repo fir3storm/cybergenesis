@@ -49,6 +49,15 @@ NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor", "identit
 PATCHABLE = {"web-server", "app-server", "employee-workstation", "admin-workstation", "file-server"}
 SERVICE_DISABLEABLE = {"web-server", "app-server"}
 QUARANTINABLE = PATCHABLE | {"database", "identity-provider"}
+# role-based equivalents, so generated/custom twins (ids like "db-main") get the same protection
+NEVER_ISOLATE_TYPES = {"firewall", "database", "gateway", "sensor", "identity"}
+PATCHABLE_TYPES = {"web_server", "app_server", "workstation", "file_server"}
+SERVICE_DISABLEABLE_TYPES = {"web_server", "app_server"}
+IDENTITY_SCOPE_TYPES = {"identity", "workstation"}
+
+
+def _asset_type(twin: DigitalTwin, asset_id: str) -> str:
+    return next((a.get("asset_type", "") for a in twin.asset_defs if a["id"] == asset_id), "")
 
 
 def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -> PolicyDecision:
@@ -59,13 +68,16 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
     if asset_id not in twin.asset_ids():
         approved = False; reasons.append(f"asset '{asset_id}' does not exist in the twin")
         return PolicyDecision(action_type=action_type, asset_id=asset_id, approved=False, reasons=reasons)
-    if action_type == "isolate_asset" and asset_id in NEVER_ISOLATE:
+    atype = _asset_type(twin, asset_id)
+    core = asset_id in NEVER_ISOLATE or atype in NEVER_ISOLATE_TYPES
+    identity_scope = asset_id in ("identity-provider", "admin-workstation", "employee-workstation") or atype in IDENTITY_SCOPE_TYPES
+    if action_type == "isolate_asset" and core:
         approved = False; reasons.append(f"isolating core asset '{asset_id}' is prohibited")
     if action_type == "isolate_asset" and twin.isolated[asset_id]:
         approved = False; reasons.append("asset already isolated")
-    if action_type == "apply_patch" and asset_id not in PATCHABLE:
+    if action_type == "apply_patch" and not (asset_id in PATCHABLE or atype in PATCHABLE_TYPES):
         approved = False; reasons.append(f"apply_patch not permitted on '{asset_id}'")
-    if action_type == "disable_service" and asset_id not in SERVICE_DISABLEABLE:
+    if action_type == "disable_service" and not (asset_id in SERVICE_DISABLEABLE or atype in SERVICE_DISABLEABLE_TYPES):
         approved = False; reasons.append(f"disable_service not permitted on '{asset_id}'")
     if action_type == "block_connection":
         s, t = params.get("source", asset_id), params.get("target")
@@ -81,17 +93,17 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
             approved = False; reasons.append(f"unknown direction '{params.get('direction')}' (use both|egress|ingress)")
         elif not (twin.dir_active.get((s, t), False) or twin.dir_active.get((t, s), False)):
             approved = False; reasons.append("connection already blocked")
-    if action_type in ("revoke_session", "rotate_credential") and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):
+    if action_type in ("revoke_session", "rotate_credential") and not identity_scope:
         approved = False; reasons.append(f"{action_type} only permitted on identity/workstation assets")
-    if action_type == "quarantine_vlan" and asset_id in NEVER_ISOLATE:
+    if action_type == "quarantine_vlan" and core:
         approved = False; reasons.append(f"quarantining core asset '{asset_id}' is prohibited")
     if action_type == "kill_process" and twin.status.get(asset_id) not in ("compromised", "suspicious", "contained"):
         approved = False; reasons.append("kill_process requires a suspicious/compromised asset")
-    if action_type == "enforce_mfa" and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):
+    if action_type == "enforce_mfa" and not identity_scope:
         approved = False; reasons.append("enforce_mfa only permitted on identity/workstation assets")
     if action_type == "deploy_decoy" and params.get("kind", "honeypot_host") not in ("honeypot_host", "canary_credential", "canary_file"):
         approved = False; reasons.append("decoy kind not allowlisted")
-    if action_type == "restore_snapshot" and asset_id in NEVER_ISOLATE:
+    if action_type == "restore_snapshot" and core:
         approved = False; reasons.append("snapshot restore not permitted on core assets")
     if approved:
         reasons.append("allowlisted action, asset in simulation boundary, preconditions satisfied")

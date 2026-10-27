@@ -6,6 +6,7 @@ Each run owns its twin; the display twin syncs only when a run finishes.
 """
 
 import asyncio
+import secrets
 import time
 from datetime import datetime, timezone
 
@@ -48,13 +49,36 @@ def _check_cancel(run_id: str) -> bool:
     return run_id in _cancelled
 
 
-def resolve_approval(run_id: str, approved: bool) -> bool:
+def resolve_approval(run_id: str, approved: bool, via: str = "ui") -> bool:
     entry = _approvals.get(run_id)
-    if not entry:
+    if not entry or entry["event"].is_set():
         return False
     entry["approved"] = approved
+    entry["via"] = via
     entry["event"].set()
     return True
+
+
+def pending_approval(run_id: str) -> dict | None:
+    """Public view of a pending approval (includes the one-time mobile token)."""
+    entry = _approvals.get(run_id)
+    if not entry or entry["event"].is_set():
+        return None
+    if time.time() > entry.get("expires_at", 0):
+        return None  # token expires with the approval window
+    return {k: entry.get(k) for k in ("token", "label", "actions", "disrupted", "expires_at")}
+
+
+def resolve_approval_token(run_id: str, token: str, approved: bool) -> bool:
+    """Mobile approval: the token must match the pending approval and is single-use.
+    Expired (timed-out) or already-resolved approvals have no entry, so they fail."""
+    entry = _approvals.get(run_id)
+    if not entry or entry["event"].is_set() or not entry.get("token"):
+        return False
+    if not secrets.compare_digest(str(entry["token"]), str(token)) or time.time() > entry.get("expires_at", 0):
+        return False
+    entry["token"] = None  # single use
+    return resolve_approval(run_id, approved, via="mobile")
 
 
 def clear_pending_approvals() -> int:
@@ -539,14 +563,20 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                                                             "requires_human_approval": bool(needs_approval)})
                 else:
                     await set_state("AWAITING_APPROVAL", "Awaiting human approval for high-disruption defense", "defense_executor")
-                    entry = {"event": asyncio.Event(), "approved": None}
+                    entry = {"event": asyncio.Event(), "approved": None, "via": None,
+                             "token": secrets.token_urlsafe(16), "label": chosen_cand["label"],
+                             "actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est,
+                             "expires_at": time.time() + settings.approval_timeout_seconds}
                     _approvals[run_id] = entry
                     emit("approval_required", f"Human approval required: '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths. Approve in the UI.",
-                         agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est})
+                         agent="defense_executor", payload={"actions": entry["actions"], "disrupted": disrupted_est})
                     approval_timed_out = False
                     try:
                         await asyncio.wait_for(entry["event"].wait(), timeout=settings.approval_timeout_seconds)
                         approved_by_human = bool(entry["approved"])
+                        if entry["via"] == "mobile":
+                            emit("approval_mobile", f"Defense {'approved' if approved_by_human else 'rejected'} via mobile (one-time token)",
+                                 agent="defense_executor", payload={"via": "mobile", "approved": approved_by_human})
                     except asyncio.TimeoutError:
                         approved_by_human = False
                         approval_timed_out = True

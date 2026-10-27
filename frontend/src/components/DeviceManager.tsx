@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import type { Twin } from '../types'
 import CliTerminal from './CliTerminal'
+import { syntheticLoad } from './deviceLoad'
+
+export { syntheticLoad } from './deviceLoad'
 
 const TABS = ['Dashboard', 'Interfaces', 'VLANs', 'Routing', 'ACLs', 'Security Policies', 'NAT', 'VPN', 'Users/AAA', 'Management', 'Logs', 'CLI', 'Pending Changes'] as const
 
@@ -46,14 +49,20 @@ export default function DeviceManager({ assetId, twin, dialect }: { assetId: str
       </div>
       {msg && <p className="mt-2 text-xs text-cyan-300">{msg}</p>}
       <div className="mt-3 text-xs">
-        {tab === 'Dashboard' && (
-          <div className="grid grid-cols-3 gap-2">
-            {[['Status', asset?.status], ['Zone', asset?.zone], ['Posture', `${Math.round((asset?.posture ?? 0) * 100)}%`],
-              ['CPU (synthetic)', '23%'], ['Memory (synthetic)', '41%'], ['Sessions', String(asset?.connected.length ?? 0)]].map(([k, v]) => (
-              <div key={k} className="rounded bg-slate-900 p-2"><div className="text-slate-500">{k}</div><b>{v}</b></div>
-            ))}
-          </div>
-        )}
+        {tab === 'Dashboard' && (() => {
+          const load = syntheticLoad(asset?.status, assetId)
+          return (
+            <div>
+              <div className="grid grid-cols-3 gap-2">
+                {[['Status', asset?.status], ['Zone', asset?.zone], ['Posture', `${Math.round((asset?.posture ?? 0) * 100)}%`],
+                  ['CPU (synthetic)', `${load.cpu}%`], ['Memory (synthetic)', `${load.memory}%`], ['Sessions', String(asset?.connected.length ?? 0)]].map(([k, v]) => (
+                  <div key={k} className="rounded bg-slate-900 p-2"><div className="text-slate-300">{k}</div><b>{v}</b></div>
+                ))}
+              </div>
+              <p className="mt-1 font-mono text-[9px] text-slate-300">CPU/memory are synthetic values derived deterministically from twin status ({asset?.status ?? 'unknown'}), not real telemetry.</p>
+            </div>
+          )
+        })()}
         {tab === 'Interfaces' && (
           <table className="w-full text-left"><thead><tr className="text-slate-500"><th>Name</th><th>Peer</th><th>IP</th><th>Zone</th><th>Action</th></tr></thead>
             <tbody>{((config?.interfaces ?? []) as { name: string; peer?: string; ip?: string; zone?: string }[]).map((i) => (

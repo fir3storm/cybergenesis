@@ -2,7 +2,7 @@ import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode 
 import { motion } from 'framer-motion'
 import {
   Activity, BarChart3, Bot, Boxes, Bug, Cpu, Database, Download, FlaskConical, Folder, Globe, KeyRound, MessageSquareText, Monitor, PenTool, Play, Radar, RotateCcw, Route,
-  Settings as SettingsIcon, Server, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText,
+  Settings as SettingsIcon, Server, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText, Trophy,
 } from 'lucide-react'
 
 export const ASSET_TYPE_ICON: Record<string, ReactNode> = {
@@ -18,8 +18,12 @@ import { TwinView, Twin2D, AttackChain, MapFocusToggle, AssetPanel, SkeletonTwin
 import { CandidatesPanel, ResilienceCurve, BattlePanel } from './views/panels'
 import { ConversationMap, CommanderPlanView, STAGES } from './views/agents'
 import { BattleView } from './views/battle'
+import { ArenaView } from './views/arena'
 import { BenchmarkView, ScorecardsView } from './views/benchmark'
 import { EvidenceView } from './views/evidence'
+import { ProofCard } from './views/proof'
+import { TimeMachine } from './views/timemachine'
+import { MobileApprovalQR } from './views/mobileApproval'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
 const TwinDesigner = lazy(() => import('./components/TwinDesigner'))
@@ -159,6 +163,29 @@ export default function App() {
   const [tourStep, setTourStep] = useState<number | null>(null)
   const [whatIf, setWhatIf] = useState('what if the admin laptop is phished?')
   const [whatIfMsg, setWhatIfMsg] = useState<string | null>(null)
+  const [whatIfCard, setWhatIfCard] = useState<{
+    id: string; name: string; source: string; target: string; steps: number
+    validation: string; runStatus: 'starting' | 'live' | 'failed'; runError?: string
+  } | null>(null)
+  const openDevice = useOpenDevice()
+
+  // Window-manager bridge (F8c #1): TwinScene (3D), Twin2D and the designer
+  // dispatch `open-device` with an asset id; open the same device window
+  // here, where the twin views are owned. No listener existed before.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<unknown>).detail
+      const id = typeof detail === 'string'
+        ? detail
+        : (detail as { asset_id?: unknown; id?: unknown } | null)?.asset_id ?? (detail as { id?: unknown } | null)?.id
+      if (typeof id !== 'string' || !id) return
+      const twin = useStore.getState().twin
+      if (!twin) return
+      openDevice(id, twin, twin.assets.find((a) => a.id === id)?.name)
+    }
+    window.addEventListener('open-device', handler)
+    return () => window.removeEventListener('open-device', handler)
+  }, [openDevice])
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
 
@@ -229,12 +256,19 @@ export default function App() {
     }
   }
 
-  async function runCustomExperiment(customScenarioId: string, customTwinId: string | null) {
-    s.set({ error: null, events: [], results: null, runState: 'SCENARIO_SELECTED', view: 'experiment', replayBaseline: null, replayVerdict: null })
+  /**
+   * Create + run a custom experiment and navigate to the Experiment view
+   * where the run is live. Throws on failure so callers (what-if auto-run)
+   * can report honestly inline; approvals during the run are handled by
+   * the existing approval flow — no gate is bypassed here.
+   */
+  async function launchCustomExperiment(customScenarioId: string, customTwinId: string | null): Promise<void> {
+    s.set({ error: null, events: [], results: null, runState: 'SCENARIO_SELECTED', replayBaseline: null, replayVerdict: null })
+    const created = await api.createCustomExperiment({ custom_scenario_id: customScenarioId, custom_twin_id: customTwinId, seed: 42 })
+    s.set({ runId: created.id })
+    await api.runExperiment(created.id, Math.round(350 / speed))
+    s.set({ view: 'experiment' })
     try {
-      const created = await api.createCustomExperiment({ custom_scenario_id: customScenarioId, custom_twin_id: customTwinId, seed: 42 })
-      s.set({ runId: created.id })
-      await api.runExperiment(created.id, Math.round(350 / speed))
       wsRef.current?.close()
       const ws = new WebSocket(`${WS}/ws/experiments/${created.id}`)
       wsRef.current = ws
@@ -245,10 +279,55 @@ export default function App() {
         if (ev.event_type === 'completed' || ev.event_type === 'failed') void refreshResults(created.id)
       }
       ws.onerror = () => s.set({ error: 'WebSocket disconnected — polling fallback active' })
-      stopPoll()
-      pollRef.current = window.setInterval(() => void refreshResults(created.id), 1500)
+    } catch {
+      // Live updates fall back to polling below; this is not a run failure.
+      s.set({ error: 'WebSocket disconnected — polling fallback active' })
+    }
+    stopPoll()
+    pollRef.current = window.setInterval(() => void refreshResults(created.id), 1500)
+  }
+
+  async function runCustomExperiment(customScenarioId: string, customTwinId: string | null) {
+    try {
+      await launchCustomExperiment(customScenarioId, customTwinId)
     } catch (e) {
-      s.set({ error: `Custom experiment failed to start: ${(e as Error).message}`, runState: 'FAILED' })
+      s.set({ error: `Custom experiment failed to start: ${(e as Error).message}`, runState: 'FAILED', view: 'experiment' })
+    }
+  }
+
+  /** Welcome "Ask a what-if" (F8c #6): inline summary card + auto-run. */
+  async function askWhatIf() {
+    setWhatIfMsg('Muse Spark is writing the scenario…')
+    setWhatIfCard(null)
+    let sc: Awaited<ReturnType<typeof api.fromText>>
+    try {
+      sc = await api.fromText(whatIf, 'AI What-If Scenario')
+    } catch (e) {
+      setWhatIfMsg(`Failed honestly: ${(e as Error).message}`)
+      return
+    }
+    const def = sc.definition as { source_asset?: unknown; target_asset?: unknown; attack_steps?: unknown; invariant?: unknown }
+    const steps = Array.isArray(def.attack_steps) ? def.attack_steps.length : 0
+    const card = {
+      id: sc.id,
+      name: sc.name,
+      source: typeof def.source_asset === 'string' ? def.source_asset : '—',
+      target: typeof def.target_asset === 'string' ? def.target_asset : '—',
+      steps,
+      validation: `Validated ✓ — passed backend allowlist checks (${steps} attack step${steps === 1 ? '' : 's'}, source/target in twin)`,
+      runStatus: 'starting' as const,
+    }
+    setWhatIfCard(card)
+    setWhatIfMsg(`Scenario "${sc.name}" created and validated — auto-running it now…`)
+    try {
+      await launchCustomExperiment(sc.id, null)
+      setWhatIfCard({ ...card, runStatus: 'live' })
+      setWhatIfMsg(`Scenario "${sc.name}" is running — follow it live in the Experiment view.`)
+    } catch (e) {
+      const message = (e as Error).message
+      setWhatIfCard({ ...card, runStatus: 'failed', runError: message })
+      setWhatIfMsg(`Scenario created and validated, but auto-run failed honestly: ${message}`)
+      s.set({ view: 'welcome', runState: 'IDLE' })
     }
   }
 
@@ -342,6 +421,7 @@ export default function App() {
     { id: 'welcome', label: 'Welcome', icon: <Home size={15} />, group: 'RUN' },
     { id: 'experiment', label: 'Experiment', icon: <FlaskConical size={15} />, group: 'RUN' },
     { id: 'battle', label: 'Battle', icon: <Swords size={15} />, group: 'RUN' },
+    { id: 'arena', label: 'Arena', icon: <Trophy size={15} />, group: 'RUN' },
     { id: 'twin', label: 'Living Twin', icon: <Globe size={15} />, group: 'INSPECT' },
     { id: 'attackpath', label: 'Attack Path', icon: <Route size={15} />, group: 'INSPECT' },
     { id: 'agents', label: 'Agents', icon: <Bot size={15} />, group: 'INSPECT' },
@@ -399,13 +479,24 @@ export default function App() {
           <div className="mx-auto mt-8 flex max-w-xl gap-2">
             <input value={whatIf} onChange={(e) => setWhatIf(e.target.value)} aria-label="What-if scenario prompt"
               className="flex-1 rounded-lg border border-violet-700 bg-slate-900 px-3 py-2 text-sm" />
-            <button onClick={() => {
-              setWhatIfMsg('Muse Spark is writing the scenario…')
-              api.fromText(whatIf, 'AI What-If Scenario').then(() => { setWhatIfMsg('Scenario created and validated — opening the Playbook to run it.'); s.set({ view: 'playbook' }) })
-                .catch((e) => setWhatIfMsg(`Failed honestly: ${(e as Error).message}`))
-            }} className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-bold">✨ Ask a what-if</button>
+            <button onClick={() => void askWhatIf()} className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-bold">✨ Ask a what-if</button>
           </div>
           {whatIfMsg && <p className="mt-1 text-xs text-violet-300">{whatIfMsg}</p>}
+          {whatIfCard && (
+            <section aria-label="What-if scenario summary" className="mx-auto mt-3 max-w-xl rounded-xl border border-violet-700/70 bg-violet-950/30 p-4 text-left">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <b className="text-sm text-violet-100">{whatIfCard.name}</b>
+                <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${whatIfCard.runStatus === 'failed' ? 'border-red-500 text-red-300' : 'border-emerald-500 text-emerald-300'}`}>
+                  {whatIfCard.runStatus === 'live' ? '● AUTO-RUN LIVE' : whatIfCard.runStatus === 'failed' ? 'AUTO-RUN FAILED' : 'AUTO-RUN STARTING…'}
+                </span>
+              </div>
+              <p className="mt-1 font-mono text-xs text-slate-200">{whatIfCard.source} → {whatIfCard.target} · {whatIfCard.steps} attack step{whatIfCard.steps === 1 ? '' : 's'}</p>
+              <p className="mt-1 text-xs text-emerald-300">{whatIfCard.validation}</p>
+              {whatIfCard.runStatus === 'live' && <p className="mt-1 text-xs text-slate-300">Running now in the Experiment view — approvals, if any, use the normal human-approval gate.</p>}
+              {whatIfCard.runStatus === 'failed' && <p className="mt-1 text-xs text-red-300">Auto-run failed honestly: {whatIfCard.runError}. The scenario was still created and validated.</p>}
+              <button onClick={() => s.set({ view: 'playbook' })} className="mt-2 text-xs text-violet-300 underline">Open in Playbook →</button>
+            </section>
+          )}
           <p className="mt-10 text-xs font-mono text-slate-500">Powered by Meta Muse Spark · Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026</p>
           <div className="mx-auto mt-8 h-[380px] max-w-5xl rounded-2xl border border-cyan-900 overflow-hidden">
             {s.twin ? <TwinView twin={s.twin} /> : <div className="p-8 text-slate-400">Loading twin… (backend on :8000 required)</div>}
@@ -586,6 +677,7 @@ export default function App() {
                     <div className={`text-2xl font-black ${s.results.verification.outcome === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`}>{s.results.verification.outcome}</div>
                     <p className="text-xs text-slate-400">Effectiveness {String(s.results.verification.metrics.defense_effectiveness_pct)}% · disrupted legit paths: {String(s.results.verification.metrics.operational_impact_disrupted_legit_paths)}</p>
                     <button onClick={() => s.set({ view: 'verification' })} className="mt-1 text-xs text-cyan-300 underline">Open Verification Lab →</button>
+                    <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
                   </>
                 ) : <p className="text-xs text-slate-500">No outcome yet. A failed or rejected defense will show FAIL here — honestly.</p>}
               </section>
@@ -718,6 +810,7 @@ export default function App() {
               </ul>
               <ResilienceCurve />
               <div className="mt-4"><CandidatesPanel /></div>
+              <TimeMachine />
               <p className="mt-4 text-slate-300 font-semibold">CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={() => void runDemo(s.scenarioId, true)} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><RotateCcw size={13} /> Replay with Seed 42</button>
@@ -725,6 +818,7 @@ export default function App() {
                 <span className="text-xs text-slate-400">Deterministic replay: identical seed produces identical telemetry (proven in backend tests).</span>
               </div>
               {s.replayVerdict && <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">{s.replayVerdict}</p>}
+              <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
             </div>
           )}
         </main>
@@ -734,6 +828,7 @@ export default function App() {
       {s.view === 'playbook' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Attack Playbook…</div>}><AttackPlaybook onRunCustom={(sid, tid) => void runCustomExperiment(sid, tid)} /></Suspense>}
       {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
       {s.view === 'battle' && <BattleView onRunBattle={() => void runDemo('red_vs_blue_battle')} />}
+      {s.view === 'arena' && <ArenaView />}
       {s.view === 'benchmark' && <BenchmarkView />}
       {s.view === 'scorecards' && <ScorecardsView />}
       {s.view === 'evidence' && <EvidenceView />}
@@ -786,6 +881,7 @@ export default function App() {
               <button onClick={() => void api.approve(s.runId!, true)} className="rounded bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950">Approve defense</button>
               <button onClick={() => void api.deny(s.runId!)} className="rounded border border-red-500 px-4 py-2 text-sm text-red-300">Reject</button>
             </div>
+            <MobileApprovalQR runId={s.runId} />
           </div>
         </div>
       )}
