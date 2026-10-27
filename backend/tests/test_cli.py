@@ -26,10 +26,24 @@ def test_cli_show_commands_and_acl_diff():
 
 
 def test_cli_render_roundtrip_contains_config():
+    from app.cli.engine import parse_config_text
+
     twin = orchestrator.TWIN
     cfg = twin.device_configs["database"]
     text = render_config("bash", cfg)
     assert cfg["hostname"] in text
+    back = parse_config_text("bash", text)
+    assert back["hostname"] == cfg["hostname"]
+    assert [i["name"] for i in back["interfaces"]] == [i["name"] for i in cfg["interfaces"]]
+    assert [i["ip"] for i in back["interfaces"]] == [i["ip"] for i in cfg["interfaces"]]
+
+
+def test_cli_more_dialects_show_commands():
+    twin = orchestrator.TWIN
+    for asset in ("firewall", "web-server", "database", "employee-workstation"):
+        for cmd in ("show interfaces", "show ip route", "show access-list", "show version", "?"):
+            out = execute(twin, asset, cmd)
+            assert out["output"], (asset, cmd)
 
 
 def test_verified_commit_rejects_reopening():

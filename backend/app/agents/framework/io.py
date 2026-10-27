@@ -22,6 +22,8 @@ class InvestigateIn(BaseModel):
 class ProposeIn(BaseModel):
     scenario: dict = {}
     hypothesis: dict = {}
+    past_examples: list[str] = []
+    extra_context: str = ""
 
 
 class ExecuteIn(BaseModel):

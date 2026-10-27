@@ -132,6 +132,37 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         board = Blackboard(run_id, persist=_persist_message, stream=_stream_message)
 
+        # framework routing: investigator / strategist / red planner run THROUGH their adapters,
+        # so AgentResult carries framework mode, fallback_reason, prompt hash and token accounting
+        from app.agents.framework.adapters import build_agent as _fw_build
+        from app.agents.framework.base import AgentContext as _FwCtx
+        from app.agents.framework import io as _fw_io
+
+        _baseline_ref: dict = {}
+
+        def _fw_ctx(telemetry_now=None):
+            return _FwCtx(run_id=run_id, twin=twin, scenario=scenario, telemetry=telemetry_now or [],
+                          baseline_twin=_baseline_ref.get("twin"), bus=board)
+
+        async def _fw_investigate(scn, obs_obj, telemetry_now):
+            res = await _fw_build("incident_investigator").run(
+                _fw_ctx(telemetry_now), _fw_io.InvestigateIn(scenario=scn, telemetry=telemetry_now))
+            out = res.output
+            out.mode = res.mode
+            if res.fallback_reason and not out.fallback_reason:
+                out.fallback_reason = res.fallback_reason
+            return out
+
+        async def _fw_propose_with_context(scn, hyp_obj, extra_context=""):
+            res = await _fw_build("defense_strategist").run(
+                _fw_ctx(), _fw_io.ProposeIn(scenario=scn, hypothesis=hyp_obj.model_dump(),
+                                            past_examples=past_examples, extra_context=extra_context))
+            out = res.output
+            out.mode = res.mode
+            if res.fallback_reason and not out.fallback_reason:
+                out.fallback_reason = res.fallback_reason
+            return out
+
         async def set_state(state, msg, agent=None):
             run.state = state; db.commit()
             emit("state", msg, agent=agent, payload={"state": state, "mode": mode})
@@ -157,6 +188,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             emit("provider_fallback", f"Commander unavailable, default backbone in use: {type(e).__name__}: {e}", agent="incident_commander")
         await set_state("SCENARIO_SELECTED", f"Scenario selected: {scenario['name']}", "adversary_simulator")
         baseline_twin = twin.clone()
+        _baseline_ref["twin"] = baseline_twin
         db.add(models.AssetStateSnapshot(run_id=run_id, label="baseline", snapshot=twin.snapshot())); db.commit()
         emit("snapshot", "Baseline snapshot saved", payload={"label": "baseline"})
 
@@ -210,7 +242,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             past_examples = []
 
         await set_state("INVESTIGATING", "Meta Muse Spark investigating evidence" if mode == "live" else "Investigating evidence (OFFLINE)", "incident_investigator")
-        hyp = await agents.investigate(scenario, obs, run_id, telemetry=telemetry, twin=twin)
+        hyp = await _fw_investigate(scenario, obs, telemetry)
         if hyp.fallback_reason:
             emit("provider_fallback", f"Investigator fell back to offline: {hyp.fallback_reason}", agent="incident_investigator")
         db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp.hypothesis,
@@ -240,8 +272,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         async def defend(hyp_obj, round_num: int, extra_context: str = "") -> tuple[list, object]:
             """Propose -> simulate -> AI final choice -> critic -> policy -> [approval] -> apply. Fully recorded."""
             await set_state("DEFENSE_PROPOSED", f"[round {round_num}] Defense strategist proposing countermeasure", "defense_strategist")
-            proposal = await agents.propose_defense(scenario, hyp_obj, run_id, twin=twin,
-                                                    past_examples=past_examples, extra_context=extra_context)
+            proposal = await _fw_propose_with_context(scenario, hyp_obj, extra_context)
             if proposal.fallback_reason:
                 emit("provider_fallback", f"Strategist fell back to offline: {proposal.fallback_reason}", agent="defense_strategist")
             db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
@@ -297,8 +328,8 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                     if verdict["approved"]:
                         emit("debate", f"DEBATE — Red: '{critic['assessment']}' via {' -> '.join(critic['bypass'])}. Blue gets one revision.",
                              agent="adversary_simulator", payload={"critic": critic, "campaign_valid": True})
-                        proposal = await agents.propose_defense(
-                            scenario, hyp_obj, run_id, twin=twin, past_examples=past_examples,
+                        proposal = await _fw_propose_with_context(
+                            scenario, hyp_obj,
                             extra_context=(f"RED CRITIC: your previous defense can be bypassed via {' -> '.join(critic['bypass'])}. "
                                            f"Assessment: {critic['assessment']}. Propose a revised defense that also covers this bypass."))
                         db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
@@ -452,7 +483,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                             "invariant": f"No path from {plan.foothold} to {plan.objective}"}
                 baseline_result = {"objective_blocked": False, "path": chosen_path}
                 obs2 = agents.observe(red_telemetry)
-                hyp2 = await agents.investigate(scenario, obs2, run_id, telemetry=red_telemetry, twin=twin)
+                hyp2 = await _fw_investigate(scenario, obs2, red_telemetry)
                 db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp2.hypothesis,
                                             justification="; ".join(hyp2.confirmed), confidence=hyp2.confidence, model=hyp2.model,
                                             mode=hyp2.mode, evidence_refs=hyp2.evidence_refs, asset_ids=hyp2.affected_assets,

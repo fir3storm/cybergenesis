@@ -93,13 +93,18 @@ export default function TwinDesigner() {
     return [{ name: 'eth0', speed: '1G', media: 'copper' }, { name: 'eth1', speed: '1G', media: 'copper' }]
   }
 
+  const [portDragFrom, setPortDragFrom] = useState<string | null>(null)
+  async function openPicker(aId: string, bId: string) {
+    const a = assets.find((x) => x.id === aId)!
+    const b = assets.find((x) => x.id === bId)!
+    const [aPorts, bPorts] = await Promise.all([portsFor(a), portsFor(b)])
+    setPicker({ a: a.id, b: b.id, aPorts, bPorts, aPort: aPorts[0]?.name ?? '', bPort: bPorts[0]?.name ?? '' })
+  }
+
   async function onNodeClick(id: string) {
     if (!connectFrom) { setConnectFrom(id); setMsg(`Connect mode: click a second asset to link from ${id} (click again to cancel)`); return }
     if (connectFrom === id) { setConnectFrom(null); return }
-    const a = assets.find((x) => x.id === connectFrom)!
-    const b = assets.find((x) => x.id === id)!
-    const [aPorts, bPorts] = await Promise.all([portsFor(a), portsFor(b)])
-    setPicker({ a: a.id, b: b.id, aPorts, bPorts, aPort: aPorts[0]?.name ?? '', bPort: bPorts[0]?.name ?? '' })
+    await openPicker(connectFrom, id)
     setConnectFrom(null)
   }
 
@@ -259,7 +264,7 @@ export default function TwinDesigner() {
           ))}
         </section>
 
-        <section className="lg:col-span-6" onDragOver={(e) => e.preventDefault()}
+        <section className="relative lg:col-span-6" onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault()
             const raw = e.dataTransfer.getData('text/device-id')
@@ -277,12 +282,26 @@ export default function TwinDesigner() {
             })}
             {assets.map((a) => (
               <g key={a.id} transform={`translate(${sx(a.pos[0])},${sy(a.pos[2])})`}
-                onPointerDown={() => { drag.current = { id: a.id } }} onClick={() => onNodeClick(a.id)} style={{ cursor: 'grab' }}>
+                onPointerDown={() => { drag.current = { id: a.id } }} onClick={() => onNodeClick(a.id)}
+                onPointerUp={() => { if (portDragFrom && portDragFrom !== a.id) { void openPicker(portDragFrom, a.id); setPortDragFrom(null) } }}
+                onDoubleClick={() => window.dispatchEvent(new CustomEvent('open-device', { detail: a.id }))}
+                style={{ cursor: 'grab' }}>
                 <circle r={17} fill={connectFrom === a.id ? '#f59e0b' : '#0e7490'} stroke="#22d3ee" strokeWidth={connectFrom === a.id ? 3 : 1.5} />
                 <text textAnchor="middle" dy={4} fill="#e0f2fe" fontSize={9} fontFamily="monospace">{a.id.slice(0, 10)}</text>
                 <text textAnchor="middle" dy={30} fill="#94a3b8" fontSize={9}>{a.name}</text>
+                <circle cx={21} cy={0} r={5.5} fill="#22d3ee" stroke="#083344" style={{ cursor: 'crosshair' }}
+                  onPointerDown={(e) => { e.stopPropagation(); setPortDragFrom(a.id); setMsg(`Drag from ${a.id}'s port handle onto another device…`) }}>
+                  <title>Drag to another device to cable</title>
+                </circle>
               </g>
             ))}
+          </svg>
+          <svg viewBox="0 0 720 400" className="pointer-events-none absolute bottom-2 right-2 w-36 rounded border border-slate-700 bg-slate-950/85" aria-label="Minimap">
+            {conns.map((c, i) => {
+              const a = assets.find((x) => x.id === c.source); const b = assets.find((x) => x.id === c.target)
+              return a && b ? <line key={i} x1={sx(a.pos[0])} y1={sy(a.pos[2])} x2={sx(b.pos[0])} y2={sy(b.pos[2])} stroke="#155e75" strokeWidth={3} /> : null
+            })}
+            {assets.map((a) => <circle key={a.id} cx={sx(a.pos[0])} cy={sy(a.pos[2])} r={9} fill="#22d3ee" />)}
           </svg>
           <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-500"><MousePointer2 size={11} /> Drag nodes to arrange · <Waypoints size={11} /> click one node, then another, to connect (port picker opens)</p>
           {picker && (

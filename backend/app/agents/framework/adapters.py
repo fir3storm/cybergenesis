@@ -60,7 +60,8 @@ class DefenseStrategistAgent(Agent):
         from app.schemas import IncidentHypothesis
 
         hyp = IncidentHypothesis(**inp.hypothesis) if inp.hypothesis else IncidentHypothesis(hypothesis="incident")
-        res = await agents.propose_defense(inp.scenario or ctx.scenario, hyp, ctx.run_id, twin=ctx.twin)
+        res = await agents.propose_defense(inp.scenario or ctx.scenario, hyp, ctx.run_id, twin=ctx.twin,
+                                           past_examples=inp.past_examples, extra_context=inp.extra_context)
         if res.mode != "live":
             raise RuntimeError(res.fallback_reason or "provider unavailable")
         return res
@@ -69,7 +70,8 @@ class DefenseStrategistAgent(Agent):
         from app.schemas import IncidentHypothesis
 
         hyp = IncidentHypothesis(**inp.hypothesis) if inp.hypothesis else IncidentHypothesis(hypothesis="incident")
-        return await agents.propose_defense(inp.scenario or ctx.scenario, hyp, ctx.run_id, twin=ctx.twin)
+        return await agents.propose_defense(inp.scenario or ctx.scenario, hyp, ctx.run_id, twin=ctx.twin,
+                                            past_examples=inp.past_examples, extra_context=inp.extra_context)
 
 
 class DefenseExecutorAgent(Agent):

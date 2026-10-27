@@ -35,6 +35,38 @@ def render_config(dialect: str, cfg: dict) -> str:
     return "\n".join(lines)
 
 
+def parse_config_text(dialect: str, text: str) -> dict:
+    """Parse rendered running-config back into config fields (round-trip for supported features)."""
+    cfg: dict = {"interfaces": [], "acls": [], "users": [], "mgmt": {"telnet": False, "snmp_community": None}}
+    current = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("hostname "):
+            cfg["hostname"] = line.split(None, 1)[1]
+        elif line.startswith("interface "):
+            current = {"name": line.split(None, 1)[1], "enabled": True, "ip": "", "description": ""}
+            cfg["interfaces"].append(current)
+        elif line.startswith("shutdown") and current is not None:
+            current["enabled"] = False
+        elif line.startswith("no shutdown") and current is not None:
+            current["enabled"] = True
+        elif line.startswith("ip address") and current is not None:
+            current["ip"] = line.split()[2].split("/")[0]
+        elif line.startswith("description") and current is not None:
+            current["description"] = line[len("description"):].strip()
+        elif line.startswith("access-list "):
+            parts = line.split()
+            cfg["acls"].append({"name": parts[1], "entries": [{"action": parts[2], "dst": parts[-1]}]})
+        elif line.startswith("username "):
+            parts = line.split()
+            cfg["users"].append({"name": parts[1], "mfa": "on" in line})
+        elif "transport input telnet" in line:
+            cfg["mgmt"]["telnet"] = True
+        elif line.startswith("snmp-server community"):
+            cfg["mgmt"]["snmp_community"] = line.split()[2]
+    return cfg
+
+
 def parse_command(dialect: str, cfg: dict, command: str) -> tuple[str, dict | None]:
     """Returns (output, staged_diff_or_None). Abbreviations: unique prefixes expanded by callers' help."""
     cmd = command.strip()
