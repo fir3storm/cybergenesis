@@ -128,6 +128,24 @@ def test_f2_lru_cache_bounded():
     assert cache_size() <= 256
 
 
+def test_f7b_reads_are_pure_and_manual_edits_survive():
+    from app.simulation.twin import DigitalTwin
+
+    t = DigitalTwin()
+    cfg = t.device_configs["file-server"]
+    cfg["weaknesses"] = ["manual_weakness_marker"]
+    cfg["services"][0]["enabled"] = False  # per-service edit must be preserved
+    t.vulns["file-server"] = ["manual_weakness_marker"]
+    before = t.config_hash()
+    for _ in range(10):
+        t.find_path("employee-workstation", "database")
+        t.explain_path("internet", "database")
+        t.live_graph("database")
+    assert t.config_hash() == before, "read paths must not mutate config state"
+    assert t.device_configs["file-server"]["weaknesses"] == ["manual_weakness_marker"]
+    assert t.device_configs["file-server"]["services"][0]["enabled"] is False
+
+
 def test_determinism_hash():
     configs, cables, _ = base()
     assert content_hash(configs, cables) == content_hash(configs, cables)

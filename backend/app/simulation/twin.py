@@ -200,25 +200,63 @@ class DigitalTwin:
                         "media": "copper", "pairs": pairs})
         return out
 
-    def _sync_configs_from_flags(self) -> None:
-        """Old twin flags are inputs only: sync them INTO device_configs before compiling."""
-        for aid, cfg in self.device_configs.items():
-            cfg["isolated"] = bool(self.isolated.get(aid, False))
-            cfg["quarantine_vlan"] = 999 if aid in self.quarantined else None
-            cfg["weaknesses"] = list(self.vulns.get(aid, []))
-            cfg["patches"] = {"level": "current", "missing": []} if not self.vulns.get(aid) else \
-                {"level": cfg.get("patches", {}).get("level", "behind"), "missing": cfg.get("patches", {}).get("missing", ["CVE-SYNTH-001"])}
-            for svc in cfg.get("services", []):
-                svc["enabled"] = not self.service_disabled.get(aid, False)
+    def set_state(self, asset: str, field: str, value) -> None:
+        """THE single mutator for twin state: legacy flags and device_configs always
+        change together, atomically. Read paths (find_path/explain/live_graph) never call this."""
+        cfg = self.device_configs.get(asset)
+        if field == "isolated":
+            self.isolated[asset] = bool(value)
+            if cfg is not None:
+                cfg["isolated"] = bool(value)
+        elif field == "status":
+            self.status[asset] = value
+        elif field == "quarantine_vlan":
+            if value:
+                self.quarantined.add(asset)
+            else:
+                self.quarantined.discard(asset)
+            if cfg is not None:
+                cfg["quarantine_vlan"] = 999 if value else None
+        elif field == "weaknesses":
+            self.vulns[asset] = list(value or [])
+            if cfg is not None:
+                cfg["weaknesses"] = list(value or [])
+                cfg["patches"] = {"level": "current", "missing": []} if not value else \
+                    {"level": cfg.get("patches", {}).get("level", "behind"),
+                     "missing": cfg.get("patches", {}).get("missing", ["CVE-SYNTH-001"])}
+        elif field == "service_disabled":
+            self.service_disabled[asset] = bool(value)
+            if cfg is not None:
+                for svc in cfg.get("services", []):
+                    svc["enabled"] = not bool(value)
+        elif field == "service_enabled":  # (service_name, enabled) — per-service, preserved
+            name, enabled = value
+            if cfg is not None:
+                for svc in cfg.get("services", []):
+                    if svc["name"] == name:
+                        svc["enabled"] = bool(enabled)
+        elif field == "interface_enabled":  # (interface_name, enabled)
+            name, enabled = value
+            if cfg is not None:
+                for iface in cfg.get("interfaces", []):
+                    if iface["name"] == name:
+                        iface["enabled"] = bool(enabled)
+        elif field == "dir_active":  # ((a, b), enabled)
+            pair, enabled = value
+            self.dir_active[pair] = bool(enabled)
+            self.edge_active[frozenset(pair)] = bool(self.dir_active.get((pair[0], pair[1]), False)
+                                                    or self.dir_active.get((pair[1], pair[0]), False))
+        else:
+            raise ValueError(f"unknown twin state field: {field}")
 
     def _categories(self) -> dict[str, str]:
         return {a["id"]: ("firewall" if a["asset_type"] == "firewall" else a["asset_type"]) for a in self.asset_defs}
 
     def _compiled(self, exclude: set[str] | None = None):
+        """Pure: compiles copies of the current configs. Never mutates twin state."""
         from app.netmodel.compiler import compile_twin
         from app.netmodel.config import DeviceConfig
 
-        self._sync_configs_from_flags()
         configs = {}
         for aid, cfg in self.device_configs.items():
             c = DeviceConfig(**cfg)
@@ -381,10 +419,11 @@ class DigitalTwin:
             raise ValueError(f"missing asset: {asset_id}")
         before = self.status[asset_id]
         if action_type == "isolate_asset":
-            self.isolated[asset_id] = True; self.status[asset_id] = "contained"
+            self.set_state(asset_id, "isolated", True)
+            self.set_state(asset_id, "status", "contained")
             for k in list(self.dir_active):
                 if asset_id in k:
-                    self.dir_active[k] = False
+                    self.set_state(asset_id, "dir_active", (k, False))
             self.containment.append(f"isolate:{asset_id}")
         elif action_type == "block_connection":
             s, t = params.get("source", asset_id), params.get("target")
@@ -392,47 +431,48 @@ class DigitalTwin:
                 raise ValueError("missing connection")
             direction = params.get("direction", "both")
             if direction in ("outbound", "egress"):  # one-way egress control: block s->t only, t->s keeps flowing
-                self.dir_active[(s, t)] = False
+                self.set_state(asset_id, "dir_active", ((s, t), False))
                 self.containment.append(f"block_outbound:{s}->{t}")
             elif direction == "ingress":  # block only the reverse arc t->s
-                self.dir_active[(t, s)] = False
+                self.set_state(asset_id, "dir_active", ((t, s), False))
                 self.containment.append(f"block_ingress:{s}->{t}")
             else:
-                self.dir_active[(s, t)] = False; self.dir_active[(t, s)] = False
+                self.set_state(asset_id, "dir_active", ((s, t), False))
+                self.set_state(asset_id, "dir_active", ((t, s), False))
                 self.containment.append(f"block:{s}->{t}")
-            self.edge_active[frozenset((s, t))] = self.dir_active.get((s, t), False) or self.dir_active.get((t, s), False)
-            self.status[asset_id] = "remediated" if self.status[asset_id] != "compromised" else "contained"
-        elif action_type == "revoke_session":
+            self.set_state(asset_id, "status", "remediated" if self.status[asset_id] != "compromised" else "contained")
+        elif action_type in ("revoke_session", "rotate_credential"):
             ident = self._identity_for(params, asset_id)
+            if action_type == "rotate_credential":
+                self.identities[ident]["credential_version"] += 1
             self.identities[ident]["session_active"] = False
             self.identities[ident]["compromised"] = False
-            self.containment.append(f"revoke:{ident}")
-            self.status[asset_id] = "remediated"
-        elif action_type == "rotate_credential":
-            ident = self._identity_for(params, asset_id)
-            self.identities[ident]["credential_version"] += 1
-            self.identities[ident]["compromised"] = False
-            self.identities[ident]["session_active"] = False
-            self.containment.append(f"rotate:{ident}")
-            self.status[asset_id] = "remediated"
+            for u in self.device_configs[asset_id].get("users", []):
+                if u.get("name") == ident:
+                    u["credential_version"] = self.identities[ident]["credential_version"]
+                    for sess in u.get("sessions", []):
+                        sess["active"] = False; sess["compromised"] = False
+            self.containment.append(f"{'revoke' if action_type == 'revoke_session' else 'rotate'}:{ident}")
+            self.set_state(asset_id, "status", "remediated")
         elif action_type == "apply_patch":
-            self.vulns[asset_id] = []; self.status[asset_id] = "remediated"
+            self.set_state(asset_id, "weaknesses", [])
+            self.set_state(asset_id, "status", "remediated")
             self.containment.append(f"patch:{asset_id}")
         elif action_type == "disable_service":
-            self.service_disabled[asset_id] = True; self.status[asset_id] = "contained"
+            self.set_state(asset_id, "service_disabled", True)
+            self.set_state(asset_id, "status", "contained")
             self.containment.append(f"disable_service:{asset_id}")
         elif action_type == "quarantine_vlan":
-            self.quarantined.add(asset_id); self.status[asset_id] = "contained"
-            self.device_configs[asset_id]["quarantine_vlan"] = 999
+            self.set_state(asset_id, "quarantine_vlan", True)
+            self.set_state(asset_id, "status", "contained")
             self.device_configs[asset_id]["interfaces"] = [
                 {**i, "vlan": 999, "mode": "access"} for i in self.device_configs[asset_id]["interfaces"]]
             self.containment.append(f"quarantine:{asset_id}")
         elif action_type == "harden_mgmt":
-            cfg = self.device_configs[asset_id]
-            cfg["mgmt"] = {"telnet": False, "ssh": True, "http": False, "https": True, "snmp_community": None}
-            cfg["weaknesses"] = [w for w in cfg["weaknesses"] if w not in ("telnet_enabled", "snmp_public_community")]
-            self.vulns[asset_id] = [w for w in self.vulns[asset_id] if w not in ("telnet_enabled", "snmp_public_community")]
-            self.status[asset_id] = "remediated"
+            self.device_configs[asset_id]["mgmt"] = {"telnet": False, "ssh": True, "http": False, "https": True, "snmp_community": None}
+            self.set_state(asset_id, "weaknesses",
+                           [w for w in self.vulns[asset_id] if w not in ("telnet_enabled", "snmp_public_community")])
+            self.set_state(asset_id, "status", "remediated")
             self.containment.append(f"harden_mgmt:{asset_id}")
         elif action_type == "enforce_mfa":
             ident = self._identity_for(params, asset_id)
@@ -488,34 +528,30 @@ class DigitalTwin:
             self.decoys.add(decoy_id)
             self.containment.append(f"deploy_decoy:{decoy_id}")
         elif action_type == "kill_process":
-            self.status[asset_id] = "contained" if self.status[asset_id] == "compromised" else self.status[asset_id]
+            self.set_state(asset_id, "status", "contained" if self.status[asset_id] == "compromised" else self.status[asset_id])
             self.processes[asset_id] = [p for p in self.processes.get(asset_id, []) if not p.get("suspicious")]
             self.containment.append(f"kill_process:{params.get('process', 'suspicious')}")
         elif action_type == "restore_snapshot":
-            self.status[asset_id] = "healthy"
-            self.vulns[asset_id] = []
-            self.device_configs[asset_id]["weaknesses"] = []
+            self.set_state(asset_id, "status", "healthy")
+            self.set_state(asset_id, "weaknesses", [])
             self.containment.append(f"restore_snapshot:{asset_id}")
         elif action_type == "restore_connectivity":
             if params.get("source") and params.get("target"):  # un-block one connection (self-healing)
                 s, t = params["source"], params["target"]
-                self.dir_active[(s, t)] = True; self.dir_active[(t, s)] = True
-                self.edge_active[frozenset((s, t))] = True
+                self.set_state(asset_id, "dir_active", ((s, t), True))
+                self.set_state(asset_id, "dir_active", ((t, s), True))
                 self.containment = [c for c in self.containment
                                     if c not in (f"block:{s}->{t}", f"block_outbound:{s}->{t}", f"block:{t}->{s}", f"block_outbound:{t}->{s}")]
             else:
-                self.isolated[asset_id] = False; self.status[asset_id] = "healthy"
+                self.set_state(asset_id, "isolated", False)
+                self.set_state(asset_id, "status", "healthy")
                 for s, t, _trust, trav, _types in self.edge_defs:
                     if asset_id in (s, t):
-                        self.dir_active[(s, t)] = True
+                        self.set_state(asset_id, "dir_active", ((s, t), True))
                         if trav:
-                            self.dir_active[(t, s)] = True
+                            self.set_state(asset_id, "dir_active", ((t, s), True))
                 self.containment = [c for c in self.containment if c != f"isolate:{asset_id}"]
-        # configuration is the twin: every action is recorded as a ConfigDiff and config state syncs
-        self.device_configs[asset_id]["isolated"] = self.isolated[asset_id]
-        if action_type == "apply_patch":
-            self.device_configs[asset_id]["weaknesses"] = []
-            self.device_configs[asset_id]["patches"] = {"level": "current", "missing": []}
+        # configuration is the twin: every action is recorded as a ConfigDiff (state already set via set_state)
         diff = {"device_id": asset_id, "action": action_type, "params": params,
                 "config_hash_after": self.config_hash()}
         self.config_diffs.append(diff)
@@ -542,24 +578,24 @@ class DigitalTwin:
                 raise ValueError(f"attack step type not in allowlist: {step['type']}")
             asset = step["asset"]
             if asset in self.status and self.status[asset] not in ("contained",):
-                self.status[asset] = "suspicious" if i < len(scenario["attack_steps"]) - 1 else "compromised"
+                self.set_state(asset, "status", "suspicious" if i < len(scenario["attack_steps"]) - 1 else "compromised")
             events.append({"id": f"tele-{scenario['id']}-{seed}-{i}", "event_type": step["type"], "asset_id": asset, "synthetic": True,
                            "message": step["description"], "offset_ms": 400 * (i + 1),
                            "severity": "high" if i >= 1 else "medium",
                            "detail": {"step": i, "seed": seed}})
         if scenario["id"] == "ransomware_activity":
-            self.status[src] = "compromised"
+            self.set_state(src, "status", "compromised")
             if self.reachable(src, tgt):
-                self.status[tgt] = "suspicious"
+                self.set_state(tgt, "status", "suspicious")
                 events.append({"id": f"tele-{scenario['id']}-{seed}-spread", "event_type": "file_modification_burst", "asset_id": tgt, "synthetic": True,
                                "message": f"Synthetic shared-file modifications spreading ({180 + rng.randint(0, 60)} files/min)",
                                "offset_ms": 2400, "severity": "critical", "detail": {"spread": True}})
         if scenario.get("identity"):
             ident = self.identities[scenario["identity"]]
             ident["session_active"] = True; ident["compromised"] = True
-            self.status["identity-provider"] = "suspicious"; self.status[src] = "compromised"
+            self.status["identity-provider"] = "suspicious"; self.set_state(src, "status", "compromised")
         if scenario["id"] == "lateral_movement" and self.reachable(src, tgt):
-            self.status[tgt] = "suspicious"
+            self.set_state(tgt, "status", "suspicious")
         self.processes.setdefault(src, []).append(
             {"name": "suspicious-synthetic.exe", "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
         return events

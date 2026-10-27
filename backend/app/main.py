@@ -601,13 +601,13 @@ def _apply_config_diff(twin, asset_id: str, diff: dict) -> None:
                 node[parts[-1]] = op.get("value")
             elif isinstance(node, list):
                 node[int(parts[-1])] = op.get("value")
-            # resync the twin flags the compiler reads
+            # resync twin state through the single mutator
             if op["path"] == "isolated":
-                twin.isolated[asset_id] = bool(op.get("value"))
+                twin.set_state(asset_id, "isolated", bool(op.get("value")))
             if op["path"] == "weaknesses":
-                twin.vulns[asset_id] = list(op.get("value") or [])
+                twin.set_state(asset_id, "weaknesses", list(op.get("value") or []))
             if op["path"] == "quarantine_vlan":
-                (twin.quarantined.add if op.get("value") else twin.quarantined.discard)(asset_id)
+                twin.set_state(asset_id, "quarantine_vlan", bool(op.get("value")))
         elif op.get("op") == "add_acl_entry":
             v = op["value"]
             acl = next((a for a in cfg.setdefault("acls", []) if a["name"] == v["name"]), None)
@@ -688,12 +688,9 @@ async def rollback_device_config(asset_id: str, version: int):
     import copy as _copy
 
     twin.device_configs[asset_id] = _copy.deepcopy(match["config"])
-    twin.vulns[asset_id] = list(match["config"].get("weaknesses", []))
-    twin.isolated[asset_id] = bool(match["config"].get("isolated", False))
-    if match["config"].get("quarantine_vlan"):
-        twin.quarantined.add(asset_id)
-    else:
-        twin.quarantined.discard(asset_id)
+    twin.set_state(asset_id, "weaknesses", list(match["config"].get("weaknesses", [])))
+    twin.set_state(asset_id, "isolated", bool(match["config"].get("isolated", False)))
+    twin.set_state(asset_id, "quarantine_vlan", bool(match["config"].get("quarantine_vlan")))
     await _broadcast_twin_updated()
     return {"rolled_back": True, "asset_id": asset_id, "version": version}
 
