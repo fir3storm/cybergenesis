@@ -461,18 +461,30 @@ class DigitalTwin:
                 # neighbours, so a shortest/weakest-path planner may route through the decoy
                 neighbours = list(self.graph.successors(asset_id)) + list(self.graph.predecessors(asset_id))
                 two_hop = {x for nb in neighbours for x in list(self.graph.successors(nb)) + list(self.graph.predecessors(nb))}
-                for peer in {asset_id} | two_hop - {decoy_id}:
-                    if peer not in self.graph:
+                # Deterministic peer list (anchor first); never register a self-loop.
+                connected_peers: list[str] = []
+                for peer in [asset_id, *sorted(two_hop)]:
+                    if peer == decoy_id or peer not in self.graph or peer in connected_peers:
                         continue
-                    self.graph.add_edge(asset_id if peer == asset_id else decoy_id, peer, trust="low", traversable=True, types=["network"])
+                    connected_peers.append(peer)
+                for peer in connected_peers:
+                    if peer == decoy_id:  # guard: no (decoy, decoy) connection
+                        continue
+                    # Register in edge_defs exactly as reset() would build it, so
+                    # cables_list()/_compiled()/live_graph() can route through the decoy.
+                    self.edge_defs.append((peer, decoy_id, "low", True, ["network"]))
                     self.graph.add_edge(peer, decoy_id, trust="low", traversable=True, types=["network"])
-                    self.dir_active[(decoy_id, peer)] = True; self.dir_active[(peer, decoy_id)] = True
-                self.graph.add_edge(asset_id, decoy_id, trust="low", traversable=True, types=["network"])
-                self.graph.add_edge(decoy_id, asset_id, trust="low", traversable=True, types=["network"])
-                self.dir_active[(asset_id, decoy_id)] = True; self.dir_active[(decoy_id, asset_id)] = True
-                from app.netmodel.config import DeviceConfig
+                    self.graph.add_edge(decoy_id, peer, trust="low", traversable=True, types=["network"])
+                    self.dir_active[(peer, decoy_id)] = True; self.dir_active[(decoy_id, peer)] = True
+                    self.edge_active[frozenset((peer, decoy_id))] = True
+                from app.netmodel.config import DeviceConfig, Interface, Service
 
-                self.device_configs[decoy_id] = DeviceConfig(hostname=decoy_id.upper(), device_id="decoy").model_dump()
+                self.device_configs[decoy_id] = DeviceConfig(
+                    hostname=decoy_id.upper(), device_id="decoy",
+                    interfaces=[Interface(name=f"eth{i}", peer=peer, enabled=True)
+                                for i, peer in enumerate(connected_peers)],
+                    services=[Service(name="telnet", port=23)],
+                    weaknesses=list(self.vulns[decoy_id])).model_dump()
             self.decoys.add(decoy_id)
             self.containment.append(f"deploy_decoy:{decoy_id}")
         elif action_type == "kill_process":
