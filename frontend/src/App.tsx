@@ -852,9 +852,11 @@ export default function App() {
               </div>
               <dl className="mt-4 grid gap-2 md:grid-cols-4 text-center">
                 {[['Defense effectiveness', `${s.results.verification.metrics.defense_effectiveness_pct}%`],
-                  ['Time to detect', `${s.results.verification.metrics.time_to_detect_s}s`],
-                  ['Time to contain', `${s.results.verification.metrics.time_to_contain_s ?? '—'}s`],
-                  ['Legit paths disrupted', `${s.results.verification.metrics.operational_impact_disrupted_legit_paths}`]].map(([k, v]) => (
+                  ['Time to detect (sim)', `${s.results.verification.metrics.time_to_detect_s}s`],
+                  ['Time to contain (sim)', `${s.results.verification.metrics.sim_time_to_contain_s ?? s.results.verification.metrics.time_to_contain_s ?? '—'}s`],
+                  ['Legit paths disrupted', `${s.results.verification.metrics.operational_impact_disrupted_legit_paths}`],
+                  ['Breach risk (1000 replays)', `${String(s.results.verification.metrics.risk_before_pct ?? '—')}% → ${String(s.results.verification.metrics.risk_after_pct ?? '—')}%`],
+                  ['Users affected', `≈ ${String(s.results.verification.metrics.users_affected ?? 0)}`]].map(([k, v]) => (
                   <div key={k} className="rounded-xl border border-slate-800 glass-panel p-3"><dt className="text-[11px] text-slate-400">{k}</dt><dd className="text-xl font-black text-cyan-200">{v}</dd></div>
                 ))}
               </dl>

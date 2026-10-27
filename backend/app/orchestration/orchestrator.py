@@ -166,15 +166,17 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                     data={"claim_evidence": hyp.claim_evidence})); db.commit()
         emit("agent_decision", hyp.hypothesis, agent="incident_investigator", payload=hyp.model_dump())
 
-        # race against time: slow live reasoning lets the attack spread one hop (simulated)
+        # race against time: the attack advances one hop per 2.0s of simulated time;
+        # live model latency is converted to simulated time, so slow reasoning costs nodes
         live_latency = sum(u["latency_ms"] for u in meta_client.usage if u.get("run_id") == run_id)
-        if live_latency > 6000 and baseline_path and len(baseline_path) > 2:
-            spread_to = next((n for n in baseline_path[1:-1] if twin.status.get(n) == "healthy"), None)
-            if spread_to:
+        sim_seconds = live_latency / 1000.0
+        hops = int(sim_seconds // 2.0)
+        if hops and baseline_path and len(baseline_path) > 2:
+            for spread_to in [n for n in baseline_path[1:-1] if twin.status.get(n) == "healthy"][:hops]:
                 twin.status[spread_to] = "suspicious"
-                emit("telemetry", f"Attack spread to {spread_to} while the AI was reasoning ({live_latency} ms of model latency)",
+                emit("telemetry", f"Attack spread to {spread_to} while the AI was reasoning ({live_latency} ms model latency = {sim_seconds:.1f}s simulated, {hops} hop ticks)",
                      agent="adversary_simulator", asset_id=spread_to,
-                     payload={"id": f"tele-spread-{run_id[:6]}", "event_type": "network_connection", "asset_id": spread_to})
+                     payload={"id": f"tele-spread-{run_id[:6]}-{spread_to}", "event_type": "network_connection", "asset_id": spread_to})
         await _delay()
 
         sim_contained: float | None = None
@@ -393,6 +395,11 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 if _check_cancel(run_id):
                     break
 
+        result.metrics["nodes_compromised_before_containment"] = sum(
+            1 for s in twin.status.values() if s in ("compromised", "contained"))
+        result.metrics["sim_time_to_contain_s"] = sim_contained
+        disrupted_before_healing = result.metrics["operational_impact_disrupted_legit_paths"]
+
         # self-healing: win back legitimate traffic where the objective stays blocked
         if result.outcome == "PASS":
             for entry in list(twin.containment):
@@ -422,6 +429,12 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                     db.commit()
             result = await do_verify()
 
+        result.metrics["disrupted_before_healing"] = disrupted_before_healing
+        result.metrics["disrupted_after_healing"] = result.metrics["operational_impact_disrupted_legit_paths"]
+        result.metrics["nodes_compromised_before_containment"] = sum(
+            1 for s in twin.status.values() if s in ("compromised", "contained"))
+        result.metrics["sim_time_to_contain_s"] = sim_contained
+        result.metrics["users_affected"] = result.metrics.get("users_affected")
         result.metrics["rounds"] = rounds
         result.metrics["candidates"] = candidates
         result.metrics["ai_final_choice"] = {"mode": final_choice_meta.get("mode"),

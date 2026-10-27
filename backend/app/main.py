@@ -242,11 +242,15 @@ def exp_report_markdown(run_id: str, db: Session = Depends(get_db)):
         lines.append(f"- **{d['agent']}** ({d['model']}, mode={d['mode']}, confidence {d['confidence']}): {d['decision']}")
         if d["justification"]:
             lines.append(f"  > {d['justification']}")
+    lines += ["", "## Attack Steps (MITRE ATT&CK)"]
+    for st in sc.get("attack_steps", []):
+        lines.append(f"- {st.get('type')} on {st.get('asset')}: {st.get('description', '')} · MITRE {st.get('mitre', '—')}")
     lines += ["", "## Defense Proposal & Policy"]
     for p in data["policy"]:
         lines.append(f"- {p['action_type']} on {p['asset_id']}: {'✅ APPROVED' if p['approved'] else '❌ REJECTED'} — {'; '.join(p['reasons'])}")
+    _d3 = {d["id"]: d.get("d3fend", "") for d in library()["defense_actions"]}
     for e in data["executions"]:
-        lines.append(f"- Executed {e['action_type']} on {e['asset_id']}: success={e['success']} · {e['transition']}")
+        lines.append(f"- Executed {e['action_type']} on {e['asset_id']}: success={e['success']} · D3FEND {_d3.get(e['action_type'], '')} · {e['transition']}")
     lines += ["", "## Verification", f"**Invariant:** {ver.get('invariant', '—')}", "", "| Check | Result | Detail |", "|---|---|---|"]
     for c in ver.get("checks", []):
         lines.append(f"| {c['name']} | {'✅ PASS' if c['passed'] else '❌ FAIL'} | {c['detail']} |")

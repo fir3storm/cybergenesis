@@ -34,7 +34,7 @@ def crown_jewels(twin: DigitalTwin, primary_target: str) -> list[str]:
 
 
 def enumerate_paths(twin: DigitalTwin, src: str, tgt: str, cutoff: int = 7, limit: int = 6) -> list[list[str]]:
-    g = twin.live_graph()  # shared helper: always agrees with find_path
+    g = twin.live_graph(tgt)  # shared helper: always agrees with find_path
     if src not in g or tgt not in g:
         return []
     try:

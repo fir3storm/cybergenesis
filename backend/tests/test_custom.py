@@ -242,6 +242,43 @@ async def test_phase2_critic_debate_revision(monkeypatch):
     assert res["run"]["state"] == "COMPLETED"
 
 
+def test_phase3_egress_ingress_and_vuln_gating():
+    t = DigitalTwin()
+    assert t.reachable("database", "internet")
+    t.apply_action("block_connection", "web-server", {"source": "web-server", "target": "firewall", "direction": "egress"})
+    assert not t.reachable("database", "internet")
+    assert t.reachable("internet", "web-server")
+    # patching the only vulnerable intermediate removes the hop: vulnerabilities matter
+    t2 = DigitalTwin.from_dict(
+        [{"id": "a", "name": "a", "asset_type": "workstation", "zone": "z", "pos": [0, 1, 0], "vulnerabilities": []},
+         {"id": "mid", "name": "mid", "asset_type": "app_server", "zone": "z", "pos": [1, 1, 0], "vulnerabilities": ["cve-x"]},
+         {"id": "b", "name": "b", "asset_type": "database", "zone": "z", "pos": [2, 1, 0], "vulnerabilities": []}],
+        [{"source": "a", "target": "mid", "traversable": True}, {"source": "mid", "target": "b", "traversable": True}])
+    assert t2.reachable("a", "b")
+    t2.apply_action("apply_patch", "mid")
+    assert not t2.reachable("a", "b"), "patched intermediate must no longer be traversable"
+
+
+def test_phase3_probabilistic_deterministic_and_healing_metrics():
+    from app.verification.verifier import _breach_probability
+
+    sc = {"id": "x", "source_asset": "internet", "target_asset": "database", "verification_kind": "reachability"}
+    t = DigitalTwin()
+    r1 = _breach_probability(t, sc)
+    r2 = _breach_probability(t, sc)
+    assert r1 == r2 and r1 is not None and 0 <= r1[0] <= 100 and r1[1][0] <= r1[0] <= r1[1][1]
+
+
+@pytest.mark.asyncio
+async def test_phase3_run_metrics_present():
+    rid = client.post("/api/experiments", json={"scenario_id": "data_exfiltration", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    m = client.get(f"/api/experiments/{rid}/results").json()["verification"]["metrics"]
+    assert m["risk_before_pct"] is not None and m["risk_after_pct"] == 0.0
+    assert "disrupted_before_healing" in m and "users_affected" in m
+    assert "nodes_compromised_before_containment" in m
+
+
 def test_benchmark_endpoint():
     b = client.get("/api/benchmark").json()
     assert "available" in b and "scope" in b

@@ -9,10 +9,7 @@ from app.simulation.twin import DigitalTwin
 def _min_edge_cut(baseline: DigitalTwin, scenario: dict) -> int | None:
     if scenario["verification_kind"] != "reachability":
         return None
-    g = nx.Graph()
-    for c in baseline.to_dict()["connections"]:
-        if c["traversable"] and c["active"]:
-            g.add_edge(c["source"], c["target"])
+    g = baseline.live_graph(scenario["target_asset"])  # directed, vulnerability-gated — same semantics as find_path
     try:
         return len(nx.minimum_edge_cut(g, scenario["source_asset"], scenario["target_asset"]))
     except Exception:  # noqa: BLE001 - no path / missing node -> optimum 0
@@ -29,13 +26,11 @@ def _edges_removed(baseline: DigitalTwin, after: DigitalTwin) -> int:
     return sum(1 for k in b if a.get(k, 0) < b[k])
 
 
-LEGIT_USERS = {("internet", "web-server"): 1200, ("web-server", "app-server"): 900, ("app-server", "database"): 650,
-               ("employee-workstation", "file-server"): 240, ("employee-workstation", "app-server"): 410,
-               ("admin-workstation", "database"): 25, ("admin-workstation", "app-server"): 40}
-
-
-def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, seed: int = 42) -> float | None:
-    """Monte Carlo: each hop succeeds with probability from target posture + vulnerabilities."""
+def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, seed: int = 42) -> tuple[float, list[float]] | None:
+    """Monte Carlo (deterministic per seed): arc exploit_probability =
+    clamp(0.15 + 0.6*(1 - target_posture) + 0.15*len(target_vulns), 0, 0.95).
+    Returns (risk_pct, [ci95_low, ci95_high])."""
+    import math
     import random
 
     if scenario["verification_kind"] != "reachability":
@@ -56,21 +51,25 @@ def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, s
                     continue
                 if not twin.graph[node][nxt].get("traversable", False):
                     continue
+                if not twin.hop_allowed(nxt, tgt):
+                    continue
                 dest = postures[nxt]
-                p = max(0.05, min(0.97, 1.12 - dest["posture"] + 0.12 * len(dest["vulnerabilities"])))
+                p = max(0.0, min(0.95, 0.15 + 0.6 * (1 - dest["posture"]) + 0.15 * len(dest["vulnerabilities"])))
                 if rng.random() < p:
                     seen.add(nxt); stack.append(nxt)
         if tgt in seen:
             hits += 1
-    return round(100.0 * hits / trials, 1)
+    risk = hits / trials
+    margin = 1.96 * math.sqrt(risk * (1 - risk) / trials) if 0 < risk < 1 else 0.0
+    return round(100.0 * risk, 1), [round(100.0 * max(0.0, risk - margin), 1), round(100.0 * min(1.0, risk + margin), 1)]
 
 
 def disrupted_users(after: DigitalTwin, baseline: DigitalTwin) -> int:
-    total = 0
     from app.simulation.twin import LEGITIMATE_PAIRS
 
-    for (s, t), users in LEGIT_USERS.items():
-        if (s, t) in LEGITIMATE_PAIRS and s in after.graph and baseline.reachable(s, t) and not after.reachable(s, t):
+    total = 0
+    for s, t, users in LEGITIMATE_PAIRS:
+        if s in after.graph and baseline.reachable(s, t) and not after.reachable(s, t):
             total += users
     return total
 
@@ -92,6 +91,8 @@ def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
     checks.append({"name": "containment_recorded", "passed": len(after.containment) > 0,
                    "detail": f"containment={after.containment}"})
     disrupted = after.legitimate_disrupted(baseline)
+    _bp = _breach_probability(baseline, scenario)
+    _ap = _breach_probability(after, scenario)
     passed_checks = sum(1 for c in checks if c["passed"])
     optimum = _min_edge_cut(baseline, scenario)
     removed = _edges_removed(baseline, after)
@@ -112,8 +113,12 @@ def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
         "time_to_detect_s": round(t_detected - t_attack_start, 3),
         "time_to_contain_s": round(t_contained - t_detected, 3) if t_contained else None,
         "time_basis": "simulated telemetry timeline (event offsets), not wall-clock demo delays",
-        "baseline_breach_probability_pct": _breach_probability(baseline, scenario),
-        "after_breach_probability_pct": _breach_probability(after, scenario),
+        "baseline_breach_probability_pct": _bp[0] if _bp else None,
+        "after_breach_probability_pct": _ap[0] if _ap else None,
+        "risk_before_pct": _bp[0] if _bp else None,
+        "risk_after_pct": _ap[0] if _ap else None,
+        "risk_after_ci95": _ap[1] if _ap else None,
+        "users_affected": disrupted_users(after, baseline),
         "disrupted_users_estimate": disrupted_users(after, baseline),
     }
     passed = all(c["passed"] for c in checks)

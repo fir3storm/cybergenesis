@@ -15,7 +15,7 @@
     {"type": "network_connection", "asset": "internet", "description": "Attempted synthetic egress to internet gateway"}
   ],
   "expected_defense": [
-    {"action_type": "block_connection", "asset_id": "web-server", "params": {"source": "web-server", "target": "firewall"}}
+    {"action_type": "block_connection", "asset_id": "web-server", "params": {"source": "web-server", "target": "firewall", "direction": "egress"}}
   ],
   "invariant": "Database cannot reach the internet; the egress path through the DMZ is segmented"
 }

@@ -39,9 +39,9 @@ def evaluate_candidates(attacked: DigitalTwin, baseline: DigitalTwin, scenario: 
                            [{"action_type": "isolate_asset", "asset_id": src, "params": {}}]))
         for i in range(len(path) - 1):
             s, t = path[i], path[i + 1]
-            candidates.append((f"Segment {s} → {t} (outbound only)", "simulated",
+            candidates.append((f"Segment {s} → {t} (egress only)", "simulated",
                                [{"action_type": "block_connection", "asset_id": s,
-                                 "params": {"source": s, "target": t, "direction": "outbound"}}]))
+                                 "params": {"source": s, "target": t, "direction": "egress"}}]))
         if path:
             candidates.append((f"Patch source ({src}) only", "simulated",
                                [{"action_type": "apply_patch", "asset_id": src, "params": {}}]))

@@ -12,7 +12,7 @@ def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
     steps = campaign.get("steps", [])
     if not steps:
         return {"approved": False, "reasons": ["campaign has no steps"], "path": []}
-    graph = twin.live_graph()
+    graph = twin.live_graph(campaign.get("objective"))
     assets = set(twin.asset_ids())
     seq: list[str] = []
     for st in steps:
@@ -70,9 +70,14 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
         s, t = params.get("source", asset_id), params.get("target")
         if not t or not (twin.graph.has_edge(s, t) or twin.graph.has_edge(t, s)):
             approved = False; reasons.append("connection does not exist")
-        elif params.get("direction") == "outbound":
+        elif params.get("direction") in ("outbound", "egress"):
             if not twin.dir_active.get((s, t), False):
-                approved = False; reasons.append("outbound direction already blocked")
+                approved = False; reasons.append("egress direction already blocked")
+        elif params.get("direction") == "ingress":
+            if not twin.dir_active.get((t, s), False):
+                approved = False; reasons.append("ingress direction already blocked")
+        elif params.get("direction", "both") not in ("both",):
+            approved = False; reasons.append(f"unknown direction '{params.get('direction')}' (use both|egress|ingress)")
         elif not (twin.dir_active.get((s, t), False) or twin.dir_active.get((t, s), False)):
             approved = False; reasons.append("connection already blocked")
     if action_type in ("revoke_session", "rotate_credential") and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):

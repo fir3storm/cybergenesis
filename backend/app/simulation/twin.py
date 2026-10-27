@@ -15,7 +15,7 @@ ATTACK_STEP_TYPES = {
 
 ASSETS = [
     {"id": "internet", "name": "Internet Gateway", "asset_type": "gateway", "zone": "external", "posture": 0.4, "pos": [-8.5, 1.4, -4.5], "vulnerabilities": ["exposed_surface"]},
-    {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-6, 1.2, -1.2], "vulnerabilities": []},
+    {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-6, 1.2, -1.2], "vulnerabilities": ["permissive_default_rule"]},
     {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.65, "pos": [-4.4, 1.5, -5.2], "vulnerabilities": ["exposed_service"]},
     {"id": "app-server", "name": "Application Server", "asset_type": "app_server", "zone": "internal", "posture": 0.75, "pos": [0.2, 1.2, -0.8], "vulnerabilities": ["overprivileged_service_account"]},
     {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": []},
@@ -45,13 +45,13 @@ EDGES = [
 ]
 
 LEGITIMATE_PAIRS = [
-    ("internet", "web-server"),
-    ("web-server", "app-server"),
-    ("app-server", "database"),
-    ("employee-workstation", "file-server"),
-    ("employee-workstation", "app-server"),
-    ("admin-workstation", "database"),
-    ("admin-workstation", "app-server"),
+    ("internet", "web-server", 1200),
+    ("web-server", "app-server", 900),
+    ("app-server", "database", 650),
+    ("employee-workstation", "file-server", 240),
+    ("employee-workstation", "app-server", 410),
+    ("admin-workstation", "database", 25),
+    ("admin-workstation", "app-server", 40),
 ]
 
 ALLOWED_ACTIONS = {
@@ -77,7 +77,7 @@ class DigitalTwin:
             defs.append({"id": a["id"], "name": a.get("name", a["id"]), "asset_type": a.get("asset_type", "workstation"),
                          "zone": a.get("zone", "custom"), "posture": float(a.get("posture", 0.7)),
                          "pos": [float(pos[0]), float(pos[1]), float(pos[2])],
-                         "vulnerabilities": list(a.get("vulnerabilities", []))})
+                         "vulnerabilities": list(a.get("vulnerabilities") or ["legacy_unpatched"])})
         ids = [d["id"] for d in defs]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate asset ids")
@@ -127,13 +127,21 @@ class DigitalTwin:
     def assets_status_isolated(self) -> list[str]:
         return [aid for aid, v in self.isolated.items() if v]
 
-    def live_graph(self) -> nx.DiGraph:
+    def live_graph(self, target: str | None = None) -> nx.DiGraph:
         """The one shared directed graph: exactly the arcs find_path can traverse.
-        enumerate_paths (red team) and find_path must never disagree — both use this."""
+        enumerate_paths (red team) and find_path must never disagree — both use this.
+        Vulnerability gating is target-relative, so callers that know the objective
+        should pass it; without a target, intermediate hops require a vulnerability."""
         g = nx.DiGraph()
         for u, v, data in self.graph.edges(data=True):
-            if data.get("traversable") and self.dir_active.get((u, v), False):
-                g.add_edge(u, v)
+            if not (data.get("traversable") and self.dir_active.get((u, v), False)):
+                continue
+            if target is None:
+                if not (self.vulns.get(v) or any(i["compromised"] for i in self.identities.values())):
+                    continue
+            elif not self.hop_allowed(v, target):
+                continue
+            g.add_edge(u, v)
         for aid in self.assets_status_isolated():
             if aid in g:
                 g.remove_node(aid)
@@ -212,6 +220,8 @@ class DigitalTwin:
                     continue
                 if not self.graph[node][nb].get("traversable", False):
                     continue
+                if not self.hop_allowed(nb, dst):
+                    continue
                 if nb in seen or self.isolated[nb] or self.service_disabled[nb]:
                     continue
                 seen.add(nb); q.append(path + [nb])
@@ -219,10 +229,19 @@ class DigitalTwin:
 
     def legitimate_disrupted(self, baseline: "DigitalTwin") -> int:
         disrupted = 0
-        for s, t in LEGITIMATE_PAIRS:
+        for s, t, _users in LEGITIMATE_PAIRS:
             if s in self.graph and t in self.graph and baseline.reachable(s, t) and not self.reachable(s, t):
                 disrupted += 1
         return disrupted
+
+    def hop_allowed(self, dest: str, final_target: str) -> bool:
+        """A hop into an asset is traversable only if it has a vulnerability, is the
+        final target, or a compromised synthetic identity covers the pivot."""
+        if dest == final_target:
+            return True
+        if self.vulns.get(dest):
+            return True
+        return any(i["compromised"] for i in self.identities.values()) and dest in ("database", "admin-workstation", "identity-provider")
 
     # --- actions ---------------------------------------------------------
     def apply_action(self, action_type: str, asset_id: str, params: dict | None = None) -> dict:
@@ -243,9 +262,12 @@ class DigitalTwin:
             if not t or not (self.graph.has_edge(s, t) or self.graph.has_edge(t, s)):
                 raise ValueError("missing connection")
             direction = params.get("direction", "both")
-            if direction == "outbound":  # one-way egress control: block s->t only, t->s keeps flowing
+            if direction in ("outbound", "egress"):  # one-way egress control: block s->t only, t->s keeps flowing
                 self.dir_active[(s, t)] = False
                 self.containment.append(f"block_outbound:{s}->{t}")
+            elif direction == "ingress":  # block only the reverse arc t->s
+                self.dir_active[(t, s)] = False
+                self.containment.append(f"block_ingress:{s}->{t}")
             else:
                 self.dir_active[(s, t)] = False; self.dir_active[(t, s)] = False
                 self.containment.append(f"block:{s}->{t}")
