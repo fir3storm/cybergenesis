@@ -8,10 +8,12 @@ from app.schemas import AgentObservation, DefenseProposal, IncidentHypothesis
 
 INVESTIGATOR_SYSTEM = (
     "You are the Incident Investigator in CYBERGENESIS, a defensive simulation on synthetic data only. "
-    "You are given the real twin topology, live asset states, and the exact synthetic telemetry events. "
-    "Ground every confirmed claim in a cited telemetry event or asset state; put anything not directly evidenced under speculation. "
+    "You are given the real twin topology, live asset states, and the exact synthetic telemetry events, each with an id like tele-<scenario>-42-0. "
+    "Ground every confirmed claim in specific event ids; put anything not directly evidenced under speculation. "
     "Return ONLY JSON: {\"hypothesis\": str, \"affected_assets\": [str], \"threat_level\": \"low|medium|high|critical\", "
-    "\"confirmed\": [str], \"speculation\": [str], \"confidence\": float}. No commands, no instructions to execute."
+    "\"confirmed\": [str], \"speculation\": [str], \"confidence\": float, "
+    "\"claim_evidence\": [{\"claim\": str, \"evidence_refs\": [str]}]} where each claim cites only the event ids that directly support it. "
+    "No commands, no instructions to execute."
 )
 STRATEGIST_SYSTEM = (
     "You are the Defense Strategist in CYBERGENESIS, a defensive simulation on synthetic data only. "
@@ -70,16 +72,26 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
         data, _ = await meta_client.chat_json(INVESTIGATOR_SYSTEM, evidence, run_id)
         h = IncidentHypothesis(**{**data, "model": meta_client.model, "mode": "live",
                                   "evidence_refs": obs.event_ids, "affected_assets": data.get("affected_assets", obs.asset_ids)})
+        known = set(obs.event_ids)  # keep only citations that point at real stored telemetry
+        h.claim_evidence = [{"claim": str(c.get("claim", "")), "evidence_refs": [r for r in c.get("evidence_refs", []) if r in known]}
+                            for c in h.claim_evidence if c.get("claim")]
         return h
     except Exception as e:  # fallback is deterministic + labelled with the reason
         reason = f"{type(e).__name__}: {e}"[:220]
+        ids = obs.event_ids
         confirmed = [obs.summary, f"Source asset {scenario['source_asset']} shows synthetic malicious-pattern telemetry",
                      f"Protected target: {scenario['target_asset']}"]
+        claim_evidence = [
+            {"claim": obs.summary, "evidence_refs": ids[:2]},
+            {"claim": confirmed[1], "evidence_refs": ids[2:4] or ids[:1]},
+            {"claim": confirmed[2], "evidence_refs": ids[-1:]},
+        ]
         return IncidentHypothesis(
             hypothesis=f"Synthetic {scenario['name']} incident originating at {scenario['source_asset']} threatening {scenario['target_asset']} (offline deterministic analysis; live Investigator unavailable: {reason})",
             affected_assets=obs.asset_ids, threat_level=scenario.get("severity", "high"),
             confirmed=confirmed, speculation=["Adversary intent beyond the simulated objective is not inferred"],
-            evidence_refs=obs.event_ids, confidence=0.86, model="deterministic-offline", mode="offline",
+            evidence_refs=obs.event_ids, claim_evidence=claim_evidence,
+            confidence=0.86, model="deterministic-offline", mode="offline",
             fallback_reason=reason)
 
 
@@ -114,11 +126,26 @@ async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, 
                         + ". Propose a corrected allowlisted action set that achieves the invariant.")
         raise ValueError("live proposal rejected by policy twice")
     except Exception as e:  # noqa: BLE001 - honest, reason-carrying offline fallback
-        actions = scenario["expected_defense"]
         reason = f"{type(e).__name__}: {e}"[:220]
+        actions = scenario["expected_defense"]
+        origin = "scenario policy"
+        if twin is not None:
+            # graph-derived (not scenario-prescribed): simulate candidates on the live twin, take the best blocker.
+            # This is what lets the offline blue team adapt in red-team rounds 2+.
+            from app.simulation.candidates import evaluate_candidates
+
+            attacked = twin.clone()
+            cands = evaluate_candidates(attacked, twin, scenario, [])
+            # least-disruptive defense that cuts the currently attacked path (global block preferred on ties
+            # via candidate order); this lets the red team force adaptation in later rounds
+            viable = [c for c in cands if c["feasible"] and (c["blocked"] or c.get("path_blocked"))]
+            best = min(viable, key=lambda c: c["disrupted"] if c["disrupted"] is not None else 99, default=None)
+            if best:
+                actions = best["actions"]
+                origin = f"candidate simulation on live graph ('{best['label']}')"
         return DefenseProposal(
             actions=actions,
-            justification=f"Offline deterministic proposal (live Strategist unavailable: {reason}). Scenario-policy containment for {scenario['name']}: {scenario['invariant']}",
+            justification=f"Offline deterministic proposal (live Strategist unavailable: {reason}). Derived via {origin} for {scenario['name']}: {scenario['invariant']}",
             expected_effectiveness="Blocks the simulated attack objective; verified independently by replay",
             operational_impact="Limited to the simulated source/choke-point; legitimate-path disruption measured after execution",
             confidence=0.84, model="deterministic-offline", mode="offline", evidence_refs=hyp.evidence_refs,

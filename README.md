@@ -2,6 +2,20 @@
 
 **Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026 · Powered by Meta Muse Spark**
 
+![CYBERGENESIS battle loop](docs/battle.gif)
+
+> **Why Meta AI is essential:** Muse Spark plays *both* sides. As the blue team it investigates synthetic telemetry and proposes defenses from the live graph (no per-scenario instructions — it works it out, and since the credibility pass it still passes live with an optimality gap of 0). As the red team it chooses among policy-validated alternate attack paths and adapts for up to 5 rounds while the twin hardens itself. With no key, the app says so and runs a labelled deterministic red team instead — Meta AI is the difference between a scripted demo and an adaptive adversary. Its multimodal vision also turns a whiteboard photo into a working twin (Twin Designer → "Try sample").
+
+## Benchmark (50 seeded pairs — `python scripts/benchmark.py`)
+
+| Defender | Verification PASS | Mean effectiveness | Mean optimality gap | Mean legit paths disrupted |
+|---|---|---|---|---|
+| none | 0/50 (0%) | 0.0% | — (no defense) | 0.00 |
+| offline | 50/50 (100%) | 100.0% | 0.16 | 0.00 |
+| simulate | 50/50 (100%) | 100.0% | 0.16 | 0.00 |
+
+Live Muse Spark spot-check: all 5 builtin scenarios (incl. the 3-round Red vs Blue Battle) pass end-to-end. Details: `docs/benchmark.md`, Benchmark page in the app.
+
 CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.
 
 A closed-loop autonomous cybersecurity digital twin: AI agents observe a synthetic enterprise, a controlled adversary introduces incidents, Meta Muse Spark investigates and proposes defenses, a deterministic policy engine approves only allowlisted actions, the twin applies them, and an independent Verification Scientist replays the identical attack to prove — with computed before/after evidence — whether it now fails.

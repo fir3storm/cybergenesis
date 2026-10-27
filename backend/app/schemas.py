@@ -19,6 +19,7 @@ class IncidentHypothesis(BaseModel):
     confirmed: list[str] = []
     speculation: list[str] = []
     evidence_refs: list[str] = []
+    claim_evidence: list[dict] = []  # [{claim, evidence_refs:[tele-...]}] per-claim citations
     confidence: float = Field(ge=0, le=1, default=0.5)
     model: str = "deterministic"
     mode: str = "offline"

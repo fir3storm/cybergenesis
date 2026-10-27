@@ -90,6 +90,27 @@ async def test_concurrent_runs_isolated_twins_and_metrics():
         assert {"baseline", "attacked", "post_remediation"} <= labels
 
 
+@pytest.mark.asyncio
+async def test_red_vs_blue_battle_multiple_rounds():
+    c = client.post("/api/experiments", json={"scenario_id": "red_vs_blue_battle", "seed": 42})
+    rid = c.json()["id"]
+    await run_experiment(rid)
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert res["run"]["state"] == "COMPLETED" and res["verification"]["outcome"] == "PASS", res
+    rounds = res["verification"]["metrics"]["rounds"]
+    assert len(rounds) >= 2, rounds  # red team must have found an alternate path at least once
+    scores = [r["resilience_score"] for r in rounds]
+    assert scores[-1] == 100.0 and scores == sorted(scores), rounds  # resilience climbs to 100%
+    twin = client.get("/api/twin").json()
+    fs = next(a for a in twin["assets"] if a["id"] == "file-server")
+    assert fs["status"] in ("protected", "remediated", "healthy", "contained")
+
+
+def test_benchmark_endpoint():
+    b = client.get("/api/benchmark").json()
+    assert "available" in b and "scope" in b
+
+
 def test_library_catalog():
     lib = client.get("/api/library").json()
     assert len(lib["asset_types"]) == 9 and len(lib["attack_steps"]) == 8 and len(lib["defense_actions"]) == 7

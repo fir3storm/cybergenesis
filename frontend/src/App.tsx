@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Activity, Bot, Boxes, Bug, Cpu, Database, Download, FlaskConical, Folder, Globe, KeyRound, MessageSquareText, Monitor, PenTool, Play, Radar, RotateCcw, Route,
+  Activity, BarChart3, Bot, Boxes, Bug, Cpu, Database, Download, FlaskConical, Folder, Globe, KeyRound, MessageSquareText, Monitor, PenTool, Play, Radar, RotateCcw, Route,
   Settings as SettingsIcon, Server, Share2, Shield, ShieldCheck, Siren, Swords, Home, Network, FileText,
 } from 'lucide-react'
 
@@ -23,6 +23,7 @@ const SCENARIO_ICONS: Record<string, ReactNode> = {
   compromised_identity: <KeyRound size={13} className="inline text-amber-300" />,
   lateral_movement: <Route size={13} className="inline text-orange-300" />,
   data_exfiltration: <Share2 size={13} className="inline text-rose-300" />,
+  red_vs_blue_battle: <Swords size={13} className="inline text-red-400" />,
 }
 import { api, WS } from './services/api'
 import { useStore } from './stores/store'
@@ -84,7 +85,7 @@ function TwinView({ twin }: { twin: Twin }) {
 }
 
 interface Candidate { label: string; origin: string; blocked: boolean; disrupted: number | null; feasible: boolean; detail: string }
-interface Round { round: number; path: string[] | null; effectiveness_pct: number; outcome: string; red_team_mode: string | null }
+interface Round { round: number; path: string[] | null; effectiveness_pct: number; resilience_score?: number; outcome: string; red_team_mode: string | null }
 
 export function CandidatesPanel() {
   const s = useStore()
@@ -109,21 +110,79 @@ export function CandidatesPanel() {
   )
 }
 
+export function BattlePanel() {
+  const s = useStore()
+  const red = s.events.filter((e) => e.agent === 'adversary_simulator')
+  const blue = s.results?.decisions.filter((d) => d.agent !== 'observer' && d.agent !== 'adversary_simulator') ?? []
+  if (!red.length && !blue.length) return null
+  return (
+    <section className="rounded-xl border border-slate-800 glass-panel p-3">
+      <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">RED vs BLUE</h2>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded bg-red-950/30 border border-red-900/50 p-2">
+          <h3 className="text-[11px] font-bold text-red-300">🔴 RED — ADAPTIVE ADVERSARY</h3>
+          {red.slice(-5).map((e, i) => <p key={i} className="mt-1 text-[10px] text-slate-300">{e.message.slice(0, 130)}</p>)}
+          {!red.length && <p className="text-[10px] text-slate-500">No red activity yet.</p>}
+        </div>
+        <div className="rounded bg-cyan-950/30 border border-cyan-900/50 p-2">
+          <h3 className="text-[11px] font-bold text-cyan-300">🔵 BLUE — DEFENSE</h3>
+          {blue.slice(-5).map((d, i) => <p key={i} className="mt-1 text-[10px] text-slate-300"><span className="text-violet-300">{d.agent}:</span> {d.decision.slice(0, 110)}</p>)}
+          {!blue.length && <p className="text-[10px] text-slate-500">No blue decisions yet.</p>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+export function BenchmarkView() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.benchmark>> | null>(null)
+  useEffect(() => { api.benchmark().then(setData).catch(() => setData({ available: false, detail: 'benchmark endpoint unreachable' })) }, [])
+  return (
+    <main className="p-6 max-w-4xl">
+      <h1 className="text-2xl font-black text-cyan-200">Benchmark</h1>
+      <p className="mt-1 text-sm text-slate-400">50 seeded random twin+scenario pairs, three defenders on identical attacked twins. Reproduce with <span className="font-mono">python scripts/benchmark.py</span>.</p>
+      {!data && <p className="mt-3 text-slate-400">Loading…</p>}
+      {data && !data.available && <p className="mt-3 text-amber-300">{data.detail}</p>}
+      {data?.summary && (
+        <>
+          <p className="mt-2 text-xs text-slate-500">{data.scope} · {data.pairs} pairs</p>
+          <table className="mt-3 w-full text-left text-sm">
+            <thead><tr className="border-b border-slate-700 text-slate-400"><th className="py-2">Defender</th><th>PASS rate</th><th>Mean effectiveness</th><th>Mean optimality gap</th><th>Mean disrupted</th></tr></thead>
+            <tbody>{Object.entries(data.summary).map(([k, v]) => (
+              <tr key={k} className="border-b border-slate-800"><td className="py-2 font-mono">{k}</td><td>{v.pass_rate_pct}%</td><td>{v.mean_effectiveness_pct}%</td><td>{v.mean_optimality_gap}</td><td>{v.mean_disrupted}</td></tr>))}
+            </tbody>
+          </table>
+          <div className="mt-4 space-y-1" role="img" aria-label="Pass rate chart">
+            {Object.entries(data.summary).map(([k, v]) => (
+              <div key={k} className="flex items-center gap-2 text-xs"><span className="w-20 font-mono">{k}</span>
+                <div className="h-4 flex-1 rounded bg-slate-800"><div className={`h-4 rounded ${k === 'none' ? 'bg-red-500' : 'bg-emerald-400'}`} style={{ width: `${v.pass_rate_pct}%` }} /></div><span>{v.pass_rate_pct}%</span></div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Live Muse Spark is spot-checked on the 4 builtin scenarios (all PASS, gap 0 — see Verification Lab on any live run). The 50-pair table is a real offline run, not a projection.</p>
+        </>
+      )}
+    </main>
+  )
+}
+
 export function ResilienceCurve() {
   const s = useStore()
   const rounds = (s.results?.verification?.metrics.rounds as Round[] | undefined) ?? []
   if (!rounds.length) return null
-  const pts = rounds.map((r, i) => `${30 + i * 90},${90 - (r.effectiveness_pct / 100) * 70}`).join(' ')
+  const score = (r: Round) => r.resilience_score ?? r.effectiveness_pct
+  const pts = rounds.map((r, i) => `${30 + i * 90},${90 - (score(r) / 100) * 70}`).join(' ')
+  const offline = s.results?.run.mode !== 'live'
   return (
     <section className="mt-4 rounded-xl border border-slate-800 glass-panel p-4">
       <h2 className="font-bold text-cyan-200">Resilience Curve — Red Team Rounds</h2>
+      {offline && <p className="mt-1 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200">Adaptive adversary path-choice by Muse Spark requires LIVE Meta AI — this run used the deterministic (shortest-path) red team. Paths themselves are always policy-validated.</p>}
       <svg viewBox={`0 0 ${60 + rounds.length * 90} 110`} className="mt-2 w-full max-w-md" role="img" aria-label="Resilience curve over red-team rounds">
         <line x1={25} y1={15} x2={25} y2={92} stroke="#334155" /><line x1={25} y1={92} x2={55 + rounds.length * 90} y2={92} stroke="#334155" />
         <polyline points={pts} fill="none" stroke="#34d399" strokeWidth={2.5} />
-        {rounds.map((r, i) => <g key={r.round}><circle cx={30 + i * 90} cy={90 - (r.effectiveness_pct / 100) * 70} r={5} fill={r.outcome === 'PASS' ? '#34d399' : '#ef4444'} />
-          <text x={30 + i * 90} y={106} textAnchor="middle" fill="#94a3b8" fontSize={9}>R{r.round} · {r.effectiveness_pct}%</text></g>)}
+        {rounds.map((r, i) => <g key={r.round}><circle cx={30 + i * 90} cy={90 - (score(r) / 100) * 70} r={5} fill={r.outcome === 'PASS' ? '#34d399' : '#ef4444'} />
+          <text x={30 + i * 90} y={106} textAnchor="middle" fill="#94a3b8" fontSize={9}>R{r.round} · {score(r)}%</text></g>)}
       </svg>
-      {rounds.map((r) => <p key={r.round} className="text-xs text-slate-300">Round {r.round}: {r.path ? r.path.join(' → ') : 'initial attack'} → {r.outcome} <span className="text-slate-500">({r.effectiveness_pct}% checks{r.red_team_mode ? `, red team ${r.red_team_mode}` : ''})</span></p>)}
+      {rounds.map((r) => <p key={r.round} className="text-xs text-slate-300">Round {r.round}: {r.path ? r.path.join(' → ') : 'initial attack'} → {r.outcome} <span className="text-slate-500">(resilience {score(r)}%{r.red_team_mode ? `, red team ${r.red_team_mode}` : ''})</span></p>)}
     </section>
   )
 }
@@ -322,7 +381,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return
-      if (e.key === 'Escape') { setCinematic(false); return }
+      if (e.key === 'Escape') { setCinematic(false); useStore.getState().set({ cinematicMode: false }); return }
       const st = useStore.getState()
       if (e.key === ' ') { e.preventDefault(); if (st.view === 'twin' || st.view === 'experiment') void runDemo(st.scenarioId) }
       else if (e.key.toLowerCase() === 'r') void resetAll()
@@ -371,6 +430,7 @@ export default function App() {
     { id: 'designer', label: 'Twin Designer', icon: <PenTool size={15} /> },
     { id: 'playbook', label: 'Playbook', icon: <Swords size={15} /> },
     { id: 'library', label: 'Library', icon: <Boxes size={15} /> },
+    { id: 'benchmark', label: 'Benchmark', icon: <BarChart3 size={15} /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
   ]
   const live = s.modelStatus?.mode === 'live'
@@ -501,7 +561,7 @@ export default function App() {
               <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs" role="group" aria-label="Demo speed">
                 {[1, 2, 4].map((v) => <button key={v} onClick={() => setSpeed(v)} className={`px-2 py-2 ${speed === v ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}>{v}×</button>)}
               </div>
-              <button onClick={() => setCinematic(true)} className="rounded-lg border border-violet-600 px-3 py-2 text-sm text-violet-200">⛶ Cinematic</button>
+              <button onClick={() => { setCinematic(true); s.set({ cinematicMode: true }) }} className="rounded-lg border border-violet-600 px-3 py-2 text-sm text-violet-200">⛶ Cinematic</button>
               <button onClick={() => void runDemo()} className="flex items-center gap-1 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950"><Play size={14} /> RUN EXPERIMENT</button>
               <button onClick={() => void resetAll()} className="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-2 text-sm"><RotateCcw size={14} /> Reset</button>
               <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40"><Download size={14} className="inline" /> JSON</button>
@@ -584,6 +644,7 @@ export default function App() {
                   <div key={i} className={`text-xs ${p.approved ? 'text-emerald-300' : 'text-red-300'}`}>{p.approved ? '✓ POLICY APPROVED' : '✗ POLICY REJECTED'}: {p.action_type} on {p.asset_id}</div>
                 ))}
               </section>
+              <BattlePanel />
               <CandidatesPanel />
               <section className="rounded-xl border border-slate-800 glass-panel p-3">
                 <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">OUTCOME</h2>
@@ -723,6 +784,7 @@ export default function App() {
       {s.view === 'designer' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Twin Designer…</div>}><TwinDesigner /></Suspense>}
       {s.view === 'playbook' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Attack Playbook…</div>}><AttackPlaybook onRunCustom={(sid, tid) => void runCustomExperiment(sid, tid)} /></Suspense>}
       {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
+      {s.view === 'benchmark' && <BenchmarkView />}
       {s.view === 'evidence' && <EvidenceView />}
       {s.view === 'settings' && (
         <main className="p-6 max-w-2xl space-y-3 text-sm">
@@ -742,7 +804,7 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-[#020617]/97 p-4" role="dialog" aria-label="Cinematic twin mode">
           <div className="mb-2 flex items-center justify-between">
             <span className="font-mono text-xs tracking-widest text-cyan-300">CINEMATIC — {scenario?.name ?? 'DIGITAL TWIN'} · stage {s.runState}</span>
-            <button onClick={() => setCinematic(false)} className="rounded-full border border-slate-600 px-3 py-1 text-xs">✕ Exit (Esc)</button>
+            <button onClick={() => { setCinematic(false); s.set({ cinematicMode: false }) }} className="rounded-full border border-slate-600 px-3 py-1 text-xs">✕ Exit (Esc)</button>
           </div>
           <div className="h-[78vh] rounded-2xl border border-cyan-900 overflow-hidden">
             {s.twin ? <TwinView twin={s.twin} /> : <SkeletonTwin />}

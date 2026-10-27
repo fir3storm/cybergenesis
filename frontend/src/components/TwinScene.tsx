@@ -261,15 +261,30 @@ function AttackFlow({ chain, positions, stopPoint }: FlowProps) {
 
 /* ---------------- camera ---------------- */
 
-function CameraRig({ positions, resetNonce, zoomCmd }: {
+function CameraRig({ positions, resetNonce, zoomCmd, chain }: {
   positions: Map<string, [number, number, number]>
   resetNonce: number
   zoomCmd: { dir: 1 | -1; n: number } | null
+  chain: string[]
 }) {
   const camera = useThree((s) => s.camera)
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null
   const selected = useStore((s) => s.selectedAsset)
+  const cinematicMode = useStore((s) => s.cinematicMode)
   const goal = useRef<{ target: THREE.Vector3; cam: THREE.Vector3 } | null>(null)
+
+  useEffect(() => { // cinematic: camera follows the attack path node by node
+    if (!cinematicMode || chain.length < 2) return
+    let i = 0
+    const tick = () => {
+      const p = positions.get(chain[i % chain.length])
+      if (p) goal.current = { target: new THREE.Vector3(p[0], 1, p[2]), cam: new THREE.Vector3(p[0] + 2.6, 2.8, p[2] + 3.6) }
+      i++
+    }
+    tick()
+    const iv = window.setInterval(tick, 2400)
+    return () => window.clearInterval(iv)
+  }, [cinematicMode, chain, positions])
 
   useEffect(() => { // overview on mount / reset
     goal.current = { target: new THREE.Vector3(0, 0.7, 0), cam: new THREE.Vector3(9.2, 7.8, 11.2) }
@@ -443,7 +458,7 @@ export default function TwinScene({ twin }: { twin: Twin }) {
             ))}
           </group>
         </Bounds>
-        <CameraRig positions={positions} resetNonce={resetNonce} zoomCmd={zoomCmd} />
+        <CameraRig positions={positions} resetNonce={resetNonce} zoomCmd={zoomCmd} chain={displayChain} />
         <KeyboardNav assets={twin.assets} />
         <DemandInvalidator twin={twin} />
         <OrbitControls enableDamping makeDefault maxPolarAngle={Math.PI * 0.49} minDistance={4} maxDistance={30} />

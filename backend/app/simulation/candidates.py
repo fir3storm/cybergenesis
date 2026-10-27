@@ -4,7 +4,8 @@ from app.policies.engine import evaluate
 from app.simulation.twin import DigitalTwin
 
 
-def _score(clone: DigitalTwin, baseline: DigitalTwin, scenario: dict, actions: list[dict], label: str, origin: str) -> dict:
+def _score(clone: DigitalTwin, baseline: DigitalTwin, scenario: dict, actions: list[dict], label: str, origin: str,
+           original_path: list[str] | None = None) -> dict:
     applied = []
     for a in actions:
         d = evaluate(a["action_type"], a["asset_id"], a.get("params", {}), clone)
@@ -19,8 +20,11 @@ def _score(clone: DigitalTwin, baseline: DigitalTwin, scenario: dict, actions: l
                     "blocked": False, "disrupted": None, "detail": str(e)}
     result = clone.attempt_attack_objective(scenario)
     disrupted = clone.legitimate_disrupted(baseline)
+    new_path = clone.find_path(scenario["source_asset"], scenario["target_asset"])
     return {"label": label, "origin": origin, "actions": actions, "feasible": True,
-            "blocked": bool(result["objective_blocked"]), "disrupted": disrupted,
+            "blocked": bool(result["objective_blocked"]),
+            "path_blocked": bool(original_path) and new_path != original_path,
+            "disrupted": disrupted,
             "detail": f"applied {applied}; objective_blocked={result['objective_blocked']}"}
 
 
@@ -53,7 +57,7 @@ def evaluate_candidates(attacked: DigitalTwin, baseline: DigitalTwin, scenario: 
         if sig in seen:
             continue
         seen.add(sig)
-        results.append(_score(attacked.clone(), baseline, scenario, [dict(a) for a in actions], label, origin))
+        results.append(_score(attacked.clone(), baseline, scenario, [dict(a) for a in actions], label, origin, original_path=path))
     # best trade-off first: blocked, then least disruption; agent proposal wins ties (it reasoned about context)
     results.sort(key=lambda r: (not r["blocked"], r["disrupted"] if r["disrupted"] is not None else 99,
                                 0 if r["origin"] == "ai" else 1))

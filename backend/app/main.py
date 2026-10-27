@@ -247,6 +247,28 @@ def exp_report_markdown(run_id: str, db: Session = Depends(get_db)):
 
 # --- component library + custom twins/scenarios -------------------------
 
+@app.get("/api/benchmark")
+def get_benchmark():
+    """Latest benchmark run (scripts/benchmark.py). Honest about offline vs live scope."""
+    import json as _json
+    from pathlib import Path
+
+    p = Path(__file__).resolve().parents[2] / "scripts" / "benchmark_results.json"
+    if not p.exists():
+        return {"available": False, "detail": "run scripts/benchmark.py to generate", "rows": []}
+    rows = _json.loads(p.read_text(encoding="utf-8"))
+
+    def agg(key: str) -> dict:
+        vals = [r[key] for r in rows]
+        return {"pass_rate_pct": round(100 * sum(v["pass"] for v in vals) / len(vals), 1),
+                "mean_effectiveness_pct": round(sum(v["effectiveness"] for v in vals) / len(vals), 1),
+                "mean_optimality_gap": round(sum(v["gap"] for v in vals if v["gap"] is not None) / max(1, sum(1 for v in vals if v["gap"] is not None)), 2),
+                "mean_disrupted": round(sum(v["disrupted"] for v in vals) / len(vals), 2)}
+
+    return {"available": True, "pairs": len(rows), "scope": "50 seeded pairs, offline/simulate defenders; live Muse Spark spot-checked on 4 builtin scenarios",
+            "summary": {k: agg(k) for k in ("none", "offline", "simulate")}, "rows": rows}
+
+
 @app.get("/api/library")
 def get_library():
     return library()

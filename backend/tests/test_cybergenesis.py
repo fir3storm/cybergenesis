@@ -19,7 +19,7 @@ client = TestClient(app)
 
 
 def test_scenarios_load():
-    assert set(SCENARIOS) == {"ransomware_activity", "compromised_identity", "lateral_movement", "data_exfiltration"}
+    assert set(SCENARIOS) == {"ransomware_activity", "compromised_identity", "lateral_movement", "data_exfiltration", "red_vs_blue_battle"}
     for s in SCENARIOS.values():
         assert s["expected_defense"] and s["invariant"] and s["attack_steps"]
 

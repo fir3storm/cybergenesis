@@ -174,11 +174,13 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             emit("candidate_evaluation", f"{c['label']} [{c['origin']}]: blocked={c['blocked']} disrupted={c['disrupted']} — {c['detail']}",
                  agent="defense_strategist", payload=c)
         best = candidates[0] if candidates else None
-        if best and best["feasible"] and best["blocked"]:
+        ai_cand = next((c for c in candidates if c["origin"] == "ai"), None)
+        if ai_cand and ai_cand["feasible"] and (ai_cand["blocked"] or ai_cand.get("path_blocked")):
+            chosen = list(proposal.actions)  # agent's defense cuts the attacked path; red team may still find another
+        elif best and best["feasible"] and best["blocked"]:
             chosen = [DefenseAction(**a) for a in best["actions"]]
-            if best["origin"] != "ai":
-                emit("candidate_selected", f"Simulation selected '{best['label']}' over the agent proposal (blocked with disruption={best['disrupted']})",
-                     agent="defense_executor", payload=best)
+            emit("candidate_selected", f"Simulation selected '{best['label']}' over the agent proposal (blocked with disruption={best['disrupted']})",
+                 agent="defense_executor", payload=best)
         else:
             chosen = list(proposal.actions)
         run.metrics = {"candidates": candidates}; db.commit()
@@ -226,20 +228,42 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             return res
 
         result = await do_verify()
+        initial_paths = red_team.enumerate_paths(baseline_twin, scenario["source_asset"], scenario["target_asset"]) \
+            if scenario["verification_kind"] == "reachability" else []
+        remaining0 = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"]) \
+            if scenario["verification_kind"] == "reachability" else []
+        resilience0 = round(100.0 * (1 - len(remaining0) / max(len(initial_paths), 1)), 1) if initial_paths else result.metrics["defense_effectiveness_pct"]
         rounds = [{"round": 1, "path": baseline_result.get("path"), "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                   "outcome": result.outcome, "red_team_mode": None}]
+                   "resilience_score": resilience0, "outcome": result.outcome, "red_team_mode": None}]
 
-        # AI red team: look for an alternate path; loop defense while one exists (max 3 rounds)
+        # AI red team: look for an alternate path; loop defense while one exists (max 5 rounds total)
         if scenario["verification_kind"] == "reachability":
-            for round_num in range(2, 4):
+            for round_num in range(2, 6):
                 paths = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
                 if not paths:
                     emit("red_team", f"Red team (round {round_num}): no alternate path from {scenario['source_asset']} to {scenario['target_asset']} — attack surface closed",
                          agent="adversary_simulator", payload={"paths": []})
                     break
                 chosen_path, rt_mode, rationale = await red_team.choose_path(paths, run_id)
+                # red moves are policy-validated too: every hop must be an active, traversable, allowlisted step
+                conns = {(c["source"], c["target"]): c for c in twin.to_dict()["connections"]}
+                def _conn(a: str, b: str):
+                    return conns.get((a, b)) or conns.get((b, a))
+
+                hops_ok = all(
+                    _conn(chosen_path[i], chosen_path[i + 1]) is not None
+                    and _conn(chosen_path[i], chosen_path[i + 1])["active"]
+                    and _conn(chosen_path[i], chosen_path[i + 1])["traversable"]
+                    for i in range(len(chosen_path) - 1))
+                emit("policy_decision", f"Red team path {'VALIDATED' if hops_ok else 'REJECTED'}: {' -> '.join(chosen_path)} (typed network_connection steps only)",
+                     agent="defense_executor", payload={"approved": hops_ok, "path": chosen_path})
+                if not hops_ok:
+                    break
                 emit("red_team", f"Red team (round {round_num}, mode={rt_mode}) found alternate path: {' -> '.join(chosen_path)} — {rationale}",
                      agent="adversary_simulator", payload={"path": chosen_path, "mode": rt_mode, "candidates": paths})
+                for i, node in enumerate(chosen_path):
+                    emit("telemetry", f"[round {round_num}] Red team traverses {node}", agent="adversary_simulator",
+                         asset_id=node, payload={"id": f"tele-red-{run_id[:6]}-{round_num}-{i}", "event_type": "network_connection", "asset_id": node})
                 for node in chosen_path[1:-1]:
                     if twin.status.get(node) == "healthy":
                         twin.status[node] = "suspicious"
@@ -259,8 +283,10 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 db.commit()
                 sim_contained = (sim_contained or sim_detected) + 0.4 * applied2
                 result = await do_verify()
+                remaining = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
+                resilience = round(100.0 * (1 - len(remaining) / max(len(initial_paths), 1)), 1) if initial_paths else result.metrics["defense_effectiveness_pct"]
                 rounds.append({"round": round_num, "path": chosen_path, "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                               "outcome": result.outcome, "red_team_mode": rt_mode})
+                               "resilience_score": resilience, "outcome": result.outcome, "red_team_mode": rt_mode})
                 if result.outcome == "FAIL":
                     break
 
@@ -275,10 +301,10 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                     model="deterministic-replay", mode="offline", evidence_refs=result.evidence_refs,
                                     asset_ids=[scenario["target_asset"]])); db.commit()
 
-        if result.outcome == "PASS":  # visuals must agree with the verdict
+        if result.outcome == "PASS":  # visuals must agree with the verdict: target is PROTECTED, not "suspicious"
             for aid, st in list(twin.status.items()):
                 if st == "suspicious":
-                    twin.status[aid] = "remediated" if aid == scenario["target_asset"] else "healthy"
+                    twin.status[aid] = "protected" if aid == scenario["target_asset"] else "healthy"
 
         for u in list(meta_client.usage):
             if u.get("run_id") == run_id:

@@ -125,6 +125,19 @@ export default function TwinDesigner() {
           <div className="mt-2 flex flex-wrap gap-2">
             <input value={name} onChange={(e) => setName(e.target.value)} className="rounded border border-slate-700 bg-slate-900 px-2 py-2 text-sm" aria-label="Twin name" />
             <button onClick={() => void save()} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><Save size={13} /> Save Twin</button>
+            {['diagram-enterprise.png', 'diagram-office.png', 'diagram-datacenter.png'].map((f) => (
+              <button key={f} onClick={() => {
+                setMsg(`Loading sample ${f} and sending to Muse Spark vision…`)
+                fetch(`/samples/${f}`).then((r) => r.blob()).then((blob) => new Promise<string>((resolve) => {
+                  const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsDataURL(blob)
+                })).then((dataUrl) => api.fromImage(dataUrl, `Sample ${f}`)).then((t) => {
+                  setAssets(t.assets.map((a) => ({ ...a, posture: a.posture ?? 0.7, vulnerabilities: a.vulnerabilities ?? [], pos: [a.pos[0], a.pos[1], a.pos[2]] as [number, number, number] })))
+                  setConns(t.connections.map((c) => ({ source: c.source, target: c.target, trust: c.trust ?? 'medium', traversable: c.traversable ?? true, types: c.types ?? ['network'] })))
+                  setMsg(`Meta vision read ${f}: ${t.assets.length} assets, ${t.connections.length} connections — review, then Save/Activate and run it from the Playbook.`)
+                  void refresh()
+                }).catch((err) => setMsg(`Vision failed honestly: ${(err as Error).message}`))
+              }} className="rounded border border-slate-600 px-2 py-2 text-[11px] text-slate-300 hover:bg-slate-800">Try sample: {f.replace('diagram-', '').replace('.png', '')}</button>
+            ))}
             <label className="flex cursor-pointer items-center gap-1 rounded border border-violet-600 px-3 py-2 text-xs text-violet-200 hover:bg-violet-950/50">
               📷 Generate from whiteboard photo (Meta vision)
               <input type="file" accept="image/*" className="hidden" onChange={(e) => {

@@ -21,6 +21,7 @@ def enumerate_paths(twin: DigitalTwin, src: str, tgt: str, cutoff: int = 6, limi
     for c in twin.to_dict()["connections"]:
         if c["traversable"] and c["active"]:
             g.add_edge(c["source"], c["target"])
+            g.add_edge(c["target"], c["source"])  # twin engine adds both arcs for traversable connections
     for a in twin.assets_status_isolated():
         if a in g:
             g.remove_node(a)
