@@ -36,7 +36,7 @@ def _frontier_proof(twin: DigitalTwin, src: str, tgt: str) -> dict:
                 visited.add(nb)
                 stack.append(nb)
     frontier = []
-    for u in list(visited):
+    for u in visited:
         for v in twin.graph.successors(u):
             if v in visited:
                 continue

@@ -5,10 +5,10 @@ from collections import Counter
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from app.devices.registry import BUILTIN_DEVICE_MAP, BY_ID, CATALOG, EXPECTED_COUNTS  # noqa: E402
-from app.main import app  # noqa: E402
+from app.devices.registry import BUILTIN_DEVICE_MAP, BY_ID, CATALOG, EXPECTED_COUNTS
+from app.main import app
 
 client = TestClient(app)
 

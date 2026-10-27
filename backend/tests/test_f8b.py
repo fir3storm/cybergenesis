@@ -5,15 +5,15 @@ os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import networkx as nx  # noqa: E402
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import networkx as nx
+import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
-from app.simulation.candidates import evaluate_candidates  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
-from app.simulation.twin import DigitalTwin  # noqa: E402
+from app.main import app
+from app.orchestration.orchestrator import run_experiment
+from app.simulation.candidates import evaluate_candidates
+from app.simulation.scenarios import SCENARIOS
+from app.simulation.twin import DigitalTwin
 
 client = TestClient(app)
 
@@ -153,7 +153,7 @@ async def test_scenario_with_max_rounds_2_never_exceeds_2_rounds():
 async def test_optional_steps_skip_authoring_agents_and_persist_decisions(monkeypatch):
     from types import SimpleNamespace
 
-    import app.agents.framework.adapters as adapters
+    from app.agents.framework import adapters
     from app.agents.framework.io import CommanderPlan, PlanStep
 
     plan = CommanderPlan(plan=[

@@ -7,7 +7,7 @@ re-verifies with the same verifier. No LLM is involved, so the fork is
 exactly reproducible. The original run is never modified.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app import models
 from app.policies.engine import evaluate
@@ -100,7 +100,7 @@ def fork_run(db, run_id: str, choose_candidate: int | str, at_event: str = "atta
 
     fork = models.SimulationRun(scenario_id=run.scenario_id, custom_twin_id=run.custom_twin_id,
                                 custom_scenario_id=run.custom_scenario_id, seed=run.seed, state="RUNNING",
-                                mode="offline", started_at=datetime.now(timezone.utc))
+                                mode="offline", started_at=datetime.now(UTC))
     db.add(fork); db.commit(); db.refresh(fork)
     seq = {"n": 0}
 
@@ -147,7 +147,7 @@ def fork_run(db, run_id: str, choose_candidate: int | str, at_event: str = "atta
     emit("verification", f"Counterfactual verification {res.outcome}: {res.invariant}", agent="verification_scientist",
          payload=res.model_dump())
     fork.state = "COMPLETED"
-    fork.ended_at = datetime.now(timezone.utc)
+    fork.ended_at = datetime.now(UTC)
     fork.metrics = res.metrics
     emit("completed", f"Counterfactual COMPLETED — verification {res.outcome}")
     db.commit()

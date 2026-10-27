@@ -4,8 +4,17 @@ import networkx as nx
 
 from app.agents.framework import io
 from app.agents.framework.base import Agent, AgentContext
-from app.agents.framework.io import (CommanderPlan, DialectOut, FindingsOut, IdentityOut,
-                                     ImpactOut, IntelOut, PlanStep, ReportOut, SurfaceOut)
+from app.agents.framework.io import (
+    CommanderPlan,
+    DialectOut,
+    FindingsOut,
+    IdentityOut,
+    ImpactOut,
+    IntelOut,
+    PlanStep,
+    ReportOut,
+    SurfaceOut,
+)
 from app.agents.framework.registry import REGISTRY
 from app.integrations.meta_client import meta_client
 from app.policies import engine as policy_engine

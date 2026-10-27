@@ -8,10 +8,10 @@ chooser, labelled mode=offline. Synthetic data only.
 """
 
 from app.agents.red_team import enumerate_paths, sort_campaign_paths
+from app.arena.learning import ArenaMemory, learned_blue_chooser, learned_red_chooser
 from app.integrations.meta_client import meta_client
 from app.simulation.candidates import evaluate_candidates
 from app.simulation.twin import DigitalTwin
-from app.arena.learning import ArenaMemory, learned_blue_chooser, learned_red_chooser
 
 BLUE_SYSTEM = (
     "You are the Blue Team in CYBERGENESIS Arena, a defensive simulation on synthetic data only. "

@@ -5,9 +5,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
+import pytest
 
-from app.integrations.meta_client import meta_client  # noqa: E402
+from app.integrations.meta_client import meta_client
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_META_INTEGRATION") != "1" or not meta_client.configured,

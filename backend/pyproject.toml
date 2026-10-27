@@ -7,11 +7,11 @@ dependencies = [
   "sqlalchemy>=2.0", "networkx>=3.3", "httpx>=0.28",
 ]
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.8"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.17,<0.18"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 [tool.ruff]
 line-length = 140
 [tool.ruff.lint]
-ignore = ["E702"]  # compact twin state assignments are intentional
+ignore = ["E702", "B008"]  # E702: compact twin assignments; B008: FastAPI Depends() defaults are the framework idiom

@@ -4,16 +4,16 @@ import sys
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from app.main import app  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
-from app.policies.engine import evaluate  # noqa: E402
-from app.schemas import IncidentHypothesis  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
-from app.simulation.twin import DigitalTwin  # noqa: E402
-from pydantic import ValidationError  # noqa: E402
+from app.main import app
+from app.orchestration.orchestrator import run_experiment
+from app.policies.engine import evaluate
+from app.schemas import IncidentHypothesis
+from app.simulation.scenarios import SCENARIOS
+from app.simulation.twin import DigitalTwin
 
 client = TestClient(app)
 
@@ -72,8 +72,9 @@ def test_deterministic_replay_same_seed():
 
 
 def test_verification_catches_failed_defense():
-    from app.verification.verifier import verify
     import time
+
+    from app.verification.verifier import verify
     base = DigitalTwin()
     attacked = DigitalTwin(); attacked.apply_attack(SCENARIOS["ransomware_activity"], seed=42)
     baseline_result = attacked.attempt_attack_objective(SCENARIOS["ransomware_activity"])
@@ -84,8 +85,8 @@ def test_verification_catches_failed_defense():
 
 @pytest.mark.asyncio
 async def test_full_experiment_all_scenarios():
-    from app.db import SessionLocal
     from app import models
+    from app.db import SessionLocal
     for sid in SCENARIOS:
         c = client.post("/api/experiments", json={"scenario_id": sid, "seed": 42})
         assert c.status_code == 201, c.text

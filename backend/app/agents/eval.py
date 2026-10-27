@@ -1,19 +1,18 @@
 """Agent evaluation scorecards over generated twins with deterministic ground truth."""
 
 import asyncio
+import random
 
 from app.agents import agents as legacy_agents
+from app.agents.framework import io
 from app.agents.framework.adapters import build_agent
 from app.agents.framework.base import AgentContext
-from app.agents.framework import io
 from app.agents.framework.new_agents import default_plan, validate_plan
 from app.benchmark.generator import generate_pair
 from app.policies import engine as policy_engine
 from app.simulation.candidates import evaluate_candidates
 from app.simulation.twin import DigitalTwin
 from app.verification.verifier import verify
-
-import random
 
 
 def identity_recall(twin, guardian_out) -> float:

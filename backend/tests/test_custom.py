@@ -5,12 +5,12 @@ os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
-from app.simulation.twin import DigitalTwin  # noqa: E402
+from app.main import app
+from app.orchestration.orchestrator import run_experiment
+from app.simulation.twin import DigitalTwin
 
 client = TestClient(app)
 
@@ -68,8 +68,8 @@ def test_candidates_optimality_and_red_team():
 async def test_concurrent_runs_isolated_twins_and_metrics():
     import asyncio as _asyncio
 
-    from app.db import SessionLocal
     from app import models as _models
+    from app.db import SessionLocal
 
     ids = []
     for _ in range(2):
@@ -116,8 +116,8 @@ def test_one_way_outbound_block():
 
 @pytest.mark.asyncio
 async def test_vision_and_text_to_scenario_mocked(monkeypatch):
-    from app.integrations import meta_client as mc_mod
     from app import main as main_mod
+    from app.integrations import meta_client as mc_mod
 
     async def fake_vision(prompt, image, run_id=None):
         return ({"assets": [{"id": "ws-1", "name": "WS", "asset_type": "workstation", "zone": "endpoints", "pos": [0, 1, 0]},

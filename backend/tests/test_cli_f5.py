@@ -4,11 +4,11 @@ import sys
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from app.cli.engine import complete, execute  # noqa: E402
-from app.main import app  # noqa: E402
-from app.orchestration import orchestrator  # noqa: E402
+from app.cli.engine import complete, execute
+from app.main import app
+from app.orchestration import orchestrator
 
 client = TestClient(app)
 

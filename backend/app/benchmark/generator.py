@@ -1,6 +1,7 @@
 """Seeded benchmark generator: random layered twins (8-20 assets) + reachable scenarios."""
 
 import random
+from itertools import pairwise
 
 from app.simulation.twin import DigitalTwin
 
@@ -44,7 +45,7 @@ def generate_pair(rng: random.Random, idx: int) -> tuple[list[dict], list[dict],
     twin = DigitalTwin.from_dict(assets, conns)
     if not twin.reachable(src, tgt):  # guarantee baseline reachability with a spine
         spine = [by_layer[i][0] for i in range(4)]
-        for a, b in zip(spine, spine[1:]):
+        for a, b in pairwise(spine):
             if not any({c["source"], c["target"]} == {a, b} for c in conns):
                 conns.append({"source": a, "target": b, "traversable": True, "types": ["network"]})
     scenario = {"id": f"gen-{idx}", "name": f"Generated Pair {idx}", "source_asset": src, "target_asset": tgt, "verification_kind": "reachability",

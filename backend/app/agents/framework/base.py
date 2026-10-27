@@ -1,7 +1,6 @@
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -9,8 +8,6 @@ from app.agents.framework.spec import AgentSpec
 from app.agents.framework.tools import ToolExecutor
 from app.core.config import settings
 from app.integrations.meta_client import meta_client
-
-Out = TypeVar("Out", bound=BaseModel)
 
 
 @dataclass
@@ -25,7 +22,7 @@ class AgentContext:
     bus: object = None
 
 
-class AgentResult(BaseModel, Generic[Out]):
+class AgentResult[Out: BaseModel](BaseModel):
     agent_id: str
     output: Out
     mode: str = "offline"  # live|offline
@@ -41,7 +38,7 @@ class AgentResult(BaseModel, Generic[Out]):
     tool_calls: list[dict] = []
 
 
-class Agent(Generic[Out]):
+class Agent[Out: BaseModel]:
     spec: AgentSpec
 
     def __init__(self, spec: AgentSpec):

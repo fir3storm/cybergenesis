@@ -84,7 +84,7 @@ def learned_blue_chooser(memory: ArenaMemory):
             avg_disrupted = (entry.get("disrupted", 0) / plays) if plays else (c.get("disrupted") or 0)
             return (not c.get("blocked"), -memory.blue_rate(c["label"]), avg_disrupted,
                     invasiveness(c.get("actions", [])), c["label"])
-        return sorted(cands, key=score)[0]
+        return min(cands, key=score)
     return choose
 
 
@@ -95,5 +95,5 @@ def learned_red_chooser(memory: ArenaMemory):
         if not paths:
             return None
         ranked = sort_campaign_paths(twin, paths)
-        return sorted(ranked, key=lambda p: -memory.red_rate(p))[0]
+        return min(ranked, key=lambda p: -memory.red_rate(p))
     return choose

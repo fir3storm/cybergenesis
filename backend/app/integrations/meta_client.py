@@ -183,7 +183,7 @@ class MetaModelClient:
             return parsed, rec
         except ProviderUnavailable:
             raise
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise ProviderUnavailable(f"vision call failed: {type(e).__name__}: {e}") from e
 
 

@@ -7,11 +7,11 @@ os.environ["OFFLINE_MODE"] = "true"
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.core.config import settings  # noqa: E402
-from app.main import app  # noqa: E402
+from app.core.config import settings
+from app.main import app
 
 client = TestClient(app)
 

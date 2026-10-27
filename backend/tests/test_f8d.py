@@ -7,14 +7,19 @@ os.environ["OFFLINE_MODE"] = "true"
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
+from app.main import app
+from app.orchestration.orchestrator import run_experiment
 
 client = TestClient(app)
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+
+def _verify(path) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "verify_cert.py"), str(path)],
+                          capture_output=True, text=True, check=False)
 
 
 @pytest.mark.asyncio
@@ -29,8 +34,7 @@ async def test_certificate_valid_then_tampered_invalid(tmp_path):
 
     good = tmp_path / "cert.json"
     good.write_text(json.dumps(data), encoding="utf-8")
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "verify_cert.py"), str(good)],
-                         capture_output=True, text=True)
+    out = _verify(good)
     assert out.returncode == 0 and "VALID" in out.stdout, out.stdout + out.stderr
 
     tampered = json.loads(json.dumps(data))
@@ -43,6 +47,5 @@ async def test_certificate_valid_then_tampered_invalid(tmp_path):
         a["isolated"] = False
     bad = tmp_path / "cert-tampered.json"
     bad.write_text(json.dumps(tampered), encoding="utf-8")
-    out = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "verify_cert.py"), str(bad)],
-                         capture_output=True, text=True)
+    out = _verify(bad)
     assert out.returncode == 1 and "INVALID" in out.stdout

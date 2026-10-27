@@ -25,7 +25,7 @@ async def author_scenario(prompt_text: str, name: str, asset_ids: list[str]) -> 
     try:
         with meta_client.use_budget_tier("advisory"):
             data, _u = await meta_client.chat_json("You write validated synthetic security scenarios. JSON only.", prompt)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(503, f"Meta unavailable: {type(e).__name__}: {e}") from e
     try:
         body = CreateCustomScenario(name=name, description=prompt_text[:300],
@@ -33,7 +33,7 @@ async def author_scenario(prompt_text: str, name: str, asset_ids: list[str]) -> 
                                     severity=data.get("severity", "medium"), invariant=data.get("invariant", ""),
                                     verification_kind="reachability",
                                     attack_steps=data.get("attack_steps", []), expected_defense=data.get("expected_defense", []))
-    except Exception as e:  # noqa: BLE001 - untrusted model output
+    except Exception as e:
         raise HTTPException(422, f"model output failed schema validation: {e}") from e
     for aid in [body.source_asset, body.target_asset] + [s.asset for s in body.attack_steps]:
         if aid not in asset_ids:
@@ -73,5 +73,5 @@ async def architect_twin(image_data_url: str, name: str) -> CreateCustomTwin:
     try:
         return CreateCustomTwin(name=name, description="Generated from uploaded diagram via Meta vision",
                                 assets=data.get("assets", []), connections=data.get("connections", []))
-    except Exception as e:  # noqa: BLE001 - untrusted model output
+    except Exception as e:
         raise HTTPException(422, f"model output failed schema validation: {e}") from e

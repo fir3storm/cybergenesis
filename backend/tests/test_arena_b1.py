@@ -6,9 +6,9 @@ import sys
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.arena.engine import play_match  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
-from app.simulation.twin import DigitalTwin  # noqa: E402
+from app.arena.engine import play_match
+from app.simulation.scenarios import SCENARIOS
+from app.simulation.twin import DigitalTwin
 
 
 def _no_defense(twin, baseline, scenario, history):

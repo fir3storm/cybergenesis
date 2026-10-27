@@ -6,12 +6,12 @@ import sys
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
+import pytest
 
-from app.arena import ai as arena_ai  # noqa: E402
-from app.arena.engine import play_match_async  # noqa: E402
-from app.integrations.meta_client import ProviderUnavailable  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
+from app.arena import ai as arena_ai
+from app.arena.engine import play_match_async
+from app.integrations.meta_client import ProviderUnavailable
+from app.simulation.scenarios import SCENARIOS
 
 
 class _Ctx:

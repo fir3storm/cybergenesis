@@ -132,7 +132,7 @@ class DigitalTwin:
 
     def _build_device_configs(self) -> dict:
         from app.devices.registry import BUILTIN_DEVICE_MAP
-        from app.netmodel.config import DeviceConfig, Interface, Service, User, Session, Mgmt
+        from app.netmodel.config import DeviceConfig, Interface, Mgmt, Service, Session, User
 
         svc_by_type = {"gateway": [Service(name="https", port=443)],
                        "firewall": [Service(name="https", port=443), Service(name="ssh", port=22)],
@@ -160,7 +160,8 @@ class DigitalTwin:
             if a["asset_type"] == "database":
                 # standing app-tier service session: the database is reached through an
                 # active (synthetic) service identity, not through a weakness
-                from app.netmodel.config import Session as _Sess, User as _Usr
+                from app.netmodel.config import Session as _Sess
+                from app.netmodel.config import User as _Usr
 
                 users.append(_Usr(name="svc-app", role="service", mfa=True,
                                   sessions=[_Sess(id="svc-app-sess", active=True, compromised=False)],
@@ -653,10 +654,9 @@ class DigitalTwin:
                      "red_vs_blue_battle": "synthetic-locker.exe"}.get(scenario["id"], "suspicious-synthetic.exe")
         windows_assets = {"employee-workstation", "admin-workstation", "file-server", "identity-provider"}
         for aid, st in self.status.items():
-            if st == "compromised" and aid in windows_assets:
-                if not any(p.get("suspicious") for p in self.processes.get(aid, [])):
-                    self.processes.setdefault(aid, []).append(
-                        {"name": proc_name, "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
+            if st == "compromised" and aid in windows_assets and not any(p.get("suspicious") for p in self.processes.get(aid, [])):
+                self.processes.setdefault(aid, []).append(
+                    {"name": proc_name, "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
         return events
 
     def attempt_attack_objective(self, scenario: dict) -> dict:

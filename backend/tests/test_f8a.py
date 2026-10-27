@@ -5,14 +5,14 @@ os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["OFFLINE_MODE"] = "true"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import asyncio  # noqa: E402
+import asyncio
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
-from app.orchestration import orchestrator  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
+from app.main import app
+from app.orchestration import orchestrator
+from app.orchestration.orchestrator import run_experiment
 
 client = TestClient(app)
 
@@ -145,7 +145,7 @@ async def test_advisory_budget_exhausted_while_backbone_still_works(monkeypatch)
         async def __aexit__(self, *exc):
             return False
 
-        async def post(self, url, headers=None, json=None):  # noqa: A002 - httpx kwarg name
+        async def post(self, url, headers=None, json=None):
             captured["body"] = json
             return _Resp()
 

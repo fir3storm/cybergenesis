@@ -2,8 +2,15 @@ from pydantic import BaseModel, Field
 
 from app.agents.framework import io
 from app.agents.framework.spec import AgentSpec
-from app.schemas import (AgentObservation, AttackScenarioPlan, CampaignPlan, DefenseProposal,
-                         DefenseExecutionResult, IncidentHypothesis, VerificationResult)
+from app.schemas import (
+    AgentObservation,
+    AttackScenarioPlan,
+    CampaignPlan,
+    DefenseExecutionResult,
+    DefenseProposal,
+    IncidentHypothesis,
+    VerificationResult,
+)
 from app.simulation.twin import ALLOWED_ACTIONS
 
 

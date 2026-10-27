@@ -12,9 +12,9 @@ os.environ["OFFLINE_MODE"] = "true"  # hermetic tests: never call the live provi
 os.environ["HUMAN_APPROVAL_ENABLED"] = "false"  # approval gate is exercised in its own test with a resolver
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app import models  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
+from app import models
+from app.db import SessionLocal, init_db
+from app.simulation.scenarios import SCENARIOS
 
 init_db()
 _db = SessionLocal()

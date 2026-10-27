@@ -5,21 +5,21 @@ os.environ["OFFLINE_MODE"] = "true"
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import asyncio  # noqa: E402
+import asyncio
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
-from app.agents.framework.base import Agent, AgentContext  # noqa: E402
-from app.agents.framework.bus import Blackboard  # noqa: E402
-from app.agents.framework.registry import REGISTRY  # noqa: E402
-from app.agents.framework.spec import AgentSpec  # noqa: E402
-from app.agents.framework.tools import ToolExecutor, ToolRefused  # noqa: E402
-from app.db import SessionLocal, init_db  # noqa: E402
-from app import models  # noqa: E402
-from app.main import app  # noqa: E402
-from app.simulation.twin import DigitalTwin  # noqa: E402
+from app import models
+from app.agents.framework.base import Agent, AgentContext
+from app.agents.framework.bus import Blackboard
+from app.agents.framework.registry import REGISTRY
+from app.agents.framework.spec import AgentSpec
+from app.agents.framework.tools import ToolExecutor, ToolRefused
+from app.db import SessionLocal, init_db
+from app.main import app
+from app.simulation.twin import DigitalTwin
 
 client = TestClient(app)
 init_db()

@@ -6,14 +6,14 @@ os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["HUMAN_APPROVAL_ENABLED"] = "false"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
-from app.netmodel.compiler import compile_twin, content_hash  # noqa: E402
-from app.netmodel.config import Acl, AclEntry, DeviceConfig, FwPolicy, Interface, Service  # noqa: E402
-from app.orchestration.orchestrator import run_experiment  # noqa: E402
-from app.simulation.scenarios import SCENARIOS  # noqa: E402
+from app.main import app
+from app.netmodel.compiler import compile_twin, content_hash
+from app.netmodel.config import Acl, AclEntry, DeviceConfig, FwPolicy, Interface, Service
+from app.orchestration.orchestrator import run_experiment
+from app.simulation.scenarios import SCENARIOS
 
 client = TestClient(app)
 
@@ -119,7 +119,8 @@ def test_f2_missing_port_refused_and_multi_service():
 
 
 def test_f2_lru_cache_bounded():
-    from app.netmodel.compiler import cache_size, compile_twin as ct
+    from app.netmodel.compiler import cache_size
+    from app.netmodel.compiler import compile_twin as ct
 
     for i in range(260):
         c, cb, cats = base()

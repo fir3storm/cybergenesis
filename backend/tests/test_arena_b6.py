@@ -9,11 +9,11 @@ os.environ["OFFLINE_MODE"] = "true"
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
+import pytest
+from fastapi.testclient import TestClient
 
-from app.core.config import settings  # noqa: E402
-from app.main import app  # noqa: E402
+from app.core.config import settings
+from app.main import app
 
 client = TestClient(app)
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
@@ -26,7 +26,7 @@ def _mem(tmp_path, monkeypatch):
 
 def _verify(path) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "verify_cert.py"), str(path)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, check=False)
 
 
 def test_arena_certificate_valid_then_tampered_invalid(tmp_path):

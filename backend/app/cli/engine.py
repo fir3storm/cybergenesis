@@ -310,7 +310,7 @@ def execute(twin, asset_id: str, command: str, user: str = "admin") -> dict:
         out, diff = "\n".join(entries) or "no commands in this mode", None
     else:
         output, diff = parse_command(dialect, cfg, cmd)
-        if output.startswith("% Invalid input") or "command not found" in output or output.startswith("syntax error"):
+        if output.startswith(("% Invalid input", "syntax error")) or "command not found" in output:
             marker = ERROR_MARKERS.get(dialect, "% Invalid input detected at '^' marker.")
             output = marker.format(cmd=cmd.split()[0] if cmd.split() else cmd)
         out = output

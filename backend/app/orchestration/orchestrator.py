@@ -8,7 +8,7 @@ Each run owns its twin; the display twin syncs only when a run finishes.
 import asyncio
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app import models
 from app.agents import agents, red_team
@@ -104,7 +104,7 @@ def _emit(db, run_id, event_type, message, agent=None, asset_id=None, payload=No
     db.add(ev); db.commit(); db.refresh(ev)
     data = {"event_type": event_type, "run_id": run_id, "agent": agent, "asset_id": asset_id,
             "message": message, "payload": payload or {}, "seq": ev.seq,
-            "timestamp": ev.created_at.isoformat() if ev.created_at else datetime.now(timezone.utc).isoformat(),
+            "timestamp": ev.created_at.isoformat() if ev.created_at else datetime.now(UTC).isoformat(),
             "twin": (twin or TWIN).to_dict()}
     for q in _ws_queues.get(run_id, []):
         q.put_nowait(data)
@@ -124,7 +124,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         await _run_experiment_impl(run_id, step_delay_ms=step_delay_ms)
         return
     task = asyncio.create_task(_run_experiment_impl(run_id, step_delay_ms=step_delay_ms))
-    done, pending = await asyncio.wait({task}, timeout=float(timeout))
+    _done, pending = await asyncio.wait({task}, timeout=float(timeout))
     if not pending:
         if not task.cancelled():
             exc = task.exception()
@@ -137,14 +137,14 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
     except asyncio.CancelledError:
         pass
     except Exception:  # noqa: BLE001 - timeout bookkeeping below is the honest outcome
-        pass
+        task_error = True  # noqa: F841 - recorded for the timeout bookkeeping below
     db = SessionLocal()
     try:
         run = db.get(models.SimulationRun, run_id)
         if run is not None:
             run.state = "FAILED"
             run.error = "run_timeout"
-            run.ended_at = datetime.now(timezone.utc)
+            run.ended_at = datetime.now(UTC)
             db.commit()
             _emit(db, run_id, "run_timeout",
                   f"Run exceeded run_timeout_s={float(timeout)}s and was stopped (error=run_timeout)")
@@ -188,7 +188,7 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
         for aid in (scenario["source_asset"], scenario["target_asset"]):
             if aid not in twin.asset_ids():
                 raise ValueError(f"scenario asset '{aid}' not in twin")
-        run.started_at = datetime.now(timezone.utc)
+        run.started_at = datetime.now(UTC)
         mode = "live" if meta_client.configured else "offline"
         run.mode = mode; db.commit()
 
@@ -212,9 +212,9 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
 
         # framework routing: investigator / strategist / red planner run THROUGH their adapters,
         # so AgentResult carries framework mode, fallback_reason, prompt hash and token accounting
+        from app.agents.framework import io as _fw_io
         from app.agents.framework.adapters import build_agent as _fw_build
         from app.agents.framework.base import AgentContext as _FwCtx
-        from app.agents.framework import io as _fw_io
 
         _baseline_ref: dict = {}
 
@@ -251,9 +251,9 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
         # Incident Commander plans the run (validated DAG); execution follows the mandatory backbone regardless
         commander_plan = None
         try:
+            from app.agents.framework import io as _agent_io
             from app.agents.framework.adapters import build_agent as _build_agent
             from app.agents.framework.base import AgentContext as _AgentContext
-            from app.agents.framework import io as _agent_io
 
             _cmd = await _build_agent("incident_commander").run(
                 _AgentContext(run_id=run_id, twin=twin, scenario=scenario), _agent_io.TextIn(text=scenario["name"]))
@@ -303,9 +303,9 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
         await set_state("TELEMETRY_COLLECTED", f"{len(telemetry)} synthetic telemetry events collected", "observer")
         obs = agents.observe(telemetry)
         # assurance agents publish to the bus/record; failures are honest, never silently swallowed
+        from app.agents.framework import io as _aio
         from app.agents.framework.adapters import build_agent as _ba
         from app.agents.framework.base import AgentContext as _AC
-        from app.agents.framework import io as _aio
 
         _ctx = _AC(run_id=run_id, twin=twin, scenario=scenario, telemetry=telemetry, baseline_twin=baseline_twin)
         for _aid, _inp in (("threat_intel_analyst", _aio.TelemetryIn(telemetry=telemetry)),
@@ -376,7 +376,7 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                     else:
                         _runnable.append(_aid)
                 if _runnable:
-                    _step_started_at = datetime.now(timezone.utc).isoformat()
+                    _step_started_at = datetime.now(UTC).isoformat()
                     _step_t0 = time.monotonic()
                     for _aid in _runnable:
                         emit("plan_step_started", f"Commander step {_step.step}: {_aid} starting", agent="incident_commander",
@@ -388,7 +388,7 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                         _results = []
                         for _a in _runnable:  # sequential: listed order, each awaited
                             _results.append(await _run_optional(_a))
-                    _step_finished_at = datetime.now(timezone.utc).isoformat()
+                    _step_finished_at = datetime.now(UTC).isoformat()
                     _step_duration_ms = int((time.monotonic() - _step_t0) * 1000)
                     for _aid, (_r, _err, _agent_ms) in zip(_runnable, _results):
                         emit("plan_step_finished", f"Commander step {_step.step}: {_aid} {'done' if _r else 'failed'}",
@@ -577,7 +577,7 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                         if entry["via"] == "mobile":
                             emit("approval_mobile", f"Defense {'approved' if approved_by_human else 'rejected'} via mobile (one-time token)",
                                  agent="defense_executor", payload={"via": "mobile", "approved": approved_by_human})
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         approved_by_human = False
                         approval_timed_out = True
                         emit("approval_timeout", f"Human approval auto-denied after {settings.approval_timeout_seconds}s — defense NOT applied", agent="defense_executor")
@@ -837,19 +837,19 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
         run.state = "FAILED" if _check_cancel(run_id) else "COMPLETED"
         if _check_cancel(run_id):
             run.error = "cancelled by operator"
-        run.ended_at = datetime.now(timezone.utc); db.commit()
+        run.ended_at = datetime.now(UTC); db.commit()
         activate_twin(twin)
         emit("completed" if run.state == "COMPLETED" else "failed",
              f"Experiment {run.state} — verification {result.outcome}", payload={"verification": result.model_dump(), "metrics": result.metrics})
     except asyncio.CancelledError:
         run = db.get(models.SimulationRun, run_id)
         if run:
-            run.state = "FAILED"; run.error = "cancelled"; run.ended_at = datetime.now(timezone.utc); db.commit()
+            run.state = "FAILED"; run.error = "cancelled"; run.ended_at = datetime.now(UTC); db.commit()
             _emit(db, run_id, "failed", "Experiment cancelled", twin=twin)
     except Exception as e:  # noqa: BLE001
         run = db.get(models.SimulationRun, run_id)
         if run:
-            run.state = "FAILED"; run.error = f"{type(e).__name__}: {e}"; run.ended_at = datetime.now(timezone.utc); db.commit()
+            run.state = "FAILED"; run.error = f"{type(e).__name__}: {e}"; run.ended_at = datetime.now(UTC); db.commit()
             _emit(db, run_id, "failed", run.error, twin=twin)
     finally:
         _cancelled.discard(run_id)
