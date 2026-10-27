@@ -533,46 +533,94 @@ def preview_device_diff(asset_id: str, body: StageDiffRequest):
     return {"changes": changes, "config_hash_after": clone.config_hash()}
 
 
-KNOWN_SET_PATHS = {"isolated", "weaknesses", "quarantine_vlan", "hostname"}
-KNOWN_SET_PREFIXES = ("interfaces.", "mgmt.", "patches.", "services.", "users.")
+ROLE_RANK = {"viewer": 0, "user": 1, "operator": 2, "admin": 3, "administrator": 3}
 
 
-def _op_semantics(op: dict) -> tuple[str, str] | None:
-    """Map every diff op to a semantic action BEFORE policy evaluation. None = unknown."""
+def _resolve_asset_by_ip(twin, ip_or_id: str) -> str | None:
+    if ip_or_id in twin.device_configs:
+        return ip_or_id
+    for aid, cfg in twin.device_configs.items():
+        for iface in cfg.get("interfaces", []):
+            if iface.get("ip") == ip_or_id:
+                return aid
+    return None
+
+
+def _op_semantics(op: dict, twin=None, asset_id: str = "") -> tuple[str, str | None, dict] | None:
+    """Explicit op->semantic table. Returns (semantic, action_to_evaluate|None, params).
+    None = reject. There is deliberately NO catch-all."""
     kind = op.get("op")
     if kind == "action":
-        return (op["value"]["action_type"], "direct allowlisted action")
+        return (op["value"]["action_type"], op["value"]["action_type"], op["value"].get("params", {}))
     if kind in ("add_acl_entry", "bind_acl", "add_acl_deny"):
-        return ("block_connection", "ACL change evaluated as a flow-blocking action")
-    if kind == "set":
-        path = op.get("path", "")
-        if path == "isolated":
-            return ("isolate_asset", "set isolated maps to isolate_asset") if op.get("value") else ("restore_connectivity", "clearing isolated maps to restore")
-        if path == "weaknesses" or path.startswith("patches."):
-            return ("apply_patch", "weakness/patch change maps to apply_patch")
-        if path.startswith("interfaces.") and path.endswith(".enabled"):
-            return ("disable_service", "interface shutdown maps to disable_service") if not op.get("value") else ("restore_connectivity", "interface enable")
-        if path.startswith("mgmt."):
-            return ("harden_mgmt", "management-plane change maps to harden_mgmt")
-        if path in KNOWN_SET_PATHS or path.startswith(KNOWN_SET_PREFIXES):
-            return ("apply_patch", "benign config field")
+        entry = (op.get("value") or {}).get("entry", {}) if kind == "add_acl_entry" else {}
+        dst_raw = entry.get("dst", "any")
+        target = _resolve_asset_by_ip(twin, dst_raw) if twin is not None and dst_raw != "any" else None
+        if target is None and twin is not None:
+            target = next(iter(twin.graph.successors(asset_id)), asset_id) if asset_id in twin.graph else asset_id
+        return ("block_connection", "block_connection",
+                {"source": asset_id, "target": target, "direction": "egress"})
+    if kind != "set":
         return None
+    path = op.get("path", "")
+    value = op.get("value")
+    if path == "isolated":
+        return ("isolate_asset", "isolate_asset", {}) if value else ("restore_connectivity", "restore_connectivity", {})
+    if path == "quarantine_vlan":
+        return ("quarantine_vlan", "quarantine_vlan", {})
+    if path == "weaknesses" or path.startswith("patches."):
+        return ("apply_patch", "apply_patch", {})
+    if path.startswith("mgmt."):
+        return ("harden_mgmt", "harden_mgmt", {})
+    if path.startswith("interfaces."):
+        if path.endswith(".enabled"):
+            return ("disable_service", "disable_service", {}) if not value else ("restore_connectivity", "restore_connectivity", {})
+        return ("interface_config", None, {})  # vlan/mode/ip/description on an interface: validated structurally at apply
+    if path.startswith("services."):
+        if path.endswith(".enabled"):
+            return ("disable_service", "disable_service", {}) if not value else ("benign", None, {})
+        return None
+    if path.startswith("users."):
+        if path.endswith(".role"):
+            return ("privilege_change", None, {})  # special-cased in _validate_diff_ops (lowering only)
+        if path.endswith(".mfa"):
+            return ("enforce_mfa", "enforce_mfa", {}) if value else ("mfa_disable", None, {})  # disabling MFA is always denied below
+        if ".sessions" in path:
+            return ("revoke_session", "revoke_session", {})
+        return None
+    if path in ("hostname",) or path.endswith(".description"):
+        return ("benign", None, {})
     return None
 
 
 def _validate_diff_ops(twin, asset_id: str, diff: dict) -> list[str]:
     reasons: list[str] = []
+    cfg = twin.device_configs.get(asset_id, {})
     for op in diff.get("ops", []):
-        sem = _op_semantics(op)
+        sem = _op_semantics(op, twin, asset_id)
         if sem is None:
-            reasons.append(f"unknown config path/op: {op.get('op')} {op.get('path', '')}".strip())
+            reasons.append(f"unknown config path/op rejected: {op.get('op')} {op.get('path', '')}".strip())
             continue
-        action_type, _why = sem
-        peer = next(iter(twin.graph.successors(asset_id)), asset_id) if asset_id in twin.graph else asset_id
-        params = {"source": asset_id, "target": peer} if action_type == "block_connection" else {}
+        name, action_type, params = sem
+        if name == "mfa_disable":
+            reasons.append("users.*.mfa=false is denied: MFA may only be enforced, never removed")
+            continue
+        if name == "privilege_change":
+            # users.<idx>.role: only lowering a privilege is allowed
+            parts = op["path"].split(".")
+            try:
+                current = cfg.get("users", [])[int(parts[1])].get("role", "user")
+            except (IndexError, ValueError, TypeError):
+                reasons.append(f"privilege_change: cannot resolve current role at {op['path']}")
+                continue
+            if ROLE_RANK.get(str(op.get("value", "")).lower(), 99) >= ROLE_RANK.get(str(current).lower(), 1):
+                reasons.append(f"privilege escalation denied: {current} -> {op.get('value')} (only lowering is allowed)")
+            continue
+        if action_type is None:
+            continue  # benign / structural: nothing to evaluate
         d = policy_engine.evaluate(action_type, asset_id, params, twin)
         if not d.approved:
-            reasons.append(f"{op.get('op')} ({action_type}): {'; '.join(d.reasons)}")
+            reasons.append(f"{op.get('op')} ({name}->{action_type}): {'; '.join(d.reasons)}")
     return reasons
 
 

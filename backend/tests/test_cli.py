@@ -100,6 +100,29 @@ def test_f3_set_isolated_on_domain_controller_rejected_403():
     client.post("/api/twin/reset")
 
 
+def test_f7d_policy_gate_table():
+    client.post("/api/twin/reset")
+    # users.*.mfa=false -> always denied
+    client.post("/api/twin/devices/employee-workstation/config/diff",
+                json={"diff": {"ops": [{"op": "set", "path": "users.0.mfa", "value": False}]}})
+    assert client.post("/api/twin/devices/employee-workstation/config/commit").status_code == 403
+    # services disable on the identity provider (protected class) -> 403
+    client.post("/api/twin/devices/identity-provider/config/diff",
+                json={"diff": {"ops": [{"op": "set", "path": "services.0.enabled", "value": False}]}})
+    assert client.post("/api/twin/devices/identity-provider/config/commit").status_code == 403
+    # hostname change is benign -> allowed
+    client.post("/api/twin/devices/employee-workstation/config/diff",
+                json={"diff": {"ops": [{"op": "set", "path": "hostname", "value": "WS-RENAMED-01"}]}})
+    r = client.post("/api/twin/devices/employee-workstation/config/commit")
+    assert r.status_code == 200, r.text
+    assert client.get("/api/twin/devices/employee-workstation/config").json()["config"]["hostname"] == "WS-RENAMED-01"
+    # unknown path -> rejected, no catch-all
+    client.post("/api/twin/devices/employee-workstation/config/diff",
+                json={"diff": {"ops": [{"op": "set", "path": "secret.backdoor", "value": True}]}})
+    assert client.post("/api/twin/devices/employee-workstation/config/commit").status_code == 403
+    client.post("/api/twin/reset")
+
+
 def test_audit_and_explain_endpoints():
     assert client.post("/api/audit/run").status_code == 200
     r = client.post("/api/config/explain", json={"text": "line vty 0 4 transport input telnet"})
