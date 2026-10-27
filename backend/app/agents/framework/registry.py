@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from app.agents.framework.spec import AgentSpec
 from app.schemas import (AgentObservation, AttackScenarioPlan, CampaignPlan, DefenseProposal,
                          DefenseExecutionResult, IncidentHypothesis, VerificationResult)
+from app.simulation.twin import ALLOWED_ACTIONS
 
 
 class _TextIn(BaseModel):
@@ -34,8 +35,7 @@ SPECS: list[AgentSpec] = [
               tools=READ_TOOLS, prompt_file="incident_investigator.md"),
     AgentSpec(id="defense_strategist", name="Defense Strategist", team="blue", engine="meta",
               description="Countermeasure proposals + simulated final choice", input_model=_TextIn, output_model=DefenseProposal,
-              tools=READ_TOOLS + ["simulate_on_clone"], can_propose_actions=["isolate_asset", "block_connection", "revoke_session",
-              "rotate_credential", "apply_patch", "disable_service", "restore_connectivity", "quarantine_vlan", "harden_mgmt"],
+              tools=READ_TOOLS + ["simulate_on_clone"], can_propose_actions=sorted(ALLOWED_ACTIONS),
               prompt_file="defense_strategist.md"),
     AgentSpec(id="defense_executor", name="Defense Executor", team="blue", engine="deterministic",
               description="Policy gate + the ONLY twin mutator", input_model=_TextIn, output_model=DefenseExecutionResult,

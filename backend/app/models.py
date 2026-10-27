@@ -178,7 +178,7 @@ class ModelUsage(Base):
 
 class AgentMessageRow(Base):
     __tablename__ = "agent_messages"
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
     run_id: Mapped[str] = mapped_column(String, index=True)
     from_agent: Mapped[str] = mapped_column(String)
     to_agent: Mapped[str | None] = mapped_column(String, nullable=True)

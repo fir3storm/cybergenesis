@@ -568,12 +568,10 @@ async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
                                           verification={"approved": False, "reasons": d.reasons})
                 db.add(row); db.commit()
                 raise HTTPException(403, detail={"status": "rejected", "reasons": d.reasons})
-    _apply_config_diff(twin, asset_id, diff)
+    _apply_config_diff(twin, asset_id, diff)  # records the version once, inside _apply_config_diff
     row = models.ConfigCommit(device_id=asset_id, status="committed", diff=diff,
                               verification={"config_hash": twin.config_hash()})
     db.add(row); db.commit()
-    twin.config_versions.setdefault(asset_id, []).append(
-        {"version": len(twin.config_versions.get(asset_id, [])), "config": twin.device_configs[asset_id]})
     await _broadcast_twin_updated()
     return {"committed": True, "asset_id": asset_id, "config_hash": twin.config_hash(), "twin": twin.to_dict()}
 
