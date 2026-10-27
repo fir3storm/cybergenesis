@@ -168,7 +168,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         # race against time: the attack advances one hop per 2.0s of simulated time;
         # live model latency is converted to simulated time, so slow reasoning costs nodes
-        live_latency = sum(u["latency_ms"] for u in meta_client.usage if u.get("run_id") == run_id)
+        live_latency = sum(u["latency_ms"] for u in meta_client.usage_snapshot(run_id))
         sim_seconds = live_latency / 1000.0
         hops = int(sim_seconds // 2.0)
         if hops and baseline_path and len(baseline_path) > 2:
@@ -460,13 +460,11 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 elif st in ("suspicious", "compromised") and not twin.isolated.get(aid):
                     twin.status[aid] = "cleared"  # attacker was here, now cleared — distinct from never-touched "healthy"
 
-        for u in list(meta_client.usage):
-            if u.get("run_id") == run_id:
-                db.add(models.ModelUsage(run_id=run_id, model=u["model"], prompt_version=u["prompt_version"],
-                                         prompt_hash=u.get("prompt_hash", ""),
-                                         prompt_tokens=u["prompt_tokens"], completion_tokens=u["completion_tokens"],
-                                         latency_ms=u["latency_ms"], success=u["success"], error=u.get("error")))
-        meta_client.usage = [u for u in meta_client.usage if u.get("run_id") != run_id]
+        for u in meta_client.usage_snapshot(run_id, clear=True):
+            db.add(models.ModelUsage(run_id=run_id, model=u["model"], prompt_version=u["prompt_version"],
+                                     prompt_hash=u.get("prompt_hash", ""),
+                                     prompt_tokens=u["prompt_tokens"], completion_tokens=u["completion_tokens"],
+                                     latency_ms=u["latency_ms"], success=u["success"], error=u.get("error")))
         run.metrics = result.metrics
         db.add(models.AssetStateSnapshot(run_id=run_id, label="post_remediation", snapshot=twin.snapshot())); db.commit()
         run.state = "FAILED" if _check_cancel(run_id) else "COMPLETED"

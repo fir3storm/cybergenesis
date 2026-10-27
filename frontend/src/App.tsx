@@ -81,25 +81,43 @@ export function NavDropdown({ group, items, active, onSelect }: {
   onSelect: (v: View) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [hovered, setHovered] = useState<View | null>(null)
   const hasActive = items.some((i) => i.id === active)
   const activeItem = items.find((i) => i.id === active)
   return (
-    <div className="relative" onMouseLeave={() => setOpen(false)}>
+    <div className="relative" onMouseLeave={() => setOpen(false)} onMouseEnter={() => setOpen(true)}>
       <button onClick={() => setOpen(!open)} onMouseEnter={() => setOpen(true)} aria-expanded={open} aria-haspopup="menu"
         className={`flex items-center gap-1 rounded px-2.5 py-1.5 text-xs font-semibold tracking-wide ${hasActive ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-200 hover:bg-slate-800 border border-transparent'}`}>
         {group} <span className="text-[9px] text-slate-400">{open ? '▴' : '▾'}</span>
         {hasActive && <span className="max-w-24 truncate font-normal text-cyan-300">· {activeItem?.label}</span>}
       </button>
       {open && (
-        <div role="menu" style={{ zIndex: 110, backgroundColor: '#020617', opacity: 1 }}
-          className="absolute right-0 top-full mt-1 w-52 overflow-hidden rounded-xl border border-cyan-800 shadow-[0_18px_50px_rgba(0,0,0,0.9)]">
-          {items.map((n) => (
-            <button key={n.id} role="menuitem" onClick={() => { onSelect(n.id); setOpen(false) }}
-              style={{ backgroundColor: active === n.id ? '#083344' : '#020617', opacity: 1 }}
-              className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs ${active === n.id ? 'text-cyan-200' : 'text-slate-100 hover:bg-slate-800'}`}>
-              {n.icon} {n.label} {active === n.id && <span className="ml-auto text-cyan-300">●</span>}
-            </button>
-          ))}
+        <div role="menu" style={{ zIndex: 110, opacity: 1 }}
+          className="absolute right-0 top-full w-52 pt-1.5" onMouseEnter={() => setOpen(true)}>
+          <div style={{ backgroundColor: '#020617' }} className="overflow-hidden rounded-xl border border-cyan-800 shadow-[0_18px_50px_rgba(0,0,0,0.9)]">
+          {items.map((n) => {
+            const isHover = hovered === n.id
+            const isActive = active === n.id
+            return (
+              <button key={n.id} role="menuitem" onClick={() => { onSelect(n.id); setOpen(false) }}
+                onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(null)}
+                onFocus={() => setHovered(n.id)} onBlur={() => setHovered(null)}
+                style={{
+                  backgroundColor: isHover ? '#164e63' : isActive ? '#083344' : '#020617',
+                  color: isHover || isActive ? '#ecfeff' : '#e2e8f0',
+                  boxShadow: isHover ? 'inset 3px 0 0 #22d3ee, inset 0 0 0 1px #155e75' : isActive ? 'inset 3px 0 0 #0ea5b7' : 'none',
+                  transform: isHover ? 'translateX(2px)' : 'none',
+                  transition: 'background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease',
+                  opacity: 1,
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs">
+                <span style={{ color: isHover ? '#22d3ee' : undefined }}>{n.icon}</span> {n.label}
+                {isActive && <span className="ml-auto text-cyan-300">●</span>}
+                {isHover && !isActive && <span className="ml-auto text-cyan-400">→</span>}
+              </button>
+            )
+          })}
+          </div>
         </div>
       )}
     </div>

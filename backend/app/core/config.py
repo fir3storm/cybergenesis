@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     offline_mode: bool = False
     human_approval_enabled: bool = False
     approval_timeout_seconds: int = 120
+    auto_approve: bool = False
+    max_tokens_per_run: int = 20000
 
 
 settings = Settings()

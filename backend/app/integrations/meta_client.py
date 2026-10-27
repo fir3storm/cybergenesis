@@ -1,5 +1,6 @@
 """Meta Model API client (OpenAI-compatible). Never fabricates success."""
 
+import asyncio
 import hashlib
 import json
 import time
@@ -20,7 +21,29 @@ class MetaModelClient:
         self.base = settings.model_api_base_url.rstrip("/")
         self.model = settings.meta_model
         self.key = settings.model_api_key
-        self.usage: list[dict] = []
+        self._usage: dict[str, list[dict]] = {}
+        self._lock = asyncio.Lock()
+
+    async def _record(self, rec: dict) -> None:
+        async with self._lock:
+            self._usage.setdefault(rec.get("run_id") or "_global", []).append(rec)
+
+    def usage_snapshot(self, run_id: str | None, clear: bool = False) -> list[dict]:
+        """Sync snapshot for the orchestrator's persistence step (dict pop is atomic)."""
+        key = run_id or "_global"
+        rows = list(self._usage.get(key, []))
+        if clear:
+            self._usage.pop(key, None)
+        return rows
+
+    def tokens_used(self, run_id: str | None) -> int:
+        return sum(u["prompt_tokens"] + u["completion_tokens"] for u in self._usage.get(run_id or "_global", []))
+
+    def _check_budget(self, run_id: str | None) -> None:
+        used = self.tokens_used(run_id)
+        if used >= settings.max_tokens_per_run:
+            raise ProviderUnavailable(
+                f"token budget exceeded for run ({used} >= {settings.max_tokens_per_run}); falling back offline")
 
     @property
     def configured(self) -> bool:
@@ -48,6 +71,7 @@ class MetaModelClient:
         """Returns (parsed_json, usage_dict). Raises ProviderUnavailable on any failure."""
         if not self.configured:
             raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
+        self._check_budget(run_id)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.2, "response_format": {"type": "json_object"},
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
@@ -70,13 +94,14 @@ class MetaModelClient:
                        "prompt_tokens": usage.get("prompt_tokens", 0),
                        "completion_tokens": usage.get("completion_tokens", 0),
                        "latency_ms": latency, "success": True, "run_id": run_id}
-                self.usage.append(rec)
+                await self._record(rec)
                 return parsed, rec
             except Exception as e:  # noqa: BLE001
                 last_err = f"{type(e).__name__}: {e}"
-        rec = {"model": self.model, "prompt_version": PROMPT_VERSION, "prompt_tokens": 0,
-               "completion_tokens": 0, "latency_ms": 0, "success": False, "error": last_err, "run_id": run_id}
-        self.usage.append(rec)
+        rec = {"model": self.model, "prompt_version": PROMPT_VERSION,
+               "prompt_hash": hashlib.sha256((PROMPT_VERSION + system).encode()).hexdigest()[:12],
+               "prompt_tokens": 0, "completion_tokens": 0, "latency_ms": 0, "success": False, "error": last_err, "run_id": run_id}
+        await self._record(rec)
         raise ProviderUnavailable(last_err)
 
 
@@ -84,6 +109,7 @@ class MetaModelClient:
         """Multimodal: send an image + prompt, expect a JSON object back."""
         if not self.configured:
             raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
+        self._check_budget(run_id)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
                 "messages": [{"role": "user", "content": [
@@ -100,9 +126,10 @@ class MetaModelClient:
             usage = data.get("usage", {}) or {}
             parsed = _extract_json(data["choices"][0]["message"]["content"])
             rec = {"model": self.model, "prompt_version": PROMPT_VERSION + "-vision",
+                   "prompt_hash": hashlib.sha256((PROMPT_VERSION + prompt).encode()).hexdigest()[:12],
                    "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
                    "latency_ms": int((time.time() - started) * 1000), "success": True, "run_id": run_id}
-            self.usage.append(rec)
+            await self._record(rec)
             return parsed, rec
         except ProviderUnavailable:
             raise
