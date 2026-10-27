@@ -569,9 +569,29 @@ async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
                                           verification={"approved": False, "reasons": d.reasons})
                 db.add(row); db.commit()
                 raise HTTPException(403, detail={"status": "rejected", "reasons": d.reasons})
+    # Verified Commit: replay every known campaign objective on a clone with the diff applied.
+    # Reject if the change reopens a blocked path or opens a new crown-jewel path.
+    clone = twin.clone()
+    _apply_config_diff(clone, asset_id, diff)
+    campaigns = [(s["source_asset"], s["target_asset"], s["id"]) for s in SCENARIOS.values()]
+    rejected_reasons: list[str] = []
+    for src, dst, sid in campaigns:
+        before = twin.find_path(src, dst)
+        after = clone.find_path(src, dst)
+        if before is None and after is not None:
+            expl = clone.explain_path(src, dst)
+            hop = expl["hops"][0] if expl.get("hops") else {"rule": "unknown hop"}
+            rejected_reasons.append(
+                f"campaign {sid}: change opens {src}->{dst} via {hop.get('from')}->{hop.get('to')} ({hop.get('rule')})")
+    if rejected_reasons:
+        row = models.ConfigCommit(device_id=asset_id, status="rejected", diff=diff,
+                                  verification={"approved": False, "reasons": rejected_reasons, "campaigns_checked": len(campaigns)})
+        db.add(row); db.commit()
+        raise HTTPException(403, detail={"status": "rejected", "reasons": rejected_reasons})
     _apply_config_diff(twin, asset_id, diff)  # records the version once, inside _apply_config_diff
     row = models.ConfigCommit(device_id=asset_id, status="committed", diff=diff,
-                              verification={"config_hash": twin.config_hash()})
+                              verification={"config_hash": twin.config_hash(), "campaigns_checked": len(campaigns),
+                                            "all_campaigns_still_blocked_or_unchanged": True})
     db.add(row); db.commit()
     await _broadcast_twin_updated()
     return {"committed": True, "asset_id": asset_id, "config_hash": twin.config_hash(), "twin": twin.to_dict()}
@@ -711,6 +731,103 @@ async def ws_eval(ws: WebSocket, run_id: str):
             await asyncio.sleep(0.7)
     except WebSocketDisconnect:
         pass
+
+
+class CliExecRequest(BaseModel):
+    input: str
+    user: str = "admin"
+
+
+@app.post("/api/cli/{asset_id}/exec")
+def cli_exec(asset_id: str, body: CliExecRequest):
+    from app.cli.engine import execute
+
+    if asset_id not in orchestrator.TWIN.device_configs:
+        raise HTTPException(404, "device not in twin")
+    return execute(orchestrator.TWIN, asset_id, body.input, body.user)
+
+
+@app.post("/api/cli/{asset_id}/complete")
+def cli_complete(asset_id: str, body: CliExecRequest):
+    from app.cli.engine import complete
+
+    return {"completions": complete(orchestrator.TWIN, asset_id, body.input)}
+
+
+@app.websocket("/ws/cli/{asset_id}")
+async def ws_cli(ws: WebSocket, asset_id: str):
+    from app.cli.engine import execute
+
+    await ws.accept()
+    try:
+        while True:
+            data = await ws.receive_json()
+            out = execute(orchestrator.TWIN, asset_id, str(data.get("input", "")), str(data.get("user", "admin")))
+            await ws.send_text(json.dumps({"event_type": "cli_output", **out}))
+    except WebSocketDisconnect:
+        pass
+
+
+@app.post("/api/audit/run")
+def audit_run():
+    from app.agents.framework.adapters import build_agent
+    from app.agents.framework.base import AgentContext
+    from app.agents.framework import io as _aio
+    import asyncio as _asyncio
+
+    async def _run():
+        agent = build_agent("config_auditor")
+        return await agent.run(AgentContext(run_id="audit", twin=orchestrator.TWIN), _aio.TextIn())
+
+    result = _asyncio.run(_run())
+    return {"findings": result.output.findings, "mode": result.mode, "fallback_reason": result.fallback_reason}
+
+
+class ExplainRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/config/explain")
+async def explain_config(body: ExplainRequest):
+    from app.agents.agents import wrap_data
+
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(422, "empty config text")
+    try:
+        data, _u = await meta_client.chat_json(
+            "Explain the security impact of config lines in plain language. JSON only: {\"explanation\": str}.",
+            wrap_data("config", text))
+        return {"explanation": str(data.get("explanation", "")), "mode": "live"}
+    except Exception:  # noqa: BLE001 - deterministic offline explanation
+        low = text.lower()
+        hints = []
+        if "telnet" in low:
+            hints.append("Telnet management is cleartext and a common foothold — disable it (harden_mgmt).")
+        if "deny" in low:
+            hints.append("Deny entries reduce reachable services and can cut attack paths; check legitimate flows first.")
+        if "any any" in low or "any-any" in low:
+            hints.append("An any-any allow is effectively no filtering — a critical exposure.")
+        if not hints:
+            hints.append("No known risky pattern matched offline; live Meta explanation is unavailable in offline mode.")
+        return {"explanation": " ".join(hints), "mode": "offline"}
+
+
+@app.get("/api/twin/drift")
+def twin_drift():
+    twin = orchestrator.TWIN
+    drift = []
+    for aid, versions in twin.config_versions.items():
+        if not versions:
+            continue
+        committed = versions[-1]["config"]
+        current = twin.device_configs.get(aid, {})
+        for field in ("weaknesses", "isolated", "quarantine_vlan"):
+            if committed.get(field) != current.get(field):
+                drift.append({"asset_id": aid, "field": field, "committed": committed.get(field),
+                              "current": current.get(field),
+                              "risky": field == "weaknesses" and bool(current.get(field))})
+    return {"drift": drift}
 
 
 @app.get("/api/library")

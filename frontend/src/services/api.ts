@@ -32,6 +32,8 @@ export const api = {
   experiments: () => j<{ id: string; scenario_id: string; state: string; mode: string; created_at: string }[]>('/api/experiments'),
   devices: (params: string) => j<{ total: number; items: { id: string; vendor: string; model: string; category: string; tier: string; os: { name: string } }[] }>(`/api/devices/catalog?${params}`),
   device: (id: string) => j<{ id: string; vendor: string; model: string; category: string; tier: string; personality: { cli: string; gui: string }; hardware: { ports: { prefix: string; start: number; count: number; speed: string; media: string }[] } }>(`/api/devices/catalog/${id}`),
+  twinAction: (action_type: string, asset_id: string, params: Record<string, unknown>) =>
+    j<{ approved: boolean }>(`/api/twin/action`, { method: 'POST', body: JSON.stringify({ action_type, asset_id, params }) }),
   deviceConfig: (assetId: string) => j<{ config: Record<string, unknown>; config_hash: string }>(`/api/twin/devices/${assetId}/config`),
   stageDiff: (assetId: string, diff: unknown) => j<{ staged: boolean }>(`/api/twin/devices/${assetId}/config/diff`, { method: 'POST', body: JSON.stringify({ diff }) }),
   previewDiff: (assetId: string, diff: unknown) => j<{ changes: { src: string; dst: string; before_reachable: boolean; after_reachable: boolean }[] }>(`/api/twin/devices/${assetId}/config/preview`, { method: 'POST', body: JSON.stringify({ diff }) }),

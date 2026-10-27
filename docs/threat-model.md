@@ -18,5 +18,8 @@ The red team is an LLM *planner over a validated graph*, not an executor: Muse S
 ## Human approval & token budget (Phase 4)
 Defenses estimated to disrupt ≥2 legitimate paths (or isolating an identity asset) pause in `AWAITING_APPROVAL` when `HUMAN_APPROVAL_ENABLED=true`; an operator must call `/approve` or `/deny`, with auto-deny after `APPROVAL_TIMEOUT_SECONDS` (default 120). `AUTO_APPROVE=true` is a demo-only setting that still logs the approval event. Live Meta calls are capped by `MAX_TOKENS_PER_RUN` (default 20000); exceeding it forces a labelled offline fallback with the budget reason. Model usage is stored per run (locked dict) with prompt version + prompt hash.
 
+## Device emulation boundary
+All device windows, CLIs, faceplates and OS shells are **emulations over synthetic config state** — no real device connections, protocol traffic, or vendor software. Vendor and model names are used descriptively only; skins are vendor-inspired layout conventions with a colour accent, not copied GUIs or logos, and every device window carries "Emulated for simulation. Not affiliated with any vendor." CLI syntax emulation is original code rendering synthetic config. Weaknesses are synthetic classes (telnet_enabled, snmp_public_community, any_any_rule, rdp_exposed, missing_mfa, outdated_firmware) — never real exploits or credentials.
+
 ## Residual risks
 A malicious prompt-injection via scenario text could bias an LLM proposal — mitigated because policy, not the LLM, authorises execution, and verification independently replays outcomes. Synthetic credentials (`admin-01` v1→v2) are labels, not secrets.

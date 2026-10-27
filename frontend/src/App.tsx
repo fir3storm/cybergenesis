@@ -13,6 +13,7 @@ export const ASSET_TYPE_ICON: Record<string, ReactNode> = {
   sensor: <Radar size={12} className="inline" />,
 }
 import { ATTACK_PATHS, STATUS_COLOR } from './components/status'
+import { useOpenDevice } from './components/DeviceWindow'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
 const TwinDesigner = lazy(() => import('./components/TwinDesigner'))
@@ -149,10 +150,12 @@ class SceneBoundary extends Component<{ children: ReactNode; fallback: ReactNode
 
 function Twin2D({ twin }: { twin: Twin }) {
   const { selectedAsset, set } = useStore()
+  const openDevice = useOpenDevice()
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3" role="list" aria-label="Infrastructure assets (2D view)">
       {twin.assets.map((a) => (
         <button key={a.id} role="listitem" onClick={() => set({ selectedAsset: a.id })}
+          onDoubleClick={() => openDevice(a.id, twin, a.name)} title="Double-click to open device window"
           className={`text-left rounded-lg border p-3 bg-slate-900/70 ${selectedAsset === a.id ? 'border-cyan-300' : 'border-slate-700'}`}>
           <div className="text-xs font-mono" style={{ color: STATUS_COLOR[a.status] }}>{a.status.toUpperCase()}</div>
           <div className="text-sm font-semibold">{a.name}</div>

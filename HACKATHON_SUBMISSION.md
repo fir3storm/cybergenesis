@@ -9,6 +9,9 @@ Security tools overwhelmingly stop at detection: logs, alerts, dashboards, and h
 ## Solution
 An autonomous closed loop on a living 3D digital twin of an enterprise: **Observe → Reason → Propose → Validate → Act → Retest → Prove.** Six agents (Observer, Adversary Simulator, Incident Investigator, Defense Strategist, Defense Executor, Verification Scientist) run four complete incidents — ransomware-like activity, compromised credential, lateral movement, data exfiltration — end to end. A toggleable Demo Commentary panel narrates the loop for judges, and every run exports a human-readable Markdown evidence report.
 
+## Device emulation (new)
+**200 catalog devices, 20 fully emulated flagships, and configuration is the twin.** Every cable, interface, VLAN, ACL, firewall policy, service, user and patch level compiles deterministically into the graph the attack/defense/verification loop uses — defenses *are* config changes (ConfigDiffs), and every commit is a **Verified Commit** that replays known campaigns on a clone and rejects changes that reopen a path, explaining the hop and rule. Devices open in draggable windows with faceplates, GUI config panes, a backend-authoritative CLI (IOS/Junos/FortiOS/PAN-OS/RouterOS/bash/PowerShell dialects), and OS shells (Windows 11/Server, macOS, Linux, ESXi, S7-1500 HMI) that reflect live twin state. 20 framework agents (13 Meta-powered) run on one typed framework with tool permissions and scorecards. *Emulated for simulation. Not affiliated with any vendor.*
+
 ## Innovation
 - Autonomous **defense validation**, not detection: the identical attack is replayed after remediation and the outcome is computed (reachability, session denial), never asserted.
 - AI proposes; a **deterministic, LLM-independent policy engine** authorises only allowlisted simulated actions.
