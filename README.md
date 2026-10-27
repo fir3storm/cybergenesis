@@ -13,6 +13,18 @@
 
 ---
 
+## The problem: security teams drown in alerts, but starve for proof
+
+Modern defenders face a structural problem, not a tooling problem:
+
+- **Attacks move at machine speed; defense moves at ticket speed.** Ransomware and lateral movement unfold in minutes, while detection, triage, approval, and remediation still pass through dashboards, queues, and change windows measured in hours.
+- **Alerts are abundant; evidence is scarce.** SOCs are flooded with detections, yet most tools stop at *"something looks wrong."* They rarely answer the questions that matter: *What exactly happens next? Will this fix actually stop it? What legitimate work will the fix break?*
+- **You cannot rehearse on production.** Teams cannot safely test whether a segmentation rule, credential rotation, or isolation would stop a real attack path — so untested defenses fail for the first time during a real incident.
+- **Automation is hard to trust.** Letting an AI change firewall rules or isolate machines feels reckless, so automation stalls at recommendations a human must still verify by hand. The result: skilled analysts burn out on repetitive triage while mean-time-to-contain stays stubbornly high.
+- **Attackers adapt; static playbooks don't.** A defense that blocks one route teaches the adversary to find another. Fixed runbooks cannot keep up with an opponent who learns.
+
+**CYBERGENESIS solves this by giving defenders a safe place to fight, learn, and prove.** On a synthetic digital twin, autonomous agents attack and defend continuously: the AI proposes, a deterministic policy engine disposes, an independent verifier replays the attack and produces *proof* — not claims — that the defense works, at what operational cost. Defenses are rehearsed, measured, and certified before they ever touch a real network, and both sides get smarter every match.
+
 ## What is CYBERGENESIS?
 
 CYBERGENESIS is a closed-loop, autonomous cybersecurity digital twin. AI agents watch over a **synthetic** enterprise network. A controlled red team introduces incidents. Meta Muse Spark investigates the telemetry, works out a defense from the live network graph — no per-scenario instructions, it reasons it out — and proposes countermeasures. A deterministic policy engine (independent of the LLM) approves only allowlisted actions. The twin applies them. Then an independent Verification Scientist replays the identical attack to **prove, with computed before/after evidence, whether it now fails**.
