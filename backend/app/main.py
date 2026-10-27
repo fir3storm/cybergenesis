@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app import models
+from app.agents.generative import architect_twin, author_scenario
 from app.db import get_db, init_db
 from app.integrations.meta_client import meta_client
 from app.orchestration import orchestrator
@@ -720,28 +721,7 @@ class FromImageRequest(BaseModel):
 @app.post("/api/twins/from-image", status_code=201)
 async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db)):
     """Muse Spark multimodal: network diagram photo -> validated twin definition."""
-    from app.integrations.meta_client import ProviderUnavailable
-
-    if not body.image_data_url.startswith("data:image/"):
-        raise HTTPException(422, "image_data_url must be a data:image/... URL")
-    if len(body.image_data_url) > 4_000_000:
-        raise HTTPException(413, "image too large (max 4 MB data URL)")
-    prompt = (
-        "Read this network diagram and return ONLY JSON: {\"assets\": [{\"id\": str, \"name\": str, "
-        "\"asset_type\": one of [gateway, firewall, web_server, app_server, database, identity, workstation, file_server, sensor], "
-        "\"zone\": str, \"pos\": [x, y, z]}], \"connections\": [{\"source\": str, \"target\": str, \"traversable\": bool}]}. "
-        "Use lowercase hyphenated ids (e.g. web-server). Lay assets out left-to-right by trust zone, x from -8 to 8, y=1, z spread -4..4. "
-        "Only include assets/connections actually visible in the diagram."
-    )
-    try:
-        data, _usage = await meta_client.chat_vision_json(prompt, body.image_data_url)
-    except ProviderUnavailable as e:
-        raise HTTPException(503, f"Meta vision unavailable: {e}") from e
-    try:
-        twin_body = CreateCustomTwin(name=body.name, description="Generated from uploaded diagram via Meta vision",
-                                     assets=data.get("assets", []), connections=data.get("connections", []))
-    except Exception as e:  # noqa: BLE001 - model output is untrusted
-        raise HTTPException(422, f"model output failed schema validation: {e}") from e
+    twin_body = await architect_twin(body.image_data_url, body.name)
     _validate_twin(twin_body)
     row = models.CustomTwinDefinition(name=twin_body.name, description=twin_body.description,
                                       assets=[a.model_dump() for a in twin_body.assets],
@@ -759,37 +739,9 @@ class FromTextRequest(BaseModel):
 @app.post("/api/scenarios/from-text", status_code=201)
 async def scenario_from_text(body: FromTextRequest, db: Session = Depends(get_db)):
     """Text-to-scenario: Muse Spark writes a scenario; deterministic validation decides if it may run."""
-    from app.integrations.meta_client import ProviderUnavailable
-    from app.simulation.component_library import library as _lib
-
-    lib = _lib()
     assets = [a["id"] for a in orchestrator.TWIN.to_dict()["assets"]]
-    prompt = (
-        f"Write a CYBERGENESIS attack scenario for this request: \"{body.prompt_text or body.prompt}\". "
-        f"Assets that exist: {assets}. Attack step types allowed: {[s['id'] for s in lib['attack_steps']]}. "
-        f"Defense actions allowed: {[d['id'] for d in lib['defense_actions']]}. "
-        "Return ONLY JSON {\"source_asset\": str, \"target_asset\": str, \"severity\": \"low|medium|high|critical\", "
-        "\"invariant\": str, \"attack_steps\": [{\"type\": str, \"asset\": str, \"description\": str}], "
-        "\"expected_defense\": [{\"action_type\": str, \"asset_id\": str, \"params\": {}}]}. "
-        "source/target and every step asset must be from the asset list. This is a synthetic simulation; no real payloads."
-    )
-    try:
-        data, _u = await meta_client.chat_json("You write validated synthetic security scenarios. JSON only.", prompt)
-    except ProviderUnavailable as e:
-        raise HTTPException(503, f"Meta unavailable: {e}") from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(503, f"Meta unavailable: {type(e).__name__}: {e}") from e
-    try:
-        sc_body = CreateCustomScenario(name=body.name, description=(body.prompt_text or body.prompt)[:300],
-                                       source_asset=data["source_asset"], target_asset=data["target_asset"],
-                                       severity=data.get("severity", "medium"), invariant=data.get("invariant", ""),
-                                       verification_kind="reachability",
-                                       attack_steps=data.get("attack_steps", []), expected_defense=data.get("expected_defense", []))
-    except Exception as e:  # noqa: BLE001 - untrusted model output
-        raise HTTPException(422, f"model output failed schema validation: {e}") from e
-    for aid in [sc_body.source_asset, sc_body.target_asset] + [s.asset for s in sc_body.attack_steps]:
-        if aid not in assets:
-            raise HTTPException(422, f"model referenced unknown asset '{aid}'")
+    result = await author_scenario(body.prompt_text or body.prompt, body.name, assets)
+    sc_body = result["body"]
     definition = _validate_scenario(sc_body)
     row = models.CustomScenarioDefinition(name=sc_body.name, description=sc_body.description, definition=definition)
     db.add(row); db.commit(); db.refresh(row)

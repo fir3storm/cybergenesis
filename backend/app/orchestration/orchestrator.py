@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app import models
 from app.agents import agents, red_team
+from app.agents.framework.bus import Blackboard
 from app.core.config import settings
 from app.db import SessionLocal
 from app.integrations.meta_client import meta_client
@@ -113,6 +114,24 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         mode = "live" if meta_client.configured else "offline"
         run.mode = mode; db.commit()
 
+        _bb_seq = {"n": 0}
+
+        def _persist_message(msg):
+            _bb_seq["n"] += 1
+            db.add(models.AgentMessageRow(id=msg.id, run_id=run_id, from_agent=msg.from_agent,
+                                          to_agent=msg.to_agent, kind=msg.kind, payload=msg.payload,
+                                          evidence_refs=msg.evidence_refs, in_reply_to=msg.in_reply_to,
+                                          seq=_bb_seq["n"]))
+            db.commit()
+
+        def _stream_message(msg):
+            emit("agent_message", f"{msg.from_agent}: {msg.kind}", agent=msg.from_agent,
+                 payload={"id": msg.id, "from_agent": msg.from_agent, "to_agent": msg.to_agent,
+                          "kind": msg.kind, "payload": msg.payload,
+                          "evidence_refs": msg.evidence_refs, "in_reply_to": msg.in_reply_to})
+
+        board = Blackboard(run_id, persist=_persist_message, stream=_stream_message)
+
         async def set_state(state, msg, agent=None):
             run.state = state; db.commit()
             emit("state", msg, agent=agent, payload={"state": state, "mode": mode})
@@ -144,6 +163,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                     justification=obs.summary, confidence=obs.confidence, model="deterministic",
                                     mode="offline", evidence_refs=obs.event_ids, asset_ids=obs.asset_ids)); db.commit()
         emit("agent_decision", obs.summary, agent="observer", payload=obs.model_dump())
+        board.publish("observer", "observation", obs.model_dump(), evidence_refs=obs.event_ids)
 
         # learning across runs: past verified defenses for this scenario, from the evidence store
         past_examples: list[str] = []
@@ -166,6 +186,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                     data={"claim_evidence": hyp.claim_evidence, "confirmed_items": hyp.confirmed_items,
                                           "citation_warnings": hyp.citation_warnings})); db.commit()
         emit("agent_decision", hyp.hypothesis, agent="incident_investigator", payload=hyp.model_dump())
+        board.publish("incident_investigator", "hypothesis", hyp.model_dump(), evidence_refs=hyp.evidence_refs)
 
         # race against time: the attack advances one hop per 2.0s of simulated time;
         # live model latency is converted to simulated time, so slow reasoning costs nodes
@@ -198,6 +219,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                         model=proposal.model, mode=proposal.mode, evidence_refs=proposal.evidence_refs,
                                         asset_ids=[a.asset_id for a in proposal.actions])); db.commit()
             emit("agent_decision", proposal.justification, agent="defense_strategist", payload=proposal.model_dump())
+            board.publish("defense_strategist", "proposal", proposal.model_dump(), evidence_refs=proposal.evidence_refs)
 
             emit("state", "Simulating candidate defenses on cloned twins", agent="defense_strategist", payload={"state": "SIMULATING_CANDIDATES"})
             candidates = evaluate_candidates(twin.clone(), baseline_twin, scenario, [a.model_dump() for a in proposal.actions])
@@ -214,6 +236,9 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                      f"{choice['chosen_label']} — {choice['justification']} (confidence {choice['confidence']}, "
                                      f"matched simulation optimum: {choice['ai_matched_optimum']})",
                      agent="defense_strategist", payload={k: choice[k] for k in ("chosen_label", "justification", "confidence", "mode", "ai_matched_optimum", "candidates_considered")})
+                board.publish("defense_strategist", "final_choice",
+                              {k: choice[k] for k in ("chosen_label", "justification", "confidence", "mode", "ai_matched_optimum", "candidates_considered")},
+                              evidence_refs=proposal.evidence_refs)
                 if chosen_cand is not None:
                     chosen = [DefenseAction(**a) for a in chosen_cand["actions"]]
                 else:  # explicit substitution — never silent
@@ -247,6 +272,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                                       justification=f"[revision after critic] {proposal.justification}",
                                                       confidence=proposal.confidence, mode=proposal.mode)); db.commit()
                         emit("agent_decision", f"[revision] {proposal.justification}", agent="defense_strategist", payload=proposal.model_dump())
+                        board.publish("defense_strategist", "proposal", proposal.model_dump(), evidence_refs=proposal.evidence_refs)
                         emit("override", "Blue revised its defense after the red critic debate (strategist revision, recorded)",
                              agent="defense_strategist", payload={"reason": "critic_bypass_validated"})
                         candidates = evaluate_candidates(twin.clone(), baseline_twin, scenario, [a.model_dump() for a in proposal.actions])
@@ -264,6 +290,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 db.add(models.PolicyEvaluation(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, approved=d.approved, reasons=d.reasons))
                 emit("policy_decision", f"{a.action_type} on {a.asset_id}: {'APPROVED' if d.approved else 'REJECTED'} — {'; '.join(d.reasons)}",
                      agent="defense_executor", asset_id=a.asset_id, payload=d.model_dump())
+                board.publish("defense_executor", "decision", d.model_dump())
             db.commit()
 
             # human approval gate for high-disruption defenses
@@ -322,6 +349,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                                 checks=[c.model_dump() for c in res.checks], metrics=res.metrics))
             db.add(models.EvidenceRecord(run_id=run_id, kind="verification", ref=f"verification:{res.outcome}", summary=res.invariant, data=res.model_dump()))
             emit("verification", f"Verification {res.outcome}: {res.invariant}", agent="verification_scientist", payload=res.model_dump())
+            board.publish("verification_scientist", "report", res.model_dump(), evidence_refs=res.evidence_refs)
             return res
 
         result = await do_verify()
@@ -369,6 +397,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                             model=meta_client.model if plan.mode == "live" else "deterministic",
                                             mode=plan.mode, evidence_refs=[], asset_ids=chosen_path,
                                             data={"campaign": plan.model_dump(), "round": round_num})); db.commit()
+                board.publish("adversary_simulator", "campaign", plan.model_dump())
                 # apply the campaign as this round's attack (typed steps only)
                 round_scenario = {**scenario, "id": f"{scenario['id']}-r{round_num}",
                                   "source_asset": plan.foothold, "target_asset": plan.objective,
@@ -388,6 +417,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                             justification="; ".join(hyp2.confirmed), confidence=hyp2.confidence, model=hyp2.model,
                                             mode=hyp2.mode, evidence_refs=hyp2.evidence_refs, asset_ids=hyp2.affected_assets,
                                             data={"claim_evidence": hyp2.claim_evidence, "round": round_num})); db.commit()
+                board.publish("incident_investigator", "hypothesis", hyp2.model_dump(), evidence_refs=hyp2.evidence_refs)
                 _c, sim_contained = await defend(hyp2, round_num)
                 result = await do_verify()
                 rounds.append({"round": round_num, "foothold": plan.foothold, "objective": plan.objective,

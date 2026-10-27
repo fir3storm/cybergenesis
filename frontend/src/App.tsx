@@ -29,7 +29,10 @@ import { api, WS } from './services/api'
 import { useStore } from './stores/store'
 import type { Asset, RunResult, Twin, View } from './types'
 
-const AGENTS = [
+interface AgentSpecUI {
+  id: string; name: string; desc: string; engine: string; input: string; output: string; duties: string[]
+}
+const AGENT_FALLBACK: AgentSpecUI[] = [
   { id: 'observer', name: 'Observer', desc: 'Deterministic telemetry anomaly detection', engine: 'Deterministic', input: 'SimulationEvents (telemetry)', output: 'AgentObservation', duties: ['Consume synthetic telemetry', 'Detect anomaly patterns (file bursts, auth failures, network paths)', 'Emit structured observation with confidence'] },
   { id: 'adversary_simulator', name: 'Adversary Simulator', desc: 'Typed, bounded synthetic scenario actions', engine: 'Deterministic', input: 'Scenario definition (JSON)', output: 'AttackScenarioPlan + telemetry', duties: ['Execute predefined typed attack steps only', 'Mutate twin to attacked state', 'Never generates payloads or commands'] },
   { id: 'incident_investigator', name: 'Incident Investigator', desc: 'Meta Muse Spark evidence-grounded reasoning', engine: 'Meta Muse Spark (offline fallback labelled)', input: 'AgentObservation + telemetry + topology', output: 'IncidentHypothesis', duties: ['Correlate evidence across assets', 'Separate confirmed facts from speculation', 'Estimate threat level with confidence'] },
@@ -426,6 +429,16 @@ export default function App() {
   const s = useStore()
   const [commentaryOn, setCommentaryOn] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState('incident_investigator')
+  const [agentSpecs, setAgentSpecs] = useState<AgentSpecUI[]>(AGENT_FALLBACK)
+
+  useEffect(() => { // Agents page is driven by the backend registry (/api/agents), not a hard-coded list
+    api.agents().then((list) => setAgentSpecs(list.map((a) => {
+      const fb = AGENT_FALLBACK.find((f) => f.id === a.id)
+      return { id: a.id, name: a.name, desc: a.description, engine: `${a.engine} · ${a.prompt_version}#${a.prompt_hash}`,
+               input: fb?.input ?? 'see /api/agents/{id}', output: fb?.output ?? 'see /api/agents/{id}',
+               duties: fb?.duties ?? a.tools.map((t) => `tool: ${t}`) }
+    }))).catch(() => undefined)
+  }, [])
   const [speed, setSpeed] = useState(1)
   const [cinematic, setCinematic] = useState(false)
   const [replayIdx, setReplayIdx] = useState<number | null>(null)
@@ -873,7 +886,7 @@ export default function App() {
           <h1 className="text-2xl font-black text-cyan-200">Agent Collaboration</h1>
           <p className="text-sm text-slate-400 mt-1">Six specialised agents, one orchestrated state machine. Only the Investigator and Strategist use Meta Muse Spark; provider failure is shown honestly, never faked.</p>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {AGENTS.map((a, i) => {
+            {agentSpecs.map((a, i) => {
               const active = s.events.some((e) => e.agent === a.id)
               const decisions = s.results?.decisions.filter((d) => d.agent === a.id) ?? []
               const isSel = selectedAgent === a.id
@@ -899,7 +912,7 @@ export default function App() {
             })}
           </div>
           {(() => {
-            const a = AGENTS.find((x) => x.id === selectedAgent) ?? AGENTS[0]
+            const a = agentSpecs.find((x) => x.id === selectedAgent) ?? agentSpecs[0]
             const agentEvents = s.events.filter((e) => e.agent === a.id)
             const agentDecisions = s.results?.decisions.filter((d) => d.agent === a.id) ?? []
             return (
