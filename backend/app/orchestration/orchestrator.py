@@ -201,27 +201,57 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             for c in candidates:
                 emit("candidate_evaluation", f"{c['label']} [{c['origin']}]: blocked={c['blocked']} disrupted={c['disrupted']} — {c['detail']}",
                      agent="defense_strategist", payload=c)
-            choice = await agents.final_choice(candidates, scenario, run_id)
-            final_choice_meta.update(choice)
-            chosen_cand = choice["candidate"]
-            emit("final_choice", f"Final choice by {'Meta AI' if choice['mode'] == 'live' else 'deterministic fallback'}: {chosen_cand['label'] if chosen_cand else 'none'} — {choice['rationale']} (agrees with simulation optimum: {choice['agrees_with_optimum']})",
-                 agent="defense_strategist", payload={"label": chosen_cand["label"] if chosen_cand else None, "mode": choice["mode"],
-                                                      "agrees_with_optimum": choice["agrees_with_optimum"]})
-            chosen = [DefenseAction(**a) for a in chosen_cand["actions"]] if chosen_cand else list(proposal.actions)
+            chosen_cand = None
+            chosen: list = list(proposal.actions)
+            for _attempt in range(2):  # attempt 1 may be revised after the red-team critic debate
+                choice = await agents.final_choice(candidates, scenario, run_id)
+                final_choice_meta.update(choice)
+                chosen_cand = choice["candidate"]
+                emit("final_choice", f"Final choice by {'Meta AI' if choice['mode'] == 'live' else 'deterministic fallback'}: "
+                                     f"{choice['chosen_label']} — {choice['justification']} (confidence {choice['confidence']}, "
+                                     f"matched simulation optimum: {choice['ai_matched_optimum']})",
+                     agent="defense_strategist", payload={k: choice[k] for k in ("chosen_label", "justification", "confidence", "mode", "ai_matched_optimum", "candidates_considered")})
+                if chosen_cand is not None:
+                    chosen = [DefenseAction(**a) for a in chosen_cand["actions"]]
+                else:  # explicit substitution — never silent
+                    emit("override", "System substitution: no feasible simulated candidate, executing the agent proposal verbatim (policy + verification will judge it)",
+                         agent="defense_executor", payload={"reason": "no_feasible_candidate"})
+                    chosen = list(proposal.actions)
 
-            # red-team critic: how would red get around this, before it is applied?
-            clone = twin.clone()
-            for a in chosen:
-                if policy_engine.evaluate(a.action_type, a.asset_id, a.params, clone).approved:
-                    try:
-                        clone.apply_action(a.action_type, a.asset_id, a.params)
-                    except ValueError:
-                        pass
-            alt = red_team.enumerate_paths(clone, scenario["source_asset"], scenario["target_asset"]) \
-                if scenario["verification_kind"] == "reachability" else []
-            critic = await agents.criticize_defense(scenario, chosen_cand["label"] if chosen_cand else "proposal", alt, run_id)
-            emit("red_critic", f"Red critic ({critic['mode']}): {critic['assessment']}" + (f" — bypass: {' -> '.join(critic['bypass'])}" if critic["bypass"] else ""),
-                 agent="adversary_simulator", payload=critic)
+                # red-team critic: how would red get around this, before it is applied?
+                clone = twin.clone()
+                for a in chosen:
+                    if policy_engine.evaluate(a.action_type, a.asset_id, a.params, clone).approved:
+                        try:
+                            clone.apply_action(a.action_type, a.asset_id, a.params)
+                        except ValueError:
+                            pass
+                alt = red_team.enumerate_paths(clone, scenario["source_asset"], scenario["target_asset"]) \
+                    if scenario["verification_kind"] == "reachability" else []
+                critic = await agents.criticize_defense(scenario, chosen_cand["label"] if chosen_cand else "proposal", alt, run_id)
+                emit("red_critic", f"Red critic ({critic['mode']}): {critic['assessment']}" + (f" — bypass: {' -> '.join(critic['bypass'])}" if critic["bypass"] else ""),
+                     agent="adversary_simulator", payload=critic)
+                if _attempt == 0 and critic["bypass"] and critic["suggested_campaign"]:
+                    verdict = policy_engine.evaluate_campaign(critic["suggested_campaign"], twin)
+                    if verdict["approved"]:
+                        emit("debate", f"DEBATE — Red: '{critic['assessment']}' via {' -> '.join(critic['bypass'])}. Blue gets one revision.",
+                             agent="adversary_simulator", payload={"critic": critic, "campaign_valid": True})
+                        proposal = await agents.propose_defense(
+                            scenario, hyp_obj, run_id, twin=twin, past_examples=past_examples,
+                            extra_context=(f"RED CRITIC: your previous defense can be bypassed via {' -> '.join(critic['bypass'])}. "
+                                           f"Assessment: {critic['assessment']}. Propose a revised defense that also covers this bypass."))
+                        db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
+                                                      justification=f"[revision after critic] {proposal.justification}",
+                                                      confidence=proposal.confidence, mode=proposal.mode)); db.commit()
+                        emit("agent_decision", f"[revision] {proposal.justification}", agent="defense_strategist", payload=proposal.model_dump())
+                        emit("override", "Blue revised its defense after the red critic debate (strategist revision, recorded)",
+                             agent="defense_strategist", payload={"reason": "critic_bypass_validated"})
+                        candidates = evaluate_candidates(twin.clone(), baseline_twin, scenario, [a.model_dump() for a in proposal.actions])
+                        for c in candidates:
+                            emit("candidate_evaluation", f"[revision] {c['label']} [{c['origin']}]: blocked={c['blocked']} disrupted={c['disrupted']}",
+                                 agent="defense_strategist", payload=c)
+                        continue
+                break
 
             await set_state("POLICY_VALIDATING", "Deterministic policy engine validating chosen defense", "defense_executor")
             decisions = []
@@ -395,7 +425,11 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         result.metrics["rounds"] = rounds
         result.metrics["candidates"] = candidates
         result.metrics["ai_final_choice"] = {"mode": final_choice_meta.get("mode"),
-                                             "agrees_with_simulation_optimum": final_choice_meta.get("agrees_with_optimum")}
+                                             "chosen_label": final_choice_meta.get("chosen_label"),
+                                             "justification": final_choice_meta.get("justification"),
+                                             "confidence": final_choice_meta.get("confidence")}
+        result.metrics["ai_matched_optimum"] = final_choice_meta.get("ai_matched_optimum")
+        result.metrics["candidates_considered"] = final_choice_meta.get("candidates_considered")
         latest_ver = db.query(models.VerificationResultRow).filter_by(run_id=run_id).order_by(
             models.VerificationResultRow.created_at.desc()).first()
         if latest_ver:

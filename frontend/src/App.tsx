@@ -91,10 +91,12 @@ export function NavDropdown({ group, items, active, onSelect }: {
         {hasActive && <span className="max-w-24 truncate font-normal text-cyan-300">· {activeItem?.label}</span>}
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-slate-700 bg-slate-950/97 shadow-2xl backdrop-blur">
+        <div role="menu" style={{ zIndex: 110, backgroundColor: '#020617', opacity: 1 }}
+          className="absolute right-0 top-full mt-1 w-52 overflow-hidden rounded-xl border border-cyan-800 shadow-[0_18px_50px_rgba(0,0,0,0.9)]">
           {items.map((n) => (
             <button key={n.id} role="menuitem" onClick={() => { onSelect(n.id); setOpen(false) }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${active === n.id ? 'bg-cyan-500/20 text-cyan-200' : 'text-slate-200 hover:bg-slate-800'}`}>
+              style={{ backgroundColor: active === n.id ? '#083344' : '#020617', opacity: 1 }}
+              className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs ${active === n.id ? 'text-cyan-200' : 'text-slate-100 hover:bg-slate-800'}`}>
               {n.icon} {n.label} {active === n.id && <span className="ml-auto text-cyan-300">●</span>}
             </button>
           ))}
@@ -144,6 +146,13 @@ export function CandidatesPanel() {
       {m && <p className="mt-1 font-mono text-[10px] text-slate-400">
         Optimality: NetworkX min edge cut = {String(m.optimal_edge_cut ?? '—')} · defense removed {String(m.defense_edges_removed ?? '—')} edges · gap = {String(m.optimality_gap ?? '—')}
       </p>}
+      {m?.ai_final_choice != null && (
+        <p className="mt-1 text-[11px] text-violet-300">
+          AI final choice: {String((m.ai_final_choice as { chosen_label?: string }).chosen_label ?? '—')}
+          {' '}· matched simulation optimum: {m.ai_matched_optimum === true ? 'yes' : m.ai_matched_optimum === false ? 'no (AI chose differently — its justification is in the timeline)' : '—'}
+          {' '}· candidates considered: {String(m.candidates_considered ?? '—')}
+        </p>
+      )}
     </section>
   )
 }
@@ -513,7 +522,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100">
-      <header className="flex flex-wrap items-center gap-3 border-b border-cyan-900/60 px-4 py-2 bg-slate-950/80 backdrop-blur">
+      <header className="relative z-[100] flex flex-wrap items-center gap-3 border-b border-cyan-900/60 px-4 py-2 bg-[#020617]">
         <div className="font-black tracking-[0.3em] text-cyan-300">CYBERGENESIS</div>
         <span className={`text-[11px] font-mono px-2 py-1 rounded-full border ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
           {live ? '● LIVE META AI' : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}

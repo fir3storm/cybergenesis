@@ -98,49 +98,67 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
 FINAL_CHOICE_SYSTEM = (
     "You are the Defense Strategist in CYBERGENESIS making the FINAL choice among simulated candidate defenses. "
     "Each candidate was replayed on a cloned twin: blocked=true means the attack objective is stopped, disrupted counts "
-    "legitimate paths broken. Candidates whose path_blocked=true cut the currently attacked path but may leave alternates. "
-    "Return ONLY JSON {\"candidate_label\": str, \"rationale\": str}. Pick the best security/disruption trade-off; "
-    "the simulation-optimal candidate is listed first but the choice is yours."
+    "legitimate paths broken, path_blocked=true means it cuts the currently attacked path but may leave alternates. "
+    "The table also includes each candidate's policy feasibility. Choose the final defense and justify the trade-off. "
+    "Return ONLY JSON {\"chosen_label\": str, \"justification\": str, \"confidence\": float}. "
+    "The choice is yours — the simulation-optimal candidate is listed first but you may pick another and explain why."
 )
 CRITIC_SYSTEM = (
     "You are the Red Team critic in CYBERGENESIS, a defensive simulation on synthetic data only. "
-    "Given a proposed defense and the validated alternate paths that remain after it, state how you would get around it. "
-    "Return ONLY JSON {\"bypass_path_index\": int, \"assessment\": str}. Use -1 if no bypass exists. No commands."
+    "Given the chosen defense and the validated alternate paths that remain after it, say how you would get around it. "
+    "Return ONLY JSON {\"bypass\": str|null, \"assessment\": str} where bypass is the exact 'a -> b -> c' path string "
+    "from the list, or null if none works. No commands."
 )
 
 
 async def final_choice(candidates: list[dict], scenario: dict, run_id: str) -> dict:
-    """The AI makes the final call among simulated candidates (simulation informs, never overrides)."""
+    """Spec-shaped final choice: {chosen_label, justification, confidence} + execution metadata.
+    Simulation informs; the AI decides; nothing is silently overridden."""
     feasible = [c for c in candidates if c["feasible"]]
     if not feasible:
-        return {"candidate": None, "mode": "offline", "rationale": "no feasible candidate", "agrees_with_optimum": False}
-    listing = "\n".join(f"- {c['label']} [{c['origin']}]: blocked={c['blocked']} path_blocked={c.get('path_blocked')} disrupted={c['disrupted']}"
-                        for c in feasible)
+        return {"chosen_label": None, "justification": "no feasible candidate", "confidence": 0.0,
+                "candidate": None, "mode": "offline", "ai_matched_optimum": False, "candidates_considered": 0}
+    listing = "\n".join(
+        f"- {c['label']} [{c['origin']}]: actions={c['actions']} blocked={c['blocked']} "
+        f"path_blocked={c.get('path_blocked')} disrupted={c['disrupted']} detail={c['detail']}"
+        for c in feasible)
     try:
-        data, _ = await meta_client.chat_json(FINAL_CHOICE_SYSTEM, f"Invariant: {scenario['invariant']}\nCandidates:\n{listing}", run_id)
-        chosen = next((c for c in feasible if c["label"] == data.get("candidate_label")), None)
+        data, _ = await meta_client.chat_json(FINAL_CHOICE_SYSTEM, f"Invariant: {scenario['invariant']}\nSimulated candidates:\n{listing}", run_id)
+        chosen = next((c for c in feasible if c["label"] == data.get("chosen_label")), None)
         if chosen is not None:
-            return {"candidate": chosen, "mode": "live", "rationale": str(data.get("rationale", ""))[:220],
-                    "agrees_with_optimum": chosen["label"] == feasible[0]["label"] if feasible else False}
+            return {"chosen_label": chosen["label"], "justification": str(data.get("justification", ""))[:300],
+                    "confidence": float(data.get("confidence", 0.7)), "candidate": chosen, "mode": "live",
+                    "ai_matched_optimum": chosen["label"] == feasible[0]["label"],
+                    "candidates_considered": len(feasible)}
     except Exception:  # noqa: BLE001 - labelled deterministic fallback
         pass
-    return {"candidate": feasible[0], "mode": "offline", "rationale": "simulation-optimal candidate (deterministic final choice)",
-            "agrees_with_optimum": True}
+    return {"chosen_label": feasible[0]["label"], "justification": "simulation-optimal candidate (deterministic final choice)",
+            "confidence": 0.8, "candidate": feasible[0], "mode": "offline",
+            "ai_matched_optimum": True, "candidates_considered": len(feasible)}
+
+
+def _campaign_from_path(path: list[str]) -> dict:
+    return {"foothold": path[0], "pivot_identity": None, "objective": path[-1],
+            "steps": [{"type": "network_connection", "asset": a, "description": f"bypass via {a} (synthetic)"} for a in path],
+            "rationale": "critic-suggested bypass campaign", "confidence": 0.7, "mode": "offline", "path": path}
 
 
 async def criticize_defense(scenario: dict, defense_label: str, alternate_paths: list[list[str]], run_id: str) -> dict:
-    """Red-team critic: how would red get around this defense?"""
+    """Red-team critic: {bypass, suggested_campaign, assessment, mode}."""
     if not alternate_paths:
-        return {"bypass": None, "mode": "offline", "assessment": "no validated bypass path remains after this defense"}
+        return {"bypass": None, "suggested_campaign": None, "mode": "offline",
+                "assessment": "no validated bypass path remains after this defense"}
     try:
-        listing = "\n".join(f"{i}: {' -> '.join(p)}" for i, p in enumerate(alternate_paths))
+        listing = "\n".join(" -> ".join(p) for p in alternate_paths)
         data, _ = await meta_client.chat_json(CRITIC_SYSTEM, f"Defense: {defense_label}. Invariant: {scenario['invariant']}\nRemaining validated paths:\n{listing}", run_id)
-        idx = int(data.get("bypass_path_index", 0))
-        if 0 <= idx < len(alternate_paths):
-            return {"bypass": alternate_paths[idx], "mode": "live", "assessment": str(data.get("assessment", ""))[:220]}
+        bypass_str = data.get("bypass")
+        path = next((p for p in alternate_paths if " -> ".join(p) == bypass_str), alternate_paths[0])
+        return {"bypass": path, "suggested_campaign": _campaign_from_path(path), "mode": "live",
+                "assessment": str(data.get("assessment", ""))[:220]}
     except Exception:  # noqa: BLE001
         pass
-    return {"bypass": alternate_paths[0], "mode": "offline", "assessment": "shortest remaining validated path bypasses this defense"}
+    return {"bypass": alternate_paths[0], "suggested_campaign": _campaign_from_path(alternate_paths[0]),
+            "mode": "offline", "assessment": "shortest remaining validated path bypasses this defense"}
 
 
 async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None,

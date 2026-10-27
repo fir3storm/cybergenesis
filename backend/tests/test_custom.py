@@ -195,6 +195,53 @@ async def test_phase1_campaign_validation_and_round2_after_pass():
     assert all("foothold" in r and "objective" in r for r in rounds)
 
 
+@pytest.mark.asyncio
+async def test_phase2_ai_final_choice_and_metrics(monkeypatch):
+    from app.agents import agents
+
+    calls = {"n": 0}
+
+    async def fake_final(candidates, scenario, run_id):
+        calls["n"] += 1
+        # deliberately pick a non-optimal candidate when one exists; system must execute the AI's pick
+        pick = candidates[-1] if len(candidates) > 1 else candidates[0]
+        return {"chosen_label": pick["label"], "justification": "test double pick", "confidence": 0.66,
+                "candidate": pick, "mode": "live", "ai_matched_optimum": pick is candidates[0],
+                "candidates_considered": len(candidates)}
+
+    monkeypatch.setattr(agents, "final_choice", fake_final)
+    rid = client.post("/api/experiments", json={"scenario_id": "lateral_movement", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert calls["n"] >= 1
+    m = res["verification"]["metrics"]
+    assert "ai_matched_optimum" in m and "candidates_considered" in m and m["candidates_considered"] >= 2
+    assert res["run"]["state"] == "COMPLETED"  # honest outcome either way; choice was the AI's
+
+
+@pytest.mark.asyncio
+async def test_phase2_critic_debate_revision(monkeypatch):
+    from app.agents import agents
+
+    async def fake_critic(scenario, label, alt_paths, run_id):
+        if alt_paths:
+            path = alt_paths[0]
+            return {"bypass": path, "mode": "live", "assessment": "segment leaves an alternate route",
+                    "suggested_campaign": {"foothold": path[0], "pivot_identity": None, "objective": path[-1],
+                                           "steps": [{"type": "network_connection", "asset": a, "description": "bypass"} for a in path],
+                                           "rationale": "critic", "confidence": 0.7, "mode": "live", "path": path}}
+        return {"bypass": None, "suggested_campaign": None, "mode": "live", "assessment": "no bypass"}
+
+    monkeypatch.setattr(agents, "criticize_defense", fake_critic)
+    rid = client.post("/api/experiments", json={"scenario_id": "red_vs_blue_battle", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    evs = client.get(f"/api/experiments/{rid}/events").json()
+    types = [e["event_type"] for e in evs]
+    assert "debate" in types or "red_critic" in types  # critic exchange is on the record
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert res["run"]["state"] == "COMPLETED"
+
+
 def test_benchmark_endpoint():
     b = client.get("/api/benchmark").json()
     assert "available" in b and "scope" in b
