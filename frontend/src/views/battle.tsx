@@ -5,6 +5,9 @@ import type { Asset, RunResult, Twin, View } from '../types'
 import { TwinView, AttackChain, SkeletonTwin } from './twin'
 export function BattleView({ onRunBattle }: { onRunBattle: () => void }) {
   const s = useStore()
+  const battleScenario = s.scenarios.find((sc) => sc.id === 'red_vs_blue_battle')
+  const metricsMax = s.results?.verification?.metrics.max_rounds
+  const maxRounds = battleScenario?.max_rounds ?? (typeof metricsMax === 'number' ? metricsMax : null)
   const rounds = (s.results?.verification?.metrics.rounds as { round: number }[] | undefined) ?? []
   const red = s.events.filter((e) => ['adversary_simulator'].includes(e.agent ?? '') || ['red_critic', 'debate', 'decoy_tripped', 'red_team', 'red_team_pivot'].includes(e.event_type))
   const blue = s.events.filter((e) => ['incident_investigator', 'defense_strategist', 'defense_executor'].includes(e.agent ?? ''))
@@ -14,7 +17,7 @@ export function BattleView({ onRunBattle }: { onRunBattle: () => void }) {
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div>
           <h1 className="text-2xl font-black text-cyan-200">Battle — Red vs Blue</h1>
-          <p className="text-xs text-slate-400">Adaptive adversary on the left, defense on the right, the twin in the middle. Round {Math.max(rounds.length, s.runState === 'IDLE' ? 0 : 1)} · state {s.runState}</p>
+          <p className="text-xs text-slate-400">Adaptive adversary on the left, defense on the right, the twin in the middle. Round {Math.max(rounds.length, s.runState === 'IDLE' ? 0 : 1)}{maxRounds !== null ? ` of ${maxRounds}` : ''} · state {s.runState}{maxRounds !== null ? ` · max ${maxRounds} rounds (including round 1)` : ''}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => { s.set({ scenarioId: 'red_vs_blue_battle' }); onRunBattle() }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white">⚔ Run Battle</button>

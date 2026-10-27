@@ -131,7 +131,8 @@ def twin_action(body: TwinActionRequest):
 
 @app.get("/api/scenarios")
 def list_scenarios():
-    return [{k: s[k] for k in ("id", "name", "description", "severity", "source_asset", "target_asset", "invariant", "objectives")} for s in SCENARIOS.values()]
+    return [{**{k: s[k] for k in ("id", "name", "description", "severity", "source_asset", "target_asset", "invariant", "objectives")},
+             "max_rounds": s.get("max_rounds")} for s in SCENARIOS.values()]
 
 
 @app.get("/api/scenarios/custom")
@@ -1153,7 +1154,8 @@ def _validate_scenario(body: CreateCustomScenario) -> dict:
     return {"source_asset": body.source_asset, "target_asset": body.target_asset, "severity": body.severity,
             "invariant": body.invariant or f"{body.source_asset} cannot reach/affect {body.target_asset}",
             "objectives": body.objectives or ["custom_objective"], "verification_kind": body.verification_kind,
-            "identity": body.identity, "attack_steps": [s.model_dump() for s in body.attack_steps],
+            "identity": body.identity, "max_rounds": body.max_rounds,
+            "attack_steps": [s.model_dump() for s in body.attack_steps],
             "expected_defense": body.expected_defense, "description": body.description}
 
 

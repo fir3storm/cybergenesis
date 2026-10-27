@@ -3,7 +3,7 @@ import { api } from '../services/api'
 import { useStore } from '../stores/store'
 import type { Asset, RunResult, Twin, View } from '../types'
 import { Component, Suspense, lazy, type ReactNode } from 'react'
-import { ATTACK_PATHS, STATUS_COLOR } from '../components/status'
+import { STATUS_COLOR, activeAttackPath, blockedEdgeIndex } from '../components/status'
 import { Shield } from 'lucide-react'
 import { useOpenDevice } from '../components/DeviceWindow'
 
@@ -53,19 +53,29 @@ export function Twin2D({ twin }: { twin: Twin }) {
 
 export function AttackChain() {
   const s = useStore()
-  const path = ATTACK_PATHS[s.scenarioId] ?? []
+  // Follow the ACTIVE run: latest red-team round path, else the verified
+  // after/baseline path; the static table is only a no-run fallback.
+  const active = activeAttackPath(s.results, s.scenarioId)
+  const path = active.path
   const byId = Object.fromEntries((s.twin?.assets ?? []).map((a) => [a.id, a]))
-  const blocked = s.results?.verification?.metrics.after_reachable_or_granted === false
+  const blocked = active.blocked
   if (!path.length) return null
+  // Blocked hop: first hop the twin says cannot carry traffic; when the
+  // verifier says blocked but no single edge is down (e.g. a patch removed
+  // the pivot's vulnerability), mark the final hop into the target.
+  const edgeIdx = blockedEdgeIndex(path, s.twin)
+  const blockedHop = blocked ? (edgeIdx >= 0 ? edgeIdx : path.length - 2) : -1
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-red-900/50 glass-panel px-3 py-2" aria-label="Attack path in plain language">
-      <span className="font-mono text-[10px] tracking-wider text-red-300">ATTACK PATH</span>
+      <span className="font-mono text-[10px] tracking-wider text-red-300">ATTACK PATH{active.round !== null ? ` · ROUND ${active.round}` : ''}</span>
       {path.map((id, i) => {
         const a = byId[id]
         const role = i === 0 ? 'SOURCE' : i === path.length - 1 ? 'TARGET' : `PIVOT ${i}`
         return (
-          <span key={id} className="flex items-center gap-1.5">
-            {i > 0 && <span className={blocked && i === path.length - 1 ? 'text-emerald-300 font-bold' : 'text-red-400'}>{blocked && i === path.length - 1 ? '✕ blocked →' : '→'}</span>}
+          <span key={`${id}-${i}`} className="flex items-center gap-1.5">
+            {i > 0 && (blockedHop === i - 1
+              ? <span className="text-red-500 font-bold" aria-label="blocked hop">✕ blocked →</span>
+              : <span className="text-red-400">→</span>)}
             <button onClick={() => s.set({ selectedAsset: id })} className="rounded-full border px-2 py-1 text-[11px]"
               style={{ borderColor: STATUS_COLOR[a?.status ?? 'healthy'], color: STATUS_COLOR[a?.status ?? 'healthy'] }}>
               <b>{i + 1}</b> {a?.name ?? id} <span className="opacity-70">· {role} · {(a?.status ?? '—').toUpperCase()}</span>

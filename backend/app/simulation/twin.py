@@ -218,6 +218,13 @@ class DigitalTwin:
             if cfg is not None:
                 cfg["isolated"] = bool(value)
         elif field == "status":
+            # The internet gateway is external, unowned infrastructure: a
+            # defense can expose/contain it, never "remediate" it. Guarding
+            # here — the single status choke point — covers every action
+            # (patch, block, harden, revoke, ...) that tries to land the
+            # status on the internet asset.
+            if asset == "internet" and value == "remediated":
+                value = "exposed"
             self.status[asset] = value
         elif field == "quarantine_vlan":
             if value:
@@ -323,8 +330,12 @@ class DigitalTwin:
                            "connected": sorted(set(self.graph.successors(aid)) | set(self.graph.predecessors(aid)))})
         conns = []
         for s, t, trust, trav, types in self.edge_defs:
-            fwd = self.dir_active.get((s, t), False) and not self.isolated[s] and not self.isolated[t]
-            rev = self.dir_active.get((t, s), False) and not self.isolated[s] and not self.isolated[t]
+            # quarantine takes a link down exactly like isolation (compiler
+            # link_up agrees); reporting it active would hide the cut
+            _cut_off = (self.isolated[s] or self.isolated[t]
+                        or s in self.quarantined or t in self.quarantined)
+            fwd = self.dir_active.get((s, t), False) and not _cut_off
+            rev = self.dir_active.get((t, s), False) and not _cut_off
             conns.append({"source": s, "target": t, "trust": trust, "traversable": trav, "types": types,
                           "active": fwd or rev, "dir_forward_active": fwd, "dir_reverse_active": rev,
                           "one_way_blocked": fwd != rev})
@@ -407,10 +418,35 @@ class DigitalTwin:
         result = self.explain_path(src, dst)
         return result["path"] if result["reachable"] else None
 
+    # --- legitimate traffic (authorised business flows) -------------------
+    # Legitimate reachability is a SEPARATE question from attacker
+    # reachability: a patch that removes a vulnerability must never look
+    # like it "disrupted" legitimate users. So these checks compile the
+    # twin with the vulnerability/session gate disabled (no hop_allowed
+    # exclusion loop, no target-weakness gate), while links, direction
+    # (cable pairs), ACLs, firewall policy and isolation/quarantine still
+    # apply exactly as the compiler evaluates them. find_path/explain_path
+    # keep the attacker gate untouched.
+    def explain_legitimate_path(self, src: str, dst: str) -> dict:
+        if src not in self.graph or dst not in self.graph:
+            return {"reachable": False, "path": [], "hops": [], "reason": "device missing",
+                    "config_hash": self.config_hash()}
+        compiled = self._compiled()
+        result = compiled.explain(src, dst, legitimate=True)
+        return {**result, "config_hash": self.config_hash()}
+
+    def legitimate_path(self, src: str, dst: str) -> list[str] | None:
+        result = self.explain_legitimate_path(src, dst)
+        return result["path"] if result["reachable"] else None
+
+    def legitimate_reachable(self, src: str, dst: str) -> bool:
+        return self.legitimate_path(src, dst) is not None
+
     def legitimate_disrupted(self, baseline: "DigitalTwin") -> int:
         disrupted = 0
         for s, t, _users in LEGITIMATE_PAIRS:
-            if s in self.graph and t in self.graph and baseline.reachable(s, t) and not self.reachable(s, t):
+            if s in self.graph and t in self.graph and baseline.legitimate_reachable(s, t) \
+                    and not self.legitimate_reachable(s, t):
                 disrupted += 1
         return disrupted
 
@@ -494,7 +530,7 @@ class DigitalTwin:
                 if u.get("name") == ident:
                     u["mfa"] = True
             self.containment.append(f"enforce_mfa:{ident}")
-            self.status[asset_id] = "remediated"
+            self.set_state(asset_id, "status", "remediated")
         elif action_type == "deploy_decoy":
             kind = params.get("kind", "honeypot_host")
             if kind not in ("honeypot_host", "canary_credential", "canary_file"):

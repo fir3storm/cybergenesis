@@ -1,12 +1,14 @@
 {
   "id": "red_vs_blue_battle",
   "name": "Red vs Blue Battle",
-  "description": "Adaptive battle: the red team enters from the internet toward the file server. After each blue defense, the red team searches for an alternate path and tries again, for up to 5 rounds, until no path remains.",
+  "description": "Adaptive battle: the red team enters from the internet toward the file server. After each blue defense, the red team searches for an alternate path and tries again, for up to max_rounds rounds in total, until no path remains.",
   "severity": "critical",
   "source_asset": "internet",
   "target_asset": "file-server",
   "identity": null,
   "verification_kind": "reachability",
+  "max_rounds": 5,
+  "max_rounds_convention": "max_rounds is the total number of campaign rounds, INCLUDING round 1 (the opening attack and defense). Rounds 2..max_rounds are adaptive red-team retries; the campaign never exceeds max_rounds rounds.",
   "objectives": ["reach_file_server", "maintain_alternate_paths"],
   "attack_steps": [
     {"type": "network_connection", "asset": "firewall", "description": "Red team probes the firewall from the internet"},

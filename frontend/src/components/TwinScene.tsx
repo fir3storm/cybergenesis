@@ -6,7 +6,7 @@ import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { Asset, Conn, Twin } from '../types'
 import { useStore } from '../stores/store'
-import { ATTACK_PATHS, STATUS_COLOR } from './status'
+import { ATTACK_PATHS, STATUS_COLOR, activeAttackPath, blockedEdgeIndex } from './status'
 import { NODE_LAYOUT, ZONES, ZONE_OF, layoutFor } from './zones'
 
 export { ATTACK_PATHS } from './status'
@@ -421,6 +421,7 @@ function findPath(twin: Twin, src: string, dst: string): string[] | null {
 
 export default function TwinScene({ twin }: { twin: Twin }) {
   const scenarioId = useStore((s) => s.scenarioId)
+  const results = useStore((s) => s.results)
   const mapFocus = useStore((s) => s.mapFocus)
   const set = useStore((s) => s.set)
   const [resetNonce, setResetNonce] = useState(0)
@@ -428,22 +429,33 @@ export default function TwinScene({ twin }: { twin: Twin }) {
   const zoom = (dir: 1 | -1) => setZoomCmd((prev) => ({ dir, n: (prev?.n ?? 0) + 1 }))
 
   const positions = useMemo(() => new Map(twin.assets.map((a) => [a.id, layoutFor(a.id, a.pos)] as [string, [number, number, number]])), [twin])
-  const chain = ATTACK_PATHS[scenarioId] ?? []
-  const livePath = chain.length >= 2 ? findPath(twin, chain[0], chain[chain.length - 1]) : null
-  const displayChain = livePath ?? chain
+  // Follow the ACTIVE run (round path / verified after+baseline path); the
+  // static table is only a fallback. Without run data, recompute the live
+  // path from the twin's current connections as before.
+  const active = activeAttackPath(results, scenarioId)
+  const staticChain = ATTACK_PATHS[scenarioId] ?? []
+  const livePath = active.source === 'static' && staticChain.length >= 2
+    ? findPath(twin, staticChain[0], staticChain[staticChain.length - 1]) : null
+  const displayChain = active.source === 'static' ? (livePath ?? staticChain) : active.path
+  const chain = displayChain
   const pathNodes = new Set(displayChain)
   const pathEdges = new Set<string>()
   for (let i = 0; i < displayChain.length - 1; i++) { pathEdges.add(`${displayChain[i]}|${displayChain[i + 1]}`); pathEdges.add(`${displayChain[i + 1]}|${displayChain[i]}`) }
   const explicitBlocked = new Set(twin.containment.filter((c) => c.startsWith('block:')).map((c) => c.slice(6)))
   const isBlockedEdge = (c: Conn) => !c.active && (explicitBlocked.has(`${c.source}->${c.target}`) || explicitBlocked.has(`${c.target}->${c.source}`))
-  const blockedOnChain = displayChain.length >= 2 && !livePath
-    ? displayChain.slice(0, -1).map((id, i) => ({ s: id, t: displayChain[i + 1] })).find(({ s, t }) => {
-        const c = twin.connections.find((x) => (x.source === s && x.target === t) || (x.source === t && x.target === s))
-        return c && (!c.active || twin.assets.find((a) => a.id === s)?.isolated || twin.assets.find((a) => a.id === t)?.isolated)
-      }) ?? null
-    : null
+  // A path is blocked when the verifier says the objective is unreachable,
+  // or when a hop on the chain is down in the twin. The blocked hop gets a
+  // red ✕ (BlockedEdge) and attack particles never enter that edge: the
+  // flow chain is truncated to the node before the blocked hop.
+  const blockedIdx = displayChain.length >= 2
+    ? blockedEdgeIndex(displayChain, twin) : -1
+  const pathBlocked = active.blocked || blockedIdx >= 0
+  const effectiveBlockedIdx = pathBlocked ? (blockedIdx >= 0 ? blockedIdx : displayChain.length - 2) : -1
+  const blockedOnChain = effectiveBlockedIdx >= 0
+    ? { s: displayChain[effectiveBlockedIdx], t: displayChain[effectiveBlockedIdx + 1] } : null
+  const flowChain = blockedOnChain ? displayChain.slice(0, effectiveBlockedIdx + 1) : displayChain
   const stopPoint = blockedOnChain ? edgeCurve(positions.get(blockedOnChain.s)!, positions.get(blockedOnChain.t)!).getPoint(0.55) : null
-  const targetProtected = Boolean(chain.length >= 2 && !livePath && twin.containment.length > 0)
+  const targetProtected = Boolean(chain.length >= 2 && pathBlocked && twin.containment.length > 0)
   const anyCompromised = twin.assets.some((a) => a.status === 'compromised')
   const linksOf = (a: Asset) => twin.connections.filter((c) => c.source === a.id || c.target === a.id)
     .map((c) => (c.source === a.id ? c.target : c.source)).map((id) => SHORT_LABEL[id] ?? id)
@@ -476,11 +488,14 @@ export default function TwinScene({ twin }: { twin: Twin }) {
               const s = positions.get(c.source); const t = positions.get(c.target)
               if (!s || !t) return null
               const key = `${c.source}-${c.target}`
-              if (isBlockedEdge(c)) return <BlockedEdge key={key} s={s} t={t} />
+              const onBlockedHop = blockedOnChain !== null
+                && ((c.source === blockedOnChain.s && c.target === blockedOnChain.t)
+                  || (c.source === blockedOnChain.t && c.target === blockedOnChain.s))
+              if (isBlockedEdge(c) || onBlockedHop) return <BlockedEdge key={key} s={s} t={t} />
               const attack = pathEdges.has(`${c.source}|${c.target}`)
               return <EdgeTube key={key} s={s} t={t} attack={attack} dimmed={mapFocus && !attack} />
             })}
-            {displayChain.length >= 2 && <AttackFlow chain={displayChain} positions={positions} stopPoint={stopPoint} />}
+            {flowChain.length >= 2 && <AttackFlow chain={flowChain} positions={positions} stopPoint={null} />}
             {stopPoint && <BurstAtCut point={stopPoint} />}
             {twin.assets.map((a) => (
               <Node key={a.id} a={a} dimmed={mapFocus && !pathNodes.has(a.id)}

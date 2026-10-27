@@ -158,7 +158,7 @@ class CompiledTwin:
         return f"firewall implicit deny (no allow policy for {service['name']})"
 
     # -- BFS over (device, ingress_interface) -------------------------------
-    def explain(self, src: str, dst: str) -> dict:
+    def explain(self, src: str, dst: str, *, legitimate: bool = False) -> dict:
         if src not in self.configs or dst not in self.configs:
             return {"reachable": False, "path": [], "hops": [], "reason": "device missing"}
         cb = self.configs[dst]
@@ -167,17 +167,21 @@ class CompiledTwin:
         services = [s.model_dump() for s in cb.services if s.enabled]
         if not services:
             return {"reachable": False, "path": [], "hops": [], "reason": f"{dst} exposes no enabled service"}
-        if not (weak or has_session):
+        # Legitimate traffic is authorised business traffic: it needs an enabled
+        # service and an up, unfiltered link, but NOT a weakness or a held
+        # (attacker) session on the target. The vulnerability/session gate
+        # below applies to attacker reachability only.
+        if not legitimate and not (weak or has_session):
             return {"reachable": False, "path": [], "hops": [],
                     "reason": f"{dst} has no weakness/missing patch and attacker holds no session"}
         for service in services:  # consider EVERY enabled target service
-            result = self._bfs_service(src, dst, service)
+            result = self._bfs_service(src, dst, service, legitimate=legitimate)
             if result["reachable"]:
                 return result
         return {"reachable": False, "path": [], "hops": [],
                 "reason": f"no path allows any of {[s['name'] for s in services]} (link/filter/firewall rules refused; {'; '.join(self.refusals[:3])})"}
 
-    def _bfs_service(self, src: str, dst: str, service: dict) -> dict:
+    def _bfs_service(self, src: str, dst: str, service: dict, *, legitimate: bool = False) -> dict:
         start = (src, None)
         q: deque = deque([[start]])
         seen = {start}
@@ -192,7 +196,9 @@ class CompiledTwin:
                     frm = states[i][0]
                     hops.append({"from": frm, "to": states[i + 1][0], "rule": parent[states[i + 1]][1]})
                 return {"reachable": True, "path": path, "hops": hops,
-                        "reason": f"path exists for service {service['name']}; target weak or session held"}
+                        "reason": f"path exists for service {service['name']}; "
+                                  + ("legitimate service reachable (vulnerability gate skipped)"
+                                     if legitimate else "target weak or session held")}
             for nxt in self.adj.get(device, []):
                 found = self._cable_for(device, nxt)
                 if found is None:

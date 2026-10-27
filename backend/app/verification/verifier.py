@@ -72,7 +72,9 @@ def disrupted_users(after: DigitalTwin, baseline: DigitalTwin) -> int:
 
     total = 0
     for s, t, users in LEGITIMATE_PAIRS:
-        if s in after.graph and baseline.reachable(s, t) and not after.reachable(s, t):
+        # legitimate traffic ignores the attacker vulnerability gate (see
+        # DigitalTwin.legitimate_reachable): patching a hop is not disruption
+        if s in after.graph and baseline.legitimate_reachable(s, t) and not after.legitimate_reachable(s, t):
             total += users
     return total
 

@@ -3,10 +3,10 @@ export interface Asset {
   status: string; isolated: boolean; service_disabled: boolean;
   vulnerabilities: string[]; connected: string[]; pos: [number, number, number];
 }
-export interface Conn { source: string; target: string; trust: string; traversable: boolean; types: string[]; active: boolean }
+export interface Conn { source: string; target: string; trust: string; traversable: boolean; types: string[]; active: boolean; dir_forward_active?: boolean; dir_reverse_active?: boolean; one_way_blocked?: boolean }
 export interface TwinDevice { asset_id: string; device_id: string | null; model: string; vendor: string; ports: string[]; links: { peer: string; state: string }[]; config_hash: string }
 export interface Twin { assets: Asset[]; connections: Conn[]; devices?: TwinDevice[]; identities: Record<string, { asset: string; session_active: boolean; compromised: boolean; credential_version: number }>; containment: string[] }
-export interface Scenario { id: string; name: string; description: string; severity: string; source_asset: string; target_asset: string; invariant: string; objectives: string[] }
+export interface Scenario { id: string; name: string; description: string; severity: string; source_asset: string; target_asset: string; invariant: string; objectives: string[]; max_rounds?: number | null }
 export interface SimEvent { event_type: string; run_id?: string; agent?: string | null; asset_id?: string | null; message: string; payload?: Record<string, unknown>; seq?: number; timestamp?: string; twin?: Twin }
 export interface RunResult {
   run: { id: string; scenario_id: string; seed: number; state: string; mode: string; error: string | null; metrics: Record<string, unknown> };

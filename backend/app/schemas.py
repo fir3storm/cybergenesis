@@ -148,6 +148,7 @@ class CreateCustomScenario(BaseModel):
     objectives: list[str] = []
     verification_kind: str = "reachability"
     identity: str | None = None
+    max_rounds: int | None = Field(default=None, ge=1, description="total campaign rounds including round 1")
     attack_steps: list[AttackStep] = []
     expected_defense: list[dict] = []
 

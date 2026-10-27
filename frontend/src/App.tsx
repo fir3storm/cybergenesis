@@ -518,7 +518,7 @@ export default function App() {
               <button key={sc.id} onClick={() => s.set({ scenarioId: sc.id })} className={`rounded-xl border p-3 text-left ${s.scenarioId === sc.id ? 'border-cyan-300 bg-cyan-500/15' : 'border-slate-800 glass-panel hover:border-slate-600'}`}>
                 <div className="text-sm font-bold">{SCENARIO_ICONS[sc.id]} {sc.name} <span className="text-amber-300 text-xs">({sc.severity})</span></div>
                 <p className="mt-1 line-clamp-2 text-[11px] text-slate-400">{sc.description}</p>
-                <p className="mt-1 font-mono text-[10px] text-slate-500">{sc.source_asset} → {sc.target_asset}</p>
+                <p className="mt-1 font-mono text-[10px] text-slate-500">{sc.source_asset} → {sc.target_asset}{sc.max_rounds ? ` · max ${sc.max_rounds} rounds` : ''}</p>
               </button>
             ))}
           </section>

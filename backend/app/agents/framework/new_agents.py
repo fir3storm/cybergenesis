@@ -52,6 +52,33 @@ def validate_plan(plan: CommanderPlan, known_ids: set[str]) -> list[str]:
     return reasons
 
 
+def trim_plan_to_max_rounds(plan: CommanderPlan, max_rounds: int | None) -> tuple[CommanderPlan, str | None]:
+    """Deterministically cap a commander plan at the scenario's max_rounds.
+
+    Convention (single source of truth: scenario["max_rounds"]): the battle
+    runs at most max_rounds campaign rounds INCLUDING round 1, and the
+    commander's plan may not imply more work than that budget allows, so
+    the plan is trimmed to at most max_rounds steps. Trimming (not
+    rejection) is chosen so a usable plan always survives; the caller
+    records the returned reason. Plans for scenarios without max_rounds,
+    and plans already within budget, pass through unchanged. The mandatory
+    backbone is executed by the orchestrator regardless of plan trimming.
+    """
+    if max_rounds is None:
+        return plan, None
+    try:
+        cap = int(max_rounds)
+    except (TypeError, ValueError):
+        return plan, None
+    if cap < 1 or len(plan.plan) <= cap:
+        return plan, None
+    trimmed = plan.model_copy(deep=True)
+    trimmed.plan = trimmed.plan[:cap]
+    reason = (f"commander plan trimmed from {len(plan.plan)} to {cap} steps to align with "
+              f"scenario max_rounds={cap} (total campaign rounds including round 1)")
+    return trimmed, reason
+
+
 class IncidentCommanderAgent(Agent):
     def __init__(self):
         super().__init__(_spec("incident_commander"))

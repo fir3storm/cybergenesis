@@ -6,6 +6,7 @@ Each run owns its twin; the display twin syncs only when a run finishes.
 """
 
 import asyncio
+import time
 from datetime import datetime, timezone
 
 from app import models
@@ -233,12 +234,27 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
             _cmd = await _build_agent("incident_commander").run(
                 _AgentContext(run_id=run_id, twin=twin, scenario=scenario), _agent_io.TextIn(text=scenario["name"]))
             commander_plan = _cmd.output
-            emit("commander_plan", f"Commander plan ({_cmd.mode}): {len(_cmd.output.plan)} steps — {_cmd.output.stop_condition}",
-                 agent="incident_commander", payload=_cmd.output.model_dump())
-            db.add(models.AgentDecision(run_id=run_id, agent="incident_commander", decision=f"plan: {[s.agents for s in _cmd.output.plan]}",
-                                        justification=_cmd.output.stop_condition, confidence=_cmd.output.confidence,
+            # Single source of truth for campaign length: scenario["max_rounds"]
+            # (total rounds INCLUDING round 1). The commander plan is capped to
+            # the same number by deterministic trimming, with the reason recorded.
+            from app.agents.framework.new_agents import trim_plan_to_max_rounds
+
+            _max_rounds_raw = scenario.get("max_rounds")
+            commander_plan, _plan_trim_reason = trim_plan_to_max_rounds(commander_plan, _max_rounds_raw)
+            _plan_payload = {**commander_plan.model_dump(), "max_rounds": _max_rounds_raw,
+                             "plan_trim_reason": _plan_trim_reason}
+            emit("commander_plan", f"Commander plan ({_cmd.mode}): {len(commander_plan.plan)} steps — {commander_plan.stop_condition}",
+                 agent="incident_commander", payload=_plan_payload)
+            if _plan_trim_reason:
+                emit("commander_plan_trimmed", _plan_trim_reason, agent="incident_commander",
+                     payload={"max_rounds": _max_rounds_raw, "reason": _plan_trim_reason,
+                              "steps_after_trim": len(commander_plan.plan)})
+            db.add(models.AgentDecision(run_id=run_id, agent="incident_commander", decision=f"plan: {[s.agents for s in commander_plan.plan]}",
+                                        justification=commander_plan.stop_condition, confidence=commander_plan.confidence,
                                         model=_cmd.model, mode=_cmd.mode, evidence_refs=[], asset_ids=[],
-                                        data={"fallback_reason": _cmd.fallback_reason})); db.commit()
+                                        data={"fallback_reason": _cmd.fallback_reason,
+                                              "max_rounds": _max_rounds_raw,
+                                              "plan_trim_reason": _plan_trim_reason})); db.commit()
         except Exception as e:  # noqa: BLE001 - commander is advisory; backbone execution continues
             emit("provider_fallback", f"Commander unavailable, default backbone in use: {type(e).__name__}: {e}", agent="incident_commander")
         await set_state("SCENARIO_SELECTED", f"Scenario selected: {scenario['name']}", "adversary_simulator")
@@ -287,31 +303,98 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                                             data={"fallback_reason": _reason}))
             db.commit()
 
-        # execute the Commander's optional (non-backbone) steps in plan order, max 4 concurrent
+        # Execute the Commander's optional (non-backbone) steps as a DAG:
+        # steps run strictly in plan order — every agent of a step must have
+        # finished (the await below) before any agent of a later step starts.
+        # Within a step, agents run concurrently only when the step is marked
+        # parallel; otherwise they run sequentially in listed order.
+        # Authoring-time agents (scenario_author, twin_architect) never run
+        # mid-incident: they are skipped with a recorded reason. Every agent
+        # that actually runs persists an AgentDecision (success or failure).
         if commander_plan is not None:
             _sem = asyncio.Semaphore(4)
             _backbone = {"observer", "incident_investigator", "defense_strategist", "defense_executor", "verification_scientist"}
+            _authoring = {"scenario_author", "twin_architect"}
+            _finished_steps: list[int] = []
 
             async def _run_optional(_aid: str):
                 async with _sem:
+                    _t0 = time.monotonic()
                     try:
-                        _inp = _aio.TelemetryIn(telemetry=telemetry) if _aid == "threat_intel_analyst" else _aio.TextIn()
-                        return await _ba(_aid).run(_ctx, _inp)
-                    except Exception:  # noqa: BLE001 - reported by caller
-                        return None
+                        if _aid == "threat_intel_analyst":
+                            _inp = _aio.TelemetryIn(telemetry=telemetry)
+                        elif _aid == "red_team_planner":
+                            _inp = _aio.CampaignIn(source_asset=scenario["source_asset"], target_asset=scenario["target_asset"])
+                        elif _aid in ("config_engineer", "business_impact_analyst"):
+                            _inp = _aio.ExecuteIn(actions=[])
+                        else:
+                            _inp = _aio.TextIn()
+                        _res = await _ba(_aid).run(_ctx, _inp)
+                        return _res, None, int((time.monotonic() - _t0) * 1000)
+                    except Exception as _exc:  # noqa: BLE001 - reported by caller as a failed decision
+                        return None, f"{type(_exc).__name__}: {_exc}"[:220], int((time.monotonic() - _t0) * 1000)
 
             for _step in commander_plan.plan:
                 _optional = [a for a in _step.agents if a not in _backbone]
                 if not _optional:
+                    _finished_steps.append(_step.step)
                     continue
+                _depends_on = list(_finished_steps)
+                _runnable: list[str] = []
                 for _aid in _optional:
-                    emit("plan_step_started", f"Commander step {_step.step}: {_aid} starting", agent="incident_commander",
-                         payload={"step": _step.step, "agent": _aid})
-                _results = await asyncio.gather(*[_run_optional(a) for a in _optional]) \
-                    if _step.parallel else [await _run_optional(_optional[0])]
-                for _aid, _r in zip(_optional, _results):
-                    emit("plan_step_finished", f"Commander step {_step.step}: {_aid} {'done' if _r else 'failed'}",
-                         agent="incident_commander", payload={"step": _step.step, "agent": _aid, "ok": _r is not None})
+                    if _aid in _authoring:
+                        emit("plan_step_skipped",
+                             f"Commander step {_step.step}: {_aid} skipped — authoring-time agent, not incident-relevant mid-run",
+                             agent="incident_commander",
+                             payload={"step": _step.step, "agent": _aid, "skipped": True,
+                                      "reason": "authoring-time agent (scenario_author/twin_architect) excluded from in-run optional steps",
+                                      "depends_on_steps": _depends_on})
+                    else:
+                        _runnable.append(_aid)
+                if _runnable:
+                    _step_started_at = datetime.now(timezone.utc).isoformat()
+                    _step_t0 = time.monotonic()
+                    for _aid in _runnable:
+                        emit("plan_step_started", f"Commander step {_step.step}: {_aid} starting", agent="incident_commander",
+                             payload={"step": _step.step, "agent": _aid, "started_at": _step_started_at,
+                                      "depends_on_steps": _depends_on})
+                    if _step.parallel:
+                        _results = await asyncio.gather(*[_run_optional(a) for a in _runnable])
+                    else:
+                        _results = []
+                        for _a in _runnable:  # sequential: listed order, each awaited
+                            _results.append(await _run_optional(_a))
+                    _step_finished_at = datetime.now(timezone.utc).isoformat()
+                    _step_duration_ms = int((time.monotonic() - _step_t0) * 1000)
+                    for _aid, (_r, _err, _agent_ms) in zip(_runnable, _results):
+                        emit("plan_step_finished", f"Commander step {_step.step}: {_aid} {'done' if _r else 'failed'}",
+                             agent="incident_commander",
+                             payload={"step": _step.step, "agent": _aid, "ok": _r is not None,
+                                      "started_at": _step_started_at, "finished_at": _step_finished_at,
+                                      "duration_ms": _agent_ms, "step_duration_ms": _step_duration_ms,
+                                      "depends_on_steps": _depends_on})
+                        if _r is not None:
+                            _out = _r.output
+                            _decision = str(getattr(_out, "summary", None) or getattr(_out, "hypothesis", None)
+                                            or _out.model_dump_json()[:220])
+                            emit("agent_decision", _decision, agent=_aid, payload={"mode": _r.mode, "plan_step": _step.step})
+                            db.add(models.AgentDecision(
+                                run_id=run_id, agent=_aid, decision=_decision,
+                                justification=f"commander optional step {_step.step} (after steps {_depends_on})",
+                                confidence=_r.confidence, model=_r.model, mode=_r.mode,
+                                evidence_refs=_r.evidence_refs, asset_ids=[],
+                                data={"fallback_reason": _r.fallback_reason, "plan_step": _step.step,
+                                      "duration_ms": _agent_ms}))
+                        else:
+                            db.add(models.AgentDecision(
+                                run_id=run_id, agent=_aid, decision="agent failed",
+                                justification=_err or "optional agent failed", confidence=0.0,
+                                model="deterministic", mode="offline", evidence_refs=[], asset_ids=[],
+                                data={"fallback_reason": _err, "plan_step": _step.step,
+                                      "duration_ms": _agent_ms}))
+                    db.commit()
+                # DAG barrier: this step is finished before the next begins.
+                _finished_steps.append(_step.step)
         db.add(models.AgentDecision(run_id=run_id, agent="observer", decision=obs.anomaly_type,
                                     justification=obs.summary, confidence=obs.confidence, model="deterministic",
                                     mode="offline", evidence_refs=obs.event_ids, asset_ids=obs.asset_ids)); db.commit()
@@ -534,7 +617,16 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
                    "disrupted": result.metrics["operational_impact_disrupted_legit_paths"], "red_team_mode": None}]
 
         if scenario["verification_kind"] == "reachability" and not defense_rejection["reason"]:
-            for round_num in range(2, 5):  # up to 4 rounds total
+            # max_rounds (scenario JSON) is the single source of truth: total
+            # campaign rounds INCLUDING round 1 above, so adaptive retries are
+            # rounds 2..max_rounds. Scenarios without max_rounds keep the
+            # historical default of 4 total rounds.
+            try:
+                _max_rounds = int(scenario.get("max_rounds") or 4)
+            except (TypeError, ValueError):
+                _max_rounds = 4
+            _max_rounds = max(1, _max_rounds)
+            for round_num in range(2, _max_rounds + 1):
                 plan = await red_team.plan_campaign(twin, scenario["source_asset"], scenario["target_asset"], run_id)
                 if plan is None:
                     emit("red_team", f"Red team (round {round_num}): no valid campaign — attack surface closed",
@@ -668,6 +760,7 @@ async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) ->
         result.metrics["sim_time_to_contain_s"] = sim_contained
         result.metrics["users_affected"] = result.metrics.get("users_affected")
         result.metrics["rounds"] = rounds
+        result.metrics["max_rounds"] = scenario.get("max_rounds")
         result.metrics["candidates"] = candidates
         result.metrics["ai_final_choice"] = {"mode": final_choice_meta.get("mode"),
                                              "chosen_label": final_choice_meta.get("chosen_label"),
