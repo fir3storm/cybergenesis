@@ -139,6 +139,22 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         if run_id in _cancelled:
             raise asyncio.CancelledError()
+        # Incident Commander plans the run (validated DAG); execution follows the mandatory backbone regardless
+        try:
+            from app.agents.framework.adapters import build_agent as _build_agent
+            from app.agents.framework.base import AgentContext as _AgentContext
+            from app.agents.framework import io as _agent_io
+
+            _cmd = await _build_agent("incident_commander").run(
+                _AgentContext(run_id=run_id, twin=twin, scenario=scenario), _agent_io.TextIn(text=scenario["name"]))
+            emit("commander_plan", f"Commander plan ({_cmd.mode}): {len(_cmd.output.plan)} steps — {_cmd.output.stop_condition}",
+                 agent="incident_commander", payload=_cmd.output.model_dump())
+            db.add(models.AgentDecision(run_id=run_id, agent="incident_commander", decision=f"plan: {[s.agents for s in _cmd.output.plan]}",
+                                        justification=_cmd.output.stop_condition, confidence=_cmd.output.confidence,
+                                        model=_cmd.model, mode=_cmd.mode, evidence_refs=[], asset_ids=[],
+                                        data={"fallback_reason": _cmd.fallback_reason})); db.commit()
+        except Exception as e:  # noqa: BLE001 - commander is advisory; backbone execution continues
+            emit("provider_fallback", f"Commander unavailable, default backbone in use: {type(e).__name__}: {e}", agent="incident_commander")
         await set_state("SCENARIO_SELECTED", f"Scenario selected: {scenario['name']}", "adversary_simulator")
         baseline_twin = twin.clone()
         db.add(models.AssetStateSnapshot(run_id=run_id, label="baseline", snapshot=twin.snapshot())); db.commit()
@@ -159,6 +175,23 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         await set_state("TELEMETRY_COLLECTED", f"{len(telemetry)} synthetic telemetry events collected", "observer")
         obs = agents.observe(telemetry)
+        try:  # assurance agents publish to the bus/record (deterministic; cannot block the loop)
+            from app.agents.framework.adapters import build_agent as _ba
+            from app.agents.framework.base import AgentContext as _AC
+            from app.agents.framework import io as _aio
+
+            _ctx = _AC(run_id=run_id, twin=twin, scenario=scenario, telemetry=telemetry, baseline_twin=baseline_twin)
+            for _aid, _inp in (("threat_intel_analyst", _aio.TelemetryIn(telemetry=telemetry)),
+                               ("attack_surface_mapper", _aio.TextIn()),
+                               ("identity_guardian", _aio.TextIn())):
+                _r = await _ba(_aid).run(_ctx, _inp)
+                emit("agent_decision", _r.output.summary, agent=_aid, payload={"mode": _r.mode})
+                db.add(models.AgentDecision(run_id=run_id, agent=_aid, decision=_r.output.summary,
+                                            justification="assurance analysis (deterministic/hybrid)", confidence=_r.output.confidence,
+                                            model=_r.model, mode=_r.mode, evidence_refs=_r.evidence_refs, asset_ids=[]))
+            db.commit()
+        except Exception:  # noqa: BLE001 - assurance agents are additive
+            pass
         db.add(models.AgentDecision(run_id=run_id, agent="observer", decision=obs.anomaly_type,
                                     justification=obs.summary, confidence=obs.confidence, model="deterministic",
                                     mode="offline", evidence_refs=obs.event_ids, asset_ids=obs.asset_ids)); db.commit()
@@ -402,6 +435,13 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 round_scenario = {**scenario, "id": f"{scenario['id']}-r{round_num}",
                                   "source_asset": plan.foothold, "target_asset": plan.objective,
                                   "attack_steps": [s.model_dump() for s in plan.steps], "identity": None}
+                if twin.decoys.intersection(chosen_path):
+                    emit("decoy_tripped", f"DECOY TRIPPED: red campaign touched a decoy on path {' -> '.join(chosen_path)} — high-confidence detection",
+                         agent="observer", asset_id=next(iter(twin.decoys.intersection(chosen_path))),
+                         payload={"decoys": sorted(twin.decoys.intersection(chosen_path))})
+                    db.add(models.AgentDecision(run_id=run_id, agent="observer", decision="decoy_tripped",
+                                                justification="red traversal touched a decoy asset", confidence=0.99,
+                                                model="deterministic", mode="offline", evidence_refs=[], asset_ids=chosen_path)); db.commit()
                 red_telemetry = twin.apply_attack(round_scenario, seed=run.seed + round_num)
                 for e in red_telemetry:
                     e["id"] = f"tele-red-{run_id[:6]}-{round_num}-{e['id'].rsplit('-', 1)[-1]}"

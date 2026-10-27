@@ -350,7 +350,7 @@ def test_benchmark_endpoint():
 
 def test_library_catalog():
     lib = client.get("/api/library").json()
-    assert len(lib["asset_types"]) == 9 and len(lib["attack_steps"]) == 8 and len(lib["defense_actions"]) == 11
+    assert len(lib["asset_types"]) == 9 and len(lib["attack_steps"]) == 8 and len(lib["defense_actions"]) == 13
 
 
 def test_custom_twin_crud_and_validation():

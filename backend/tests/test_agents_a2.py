@@ -38,7 +38,7 @@ def _ctx(twin=None, baseline_twin=None, run_id="a2-test"):
 
 
 def test_all_ten_registry_agents_buildable():
-    assert len(REGISTRY) == 10
+    assert len(REGISTRY) == 20
     assert set(REGISTRY) == set(AGENT_CLASSES)
     for agent_id in sorted(REGISTRY):
         agent = build_agent(agent_id)

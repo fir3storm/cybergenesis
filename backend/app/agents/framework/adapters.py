@@ -180,12 +180,22 @@ class TwinArchitectAgent(Agent):
                              confidence=0.0)
 
 
+from app.agents.framework.new_agents import (AttackSurfaceMapperAgent, BusinessImpactAnalystAgent,  # noqa: E402
+                                             ConfigAuditorAgent, ConfigEngineerAgent, DeceptionEngineerAgent,
+                                             ForensicReporterAgent, IdentityGuardianAgent, IncidentCommanderAgent,
+                                             RecoveryEngineerAgent, ThreatIntelAnalystAgent)
+
 AGENT_CLASSES = {
     "observer": ObserverAgent, "adversary_simulator": AdversarySimulatorAgent,
     "incident_investigator": IncidentInvestigatorAgent, "defense_strategist": DefenseStrategistAgent,
     "defense_executor": DefenseExecutorAgent, "verification_scientist": VerificationScientistAgent,
     "red_team_planner": RedTeamPlannerAgent, "red_team_critic": RedTeamCriticAgent,
     "scenario_author": ScenarioAuthorAgent, "twin_architect": TwinArchitectAgent,
+    "incident_commander": IncidentCommanderAgent, "threat_intel_analyst": ThreatIntelAnalystAgent,
+    "identity_guardian": IdentityGuardianAgent, "config_engineer": ConfigEngineerAgent,
+    "deception_engineer": DeceptionEngineerAgent, "recovery_engineer": RecoveryEngineerAgent,
+    "config_auditor": ConfigAuditorAgent, "attack_surface_mapper": AttackSurfaceMapperAgent,
+    "business_impact_analyst": BusinessImpactAnalystAgent, "forensic_reporter": ForensicReporterAgent,
 }
 
 

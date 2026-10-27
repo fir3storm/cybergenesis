@@ -58,6 +58,7 @@ ALLOWED_ACTIONS = {
     "isolate_asset", "block_connection", "revoke_session", "rotate_credential",
     "apply_patch", "disable_service", "restore_connectivity",
     "quarantine_vlan", "harden_mgmt", "kill_process", "restore_snapshot",
+    "enforce_mfa", "deploy_decoy",
 }
 
 
@@ -113,13 +114,14 @@ class DigitalTwin:
                 self.dir_active[(t, s)] = True
             self.edge_active[frozenset((s, t))] = True
         self.identities = {
-            "admin-01": {"asset": "admin-workstation", "session_active": False, "compromised": False, "credential_version": 1},
-            "employee-01": {"asset": "employee-workstation", "session_active": True, "compromised": False, "credential_version": 1},
+            "admin-01": {"asset": "admin-workstation", "session_active": False, "compromised": False, "credential_version": 1, "mfa": False},
+            "employee-01": {"asset": "employee-workstation", "session_active": True, "compromised": False, "credential_version": 1, "mfa": True},
         }
         # keep only identities whose asset exists in this twin
         self.identities = {k: v for k, v in self.identities.items() if v["asset"] in self.graph} or {
             "user-01": {"asset": self.asset_defs[0]["id"], "session_active": True, "compromised": False, "credential_version": 1}}
         self.containment: list[str] = []
+        self.decoys: set[str] = set()
         self.quarantined: set[str] = set()
         self.config_diffs: list[dict] = []
         self.pending_diffs: dict[str, dict] = {}
@@ -218,7 +220,7 @@ class DigitalTwin:
         assets = []
         for a in self.asset_defs:
             aid = a["id"]
-            assets.append({**a, "status": self.status[aid], "isolated": self.isolated[aid],
+            assets.append({**a, "is_decoy": aid in self.decoys, "status": self.status[aid], "isolated": self.isolated[aid],
                            "service_disabled": self.service_disabled[aid], "vulnerabilities": list(self.vulns[aid]),
                            "connected": sorted(set(self.graph.successors(aid)) | set(self.graph.predecessors(aid)))})
         conns = []
@@ -257,11 +259,13 @@ class DigitalTwin:
                 "edge_active": {"||".join(sorted(k)): v for k, v in self.edge_active.items()},
                 "dir_active": {"||".join(k): v for k, v in self.dir_active.items()},
                 "quarantined": sorted(self.quarantined),
+                "decoys": sorted(self.decoys),
                 "device_configs": copy.deepcopy(self.device_configs),
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
     def restore(self, snap: dict) -> None:
         self.quarantined = set(snap.get("quarantined", []))
+        self.decoys = set(snap.get("decoys", []))
         if not hasattr(self, "config_diffs"):
             self.config_diffs = []; self.pending_diffs = {}; self.config_versions = {}
         if "device_configs" in snap:
@@ -398,6 +402,33 @@ class DigitalTwin:
             self.vulns[asset_id] = [w for w in self.vulns[asset_id] if w not in ("telnet_enabled", "snmp_public_community")]
             self.status[asset_id] = "remediated"
             self.containment.append(f"harden_mgmt:{asset_id}")
+        elif action_type == "enforce_mfa":
+            ident = self._identity_for(params, asset_id)
+            self.identities[ident]["mfa"] = True
+            for u in self.device_configs[asset_id].get("users", []):
+                if u.get("name") == ident:
+                    u["mfa"] = True
+            self.containment.append(f"enforce_mfa:{ident}")
+            self.status[asset_id] = "remediated"
+        elif action_type == "deploy_decoy":
+            kind = params.get("kind", "honeypot_host")
+            if kind not in ("honeypot_host", "canary_credential", "canary_file"):
+                raise ValueError(f"decoy kind not allowlisted: {kind}")
+            decoy_id = params.get("name") or f"decoy-{len(self.decoys) + 1}"
+            if decoy_id not in self.graph:
+                self.asset_defs.append({"id": decoy_id, "name": f"Decoy {decoy_id}", "asset_type": "workstation",
+                                        "zone": "dmz", "posture": 0.3, "pos": [0, 1, 0], "vulnerabilities": ["decoy_service"]})
+                self.graph.add_node(decoy_id)
+                self.status[decoy_id] = "healthy"; self.isolated[decoy_id] = False
+                self.service_disabled[decoy_id] = False; self.vulns[decoy_id] = ["decoy_service"]
+                self.graph.add_edge(asset_id, decoy_id, trust="low", traversable=True, types=["network"])
+                self.graph.add_edge(decoy_id, asset_id, trust="low", traversable=True, types=["network"])
+                self.dir_active[(asset_id, decoy_id)] = True; self.dir_active[(decoy_id, asset_id)] = True
+                from app.netmodel.config import DeviceConfig
+
+                self.device_configs[decoy_id] = DeviceConfig(hostname=decoy_id.upper(), device_id="decoy").model_dump()
+            self.decoys.add(decoy_id)
+            self.containment.append(f"deploy_decoy:{decoy_id}")
         elif action_type == "kill_process":
             self.status[asset_id] = "contained" if self.status[asset_id] == "compromised" else self.status[asset_id]
             self.containment.append(f"kill_process:{params.get('process', 'suspicious')}")

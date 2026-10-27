@@ -87,6 +87,10 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
         approved = False; reasons.append(f"quarantining core asset '{asset_id}' is prohibited")
     if action_type == "kill_process" and twin.status.get(asset_id) not in ("compromised", "suspicious", "contained"):
         approved = False; reasons.append("kill_process requires a suspicious/compromised asset")
+    if action_type == "enforce_mfa" and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):
+        approved = False; reasons.append("enforce_mfa only permitted on identity/workstation assets")
+    if action_type == "deploy_decoy" and params.get("kind", "honeypot_host") not in ("honeypot_host", "canary_credential", "canary_file"):
+        approved = False; reasons.append("decoy kind not allowlisted")
     if action_type == "restore_snapshot" and asset_id in NEVER_ISOLATE:
         approved = False; reasons.append("snapshot restore not permitted on core assets")
     if approved:

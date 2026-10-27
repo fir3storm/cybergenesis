@@ -37,6 +37,8 @@ DEFENSE_ACTIONS = [
     {"id": "harden_mgmt", "label": "Harden Management", "params_contract": "{asset_id}", "description": "Telnet off, SSH on, SNMP community removed", "d3fend": "D3-ACH"},
     {"id": "kill_process", "label": "Kill Process", "params_contract": "{asset_id, params:{process}}", "description": "Kill a suspicious synthetic process", "d3fend": "D3-PSA"},
     {"id": "restore_snapshot", "label": "Restore Snapshot", "params_contract": "{asset_id}", "description": "Revert hypervisor snapshot", "d3fend": "D3-BA"},
+    {"id": "enforce_mfa", "label": "Enforce MFA", "params_contract": "{asset_id, params:{identity}}", "description": "Require MFA for a synthetic identity", "d3fend": "D3-MFA"},
+    {"id": "deploy_decoy", "label": "Deploy Decoy", "params_contract": "{asset_id: anchor, params:{kind, name}}", "description": "Synthetic honeypot/canary decoy (hidden from red team)", "d3fend": "D3-DCP"},
 ]
 
 VERIFICATION_KINDS = ["reachability", "identity_access"]

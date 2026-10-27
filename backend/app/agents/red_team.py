@@ -51,8 +51,9 @@ def _steps_for_path(path: list[str]) -> list[dict]:
 
 
 def _offline_campaign(twin: DigitalTwin, src: str, tgt: str) -> CampaignPlan | None:
-    """Deterministic search: footholds near compromised assets first, shortest path wins."""
-    states = twin.status
+    """Deterministic search: footholds near compromised assets first, shortest path wins.
+    Decoy assets are never named as footholds/objectives (red must not learn they are decoys)."""
+    states = {a: s for a, s in twin.status.items() if a not in twin.decoys}
     near = [a for a, s in states.items() if s in ("compromised", "suspicious")]
     footholds = list(dict.fromkeys(near + ENTRY_POINTS))
     objectives = crown_jewels(twin, tgt)
@@ -93,7 +94,7 @@ async def plan_campaign(twin: DigitalTwin, src: str, tgt: str, run_id: str) -> C
     d = twin.to_dict()
     context = (
         f"Topology (directed arcs): {[(c['source'], c['target']) for c in d['connections'] if c['traversable']]}. "
-        f"Live states: {[(a['id'], a['status'], a['isolated']) for a in d['assets']]}. "
+        f"Live states: {[(a['id'], a['status'], a['isolated']) for a in d['assets'] if not a.get('is_decoy')]}. "
         f"Active containments: {d['containment']}. Identities: {d['identities']}. "
         f"Crown jewels: {crown_jewels(twin, tgt)}. Preferred foothold area: {src}; preferred objective: {tgt}. "
         f"Currently reachable path foothold->objective: {twin.find_path(src, tgt)}."

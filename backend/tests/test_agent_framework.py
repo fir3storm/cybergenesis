@@ -127,7 +127,7 @@ def test_messages_persisted_and_ordered():
 
 
 def test_registry_has_ten_agents_and_endpoints():
-    assert len(REGISTRY) == 10
+    assert len(REGISTRY) == 20  # 10 original (A2) + 10 new (A3)
     assert client.get("/api/agents").json()[0]["prompt_hash"]
     assert client.get("/api/agents/observer").json()["output_model"] == "AgentObservation"
     assert client.get("/api/agents/nope").status_code == 404
