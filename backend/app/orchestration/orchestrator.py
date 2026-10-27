@@ -296,62 +296,52 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             remaining = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
             return round(100.0 * (1 - len(remaining) / max(len(initial_paths), 1)), 1)
 
-        rounds = [{"round": 1, "path": baseline_path, "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                   "resilience_score": resilience_now(), "outcome": result.outcome, "red_team_mode": None}]
+        rounds = [{"round": 1, "foothold": scenario["source_asset"], "objective": scenario["target_asset"],
+                   "path": baseline_path, "red_mode": None, "blue_mode": hyp.mode,
+                   "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
+                   "resilience_score": resilience_now(), "outcome": result.outcome,
+                   "disrupted": result.metrics["operational_impact_disrupted_legit_paths"], "red_team_mode": None}]
 
         if scenario["verification_kind"] == "reachability":
-            for round_num in range(2, 6):
-                paths = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
-                campaign_src, campaign_tgt = scenario["source_asset"], scenario["target_asset"]
-                pivot_kind = None
-                if not paths:
-                    pivot = red_team.find_new_objective(twin, campaign_src, campaign_tgt)
-                    if not pivot:
-                        emit("red_team", f"Red team (round {round_num}): no path and no new foothold/target — attack surface closed",
-                             agent="adversary_simulator", payload={"paths": []})
-                        break
-                    campaign_src, campaign_tgt, _p, pivot_kind = pivot
-                    scenario = {**scenario, "source_asset": campaign_src, "target_asset": campaign_tgt,
-                                "invariant": f"No path from {campaign_src} to {campaign_tgt}"}
-                    baseline_result = twin.attempt_attack_objective(scenario)
-                    # baseline_result must reflect pre-defense reachability for the new objective
-                    baseline_result = {"objective_blocked": False, "path": _p}
-                    paths = [_p]
-                    emit("red_team_pivot", f"Red team changes approach ({pivot_kind}): new foothold {campaign_src} -> new objective {campaign_tgt} via {' -> '.join(_p)}",
-                         agent="adversary_simulator", payload={"source": campaign_src, "target": campaign_tgt, "path": _p, "kind": pivot_kind})
-                plan = await red_team.plan_campaign(twin, campaign_src, campaign_tgt, paths, run_id)
-                chosen_path = plan["path"]
-                emit("red_team", f"Red team campaign (round {round_num}, mode={plan['mode']}): {' -> '.join(chosen_path)} — {plan['rationale']}",
-                     agent="adversary_simulator", payload={"path": chosen_path, "mode": plan["mode"], "campaign": plan["campaign"], "candidates": paths})
-                db.add(models.AgentDecision(run_id=run_id, agent="adversary_simulator",
-                                            decision=f"campaign: {' -> '.join(chosen_path)}",
-                                            justification=plan["rationale"], confidence=0.8,
-                                            model=meta_client.model if plan["mode"] == "live" else "deterministic",
-                                            mode=plan["mode"], evidence_refs=[], asset_ids=chosen_path,
-                                            data={"campaign": plan["campaign"]})); db.commit()
-                conns = {(c["source"], c["target"]): c for c in twin.to_dict()["connections"]}
-
-                def _conn(a, b):
-                    return conns.get((a, b)) or conns.get((b, a))
-
-                hops_ok = all(_conn(chosen_path[i], chosen_path[i + 1]) is not None
-                              and _conn(chosen_path[i], chosen_path[i + 1])["active"]
-                              and _conn(chosen_path[i], chosen_path[i + 1])["traversable"]
-                              for i in range(len(chosen_path) - 1))
-                emit("policy_decision", f"Red team campaign {'VALIDATED' if hops_ok else 'REJECTED'} (allowlisted typed steps, graph-checked hops)",
-                     agent="defense_executor", payload={"approved": hops_ok, "path": chosen_path})
-                if not hops_ok:
+            for round_num in range(2, 5):  # up to 4 rounds total
+                plan = await red_team.plan_campaign(twin, scenario["source_asset"], scenario["target_asset"], run_id)
+                if plan is None:
+                    emit("red_team", f"Red team (round {round_num}): no valid campaign — attack surface closed",
+                         agent="adversary_simulator", payload={"campaign": None})
                     break
-                red_telemetry = []
-                for i, node in enumerate(chosen_path):
-                    e = {"id": f"tele-red-{run_id[:6]}-{round_num}-{i}", "event_type": "network_connection",
-                         "asset_id": node, "message": f"[round {round_num}] Red team traverses {node}", "offset_ms": 400 * (i + 1)}
-                    red_telemetry.append(e)
-                    emit("telemetry", e["message"], agent="adversary_simulator", asset_id=node, payload=e)
-                for node in chosen_path[1:-1]:
-                    if twin.status.get(node) == "healthy":
-                        twin.status[node] = "suspicious"
-                twin.status[campaign_tgt] = "suspicious"
+                verdict = policy_engine.evaluate_campaign(plan.model_dump(), twin)
+                emit("policy_decision", f"Red campaign {'VALIDATED' if verdict['approved'] else 'REJECTED'}: {'; '.join(verdict['reasons'])}",
+                     agent="defense_executor", payload={"approved": verdict["approved"], "campaign": plan.model_dump()})
+                db.add(models.PolicyEvaluation(run_id=run_id, action_type="red_campaign", asset_id=plan.foothold,
+                                               approved=verdict["approved"], reasons=verdict["reasons"])); db.commit()
+                if not verdict["approved"]:
+                    break
+                chosen_path = verdict["path"] or plan.path
+                is_pivot = plan.foothold != scenario["source_asset"] or plan.objective != scenario["target_asset"]
+                if is_pivot:
+                    emit("red_team_pivot", f"Red team changes approach: foothold {plan.foothold} -> objective {plan.objective} (pivot_identity={plan.pivot_identity})",
+                         agent="adversary_simulator", payload=plan.model_dump())
+                emit("red_team", f"Red campaign (round {round_num}, mode={plan.mode}): {' -> '.join(chosen_path)} — {plan.rationale}",
+                     agent="adversary_simulator", payload=plan.model_dump())
+                db.add(models.AgentDecision(run_id=run_id, agent="adversary_simulator",
+                                            decision=f"campaign {plan.foothold} -> {plan.objective}: {' -> '.join(chosen_path)}",
+                                            justification=plan.rationale, confidence=plan.confidence,
+                                            model=meta_client.model if plan.mode == "live" else "deterministic",
+                                            mode=plan.mode, evidence_refs=[], asset_ids=chosen_path,
+                                            data={"campaign": plan.model_dump(), "round": round_num})); db.commit()
+                # apply the campaign as this round's attack (typed steps only)
+                round_scenario = {**scenario, "id": f"{scenario['id']}-r{round_num}",
+                                  "source_asset": plan.foothold, "target_asset": plan.objective,
+                                  "attack_steps": [s.model_dump() for s in plan.steps], "identity": None}
+                red_telemetry = twin.apply_attack(round_scenario, seed=run.seed + round_num)
+                for e in red_telemetry:
+                    e["id"] = f"tele-red-{run_id[:6]}-{round_num}-{e['id'].rsplit('-', 1)[-1]}"
+                    db.add(models.EvidenceRecord(run_id=run_id, kind="telemetry", ref=e["id"], summary=e["message"], data=e))
+                    emit("telemetry", e["message"], agent="adversary_simulator", asset_id=e["asset_id"], payload=e)
+                db.commit()
+                scenario = {**scenario, "source_asset": plan.foothold, "target_asset": plan.objective,
+                            "invariant": f"No path from {plan.foothold} to {plan.objective}"}
+                baseline_result = {"objective_blocked": False, "path": chosen_path}
                 obs2 = agents.observe(red_telemetry)
                 hyp2 = await agents.investigate(scenario, obs2, run_id, telemetry=red_telemetry, twin=twin)
                 db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp2.hypothesis,
@@ -360,10 +350,13 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                             data={"claim_evidence": hyp2.claim_evidence, "round": round_num})); db.commit()
                 _c, sim_contained = await defend(hyp2, round_num)
                 result = await do_verify()
-                rounds.append({"round": round_num, "path": chosen_path, "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                               "resilience_score": resilience_now(), "outcome": result.outcome, "red_team_mode": plan["mode"]})
-                if pivot_kind:
-                    # exploratory pivot: recorded as its own round; the run verdict stays with the primary objective
+                rounds.append({"round": round_num, "foothold": plan.foothold, "objective": plan.objective,
+                               "path": chosen_path, "red_mode": plan.mode, "blue_mode": hyp2.mode,
+                               "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
+                               "resilience_score": resilience_now(), "outcome": result.outcome,
+                               "disrupted": result.metrics["operational_impact_disrupted_legit_paths"],
+                               "red_team_mode": plan.mode})
+                if is_pivot:
                     result = primary_result
                     scenario = original_scenario
                     break
@@ -423,6 +416,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         for u in list(meta_client.usage):
             if u.get("run_id") == run_id:
                 db.add(models.ModelUsage(run_id=run_id, model=u["model"], prompt_version=u["prompt_version"],
+                                         prompt_hash=u.get("prompt_hash", ""),
                                          prompt_tokens=u["prompt_tokens"], completion_tokens=u["completion_tokens"],
                                          latency_ms=u["latency_ms"], success=u["success"], error=u.get("error")))
         meta_client.usage = [u for u in meta_client.usage if u.get("run_id") != run_id]

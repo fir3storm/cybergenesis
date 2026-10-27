@@ -167,6 +167,7 @@ class ModelUsage(Base):
     run_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     model: Mapped[str] = mapped_column(String)
     prompt_version: Mapped[str] = mapped_column(String, default="v1")
+    prompt_hash: Mapped[str] = mapped_column(String, default="")
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)

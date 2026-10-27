@@ -31,6 +31,11 @@ def init_db() -> None:
         if "data" not in cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE agent_decisions ADD COLUMN data JSON"))
+    if "model_usage" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("model_usage")}
+        if "prompt_hash" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE model_usage ADD COLUMN prompt_hash VARCHAR DEFAULT ''"))
 
 
 def get_db():

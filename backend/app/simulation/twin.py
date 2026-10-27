@@ -127,6 +127,18 @@ class DigitalTwin:
     def assets_status_isolated(self) -> list[str]:
         return [aid for aid, v in self.isolated.items() if v]
 
+    def live_graph(self) -> nx.DiGraph:
+        """The one shared directed graph: exactly the arcs find_path can traverse.
+        enumerate_paths (red team) and find_path must never disagree — both use this."""
+        g = nx.DiGraph()
+        for u, v, data in self.graph.edges(data=True):
+            if data.get("traversable") and self.dir_active.get((u, v), False):
+                g.add_edge(u, v)
+        for aid in self.assets_status_isolated():
+            if aid in g:
+                g.remove_node(aid)
+        return g
+
     def to_dict(self) -> dict:
         assets = []
         for a in self.asset_defs:

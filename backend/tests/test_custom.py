@@ -163,6 +163,38 @@ async def test_human_approval_gate(monkeypatch):
     assert client.get(f"/api/experiments/{rid}/results").json()["verification"]["outcome"] == "PASS"
 
 
+@pytest.mark.asyncio
+async def test_phase1_campaign_validation_and_round2_after_pass():
+    from app import models
+    from app.db import SessionLocal
+    from app.policies.engine import evaluate_campaign
+    from app.simulation.twin import DigitalTwin as _DT
+
+    t = _DT()
+    bad = {"foothold": "internet", "objective": "database", "pivot_identity": None,
+           "steps": [{"type": "run_shellcode", "asset": "web-server", "description": "x"},
+                     {"type": "network_connection", "asset": "database", "description": "hop"}]}
+    assert evaluate_campaign(bad, t)["approved"] is False  # bad type + nonexistent hop
+    good = {"foothold": "internet", "objective": "database", "pivot_identity": None,
+            "steps": [{"type": "network_connection", "asset": a, "description": "traverse"}
+                      for a in ["internet", "firewall", "web-server", "app-server", "database"]]}
+    assert evaluate_campaign(good, t)["approved"] is True
+
+    # spec test: after round-1 PASS on ransomware, round 2 still produces a validated campaign
+    rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    res = client.get(f"/api/experiments/{rid}/results").json()
+    assert res["verification"]["outcome"] == "PASS"
+    db = SessionLocal()
+    red_decisions = db.query(models.AgentDecision).filter_by(run_id=rid, agent="adversary_simulator").all()
+    execs = db.query(models.DefenseExecution).filter_by(run_id=rid).all()
+    db.close()
+    assert red_decisions, "round 2+ must persist a red campaign decision even after a round-1 PASS"
+    assert execs, "every round must persist defense executions"
+    rounds = res["verification"]["metrics"]["rounds"]
+    assert all("foothold" in r and "objective" in r for r in rounds)
+
+
 def test_benchmark_endpoint():
     b = client.get("/api/benchmark").json()
     assert "available" in b and "scope" in b

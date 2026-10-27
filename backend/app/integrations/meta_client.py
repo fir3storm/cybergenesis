@@ -1,5 +1,6 @@
 """Meta Model API client (OpenAI-compatible). Never fabricates success."""
 
+import hashlib
 import json
 import time
 
@@ -65,6 +66,7 @@ class MetaModelClient:
                 usage = data.get("usage", {}) or {}
                 parsed = _extract_json(content)
                 rec = {"model": self.model, "prompt_version": PROMPT_VERSION,
+                       "prompt_hash": hashlib.sha256((PROMPT_VERSION + system).encode()).hexdigest()[:12],
                        "prompt_tokens": usage.get("prompt_tokens", 0),
                        "completion_tokens": usage.get("completion_tokens", 0),
                        "latency_ms": latency, "success": True, "run_id": run_id}

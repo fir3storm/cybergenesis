@@ -158,6 +158,24 @@ class CustomScenarioResponse(BaseModel):
     created_at: str
 
 
+class CampaignStep(BaseModel):
+    type: str
+    asset: str
+    description: str = ""
+
+
+class CampaignPlan(BaseModel):
+    agent: str = "adversary_simulator"
+    foothold: str
+    pivot_identity: str | None = None
+    objective: str
+    steps: list[CampaignStep] = []
+    rationale: str = ""
+    confidence: float = Field(ge=0, le=1, default=0.5)
+    mode: str = "offline"
+    path: list[str] = []
+
+
 class CreateCustomExperiment(BaseModel):
     """Run an experiment with a custom scenario and/or custom twin (either may be builtin)."""
 

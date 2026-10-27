@@ -74,6 +74,36 @@ function Twin2D({ twin }: { twin: Twin }) {
   )
 }
 
+export function NavDropdown({ group, items, active, onSelect }: {
+  group: string
+  items: { id: View; label: string; icon: ReactNode }[]
+  active: View
+  onSelect: (v: View) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const hasActive = items.some((i) => i.id === active)
+  const activeItem = items.find((i) => i.id === active)
+  return (
+    <div className="relative" onMouseLeave={() => setOpen(false)}>
+      <button onClick={() => setOpen(!open)} onMouseEnter={() => setOpen(true)} aria-expanded={open} aria-haspopup="menu"
+        className={`flex items-center gap-1 rounded px-2.5 py-1.5 text-xs font-semibold tracking-wide ${hasActive ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-200 hover:bg-slate-800 border border-transparent'}`}>
+        {group} <span className="text-[9px] text-slate-400">{open ? '▴' : '▾'}</span>
+        {hasActive && <span className="max-w-24 truncate font-normal text-cyan-300">· {activeItem?.label}</span>}
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-slate-700 bg-slate-950/97 shadow-2xl backdrop-blur">
+          {items.map((n) => (
+            <button key={n.id} role="menuitem" onClick={() => { onSelect(n.id); setOpen(false) }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs ${active === n.id ? 'bg-cyan-500/20 text-cyan-200' : 'text-slate-200 hover:bg-slate-800'}`}>
+              {n.icon} {n.label} {active === n.id && <span className="ml-auto text-cyan-300">●</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SkeletonTwin() {
   return (
     <div className="grid h-full grid-cols-3 gap-3 p-4" aria-label="Loading 3D twin" role="status">
@@ -496,15 +526,12 @@ export default function App() {
         )}
         <nav className="ml-auto flex flex-wrap items-center gap-1" aria-label="Primary">
           {(['RUN', 'INSPECT', 'BUILD', 'PROOF'] as const).map((group) => (
-            <span key={group} className="flex items-center gap-1">
-              <span className="ml-2 font-mono text-[9px] tracking-widest text-slate-600">{group}</span>
-              {nav.filter((n) => n.group === group).map((n) => (
-                <button key={n.id} onClick={() => s.set({ view: n.id })}
-                  className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs ${s.view === n.id ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-300 hover:bg-slate-800'}`}>
-                  {n.icon}{n.label}</button>
-              ))}
-            </span>
+            <NavDropdown key={group} group={group} items={nav.filter((n) => n.group === group)}
+              active={s.view} onSelect={(v) => s.set({ view: v })} />
           ))}
+          <button onClick={() => s.set({ view: 'settings' })} aria-label="Settings"
+            className={`ml-1 flex items-center gap-1 px-2 py-1.5 rounded text-xs ${s.view === 'settings' ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-300 hover:bg-slate-800'}`}>
+            <SettingsIcon size={15} /> Settings</button>
         </nav>
       </header>
 

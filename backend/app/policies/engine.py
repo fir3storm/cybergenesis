@@ -1,7 +1,48 @@
 """Deterministic policy engine — independent of the LLM."""
 
 from app.schemas import PolicyDecision
-from app.simulation.twin import ALLOWED_ACTIONS, DigitalTwin
+from app.simulation.twin import ALLOWED_ACTIONS, ATTACK_STEP_TYPES, DigitalTwin
+
+
+def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
+    """Validate a red-team campaign. Approved only if every step is allowlisted,
+    every asset exists, and every hop follows an active traversable arc — or is
+    covered by a compromised/session-active synthetic identity pivot."""
+    reasons: list[str] = []
+    steps = campaign.get("steps", [])
+    if not steps:
+        return {"approved": False, "reasons": ["campaign has no steps"], "path": []}
+    graph = twin.live_graph()
+    assets = set(twin.asset_ids())
+    seq: list[str] = []
+    for st in steps:
+        if st.get("type") not in ATTACK_STEP_TYPES:
+            reasons.append(f"step type '{st.get('type')}' not in ATTACK_STEP_TYPES allowlist")
+        if st.get("asset") not in assets:
+            reasons.append(f"step asset '{st.get('asset')}' does not exist in twin")
+        if st.get("asset") not in seq:
+            seq.append(st.get("asset"))
+    pivot = campaign.get("pivot_identity")
+    pivot_ok = bool(pivot and pivot in twin.identities
+                    and (twin.identities[pivot]["compromised"] or twin.identities[pivot]["session_active"]))
+    if pivot and not pivot_ok:
+        reasons.append(f"pivot identity '{pivot}' is not compromised/session-active")
+    for i in range(len(seq) - 1):
+        a, b = seq[i], seq[i + 1]
+        if graph.has_edge(a, b):
+            continue
+        if pivot_ok and (a in ("identity-provider", "admin-workstation") or b in ("database", "identity-provider", "admin-workstation")):
+            continue  # identity pivot: IdP/workstation -> protected asset with a live synthetic identity
+        reasons.append(f"hop {a} -> {b} is not an active traversable arc")
+    if campaign.get("foothold") not in assets:
+        reasons.append("foothold does not exist")
+    if campaign.get("objective") not in assets:
+        reasons.append("objective does not exist")
+    approved = not reasons
+    if approved:
+        reasons.append("all steps allowlisted, assets exist, hops graph-valid (or identity-pivot covered)")
+    return {"approved": approved, "reasons": reasons, "path": seq}
+
 
 # assets that may never be isolated (would break the twin's core)
 NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor"}
