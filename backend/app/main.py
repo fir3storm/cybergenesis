@@ -360,7 +360,6 @@ class BenchmarkRunRequest(BaseModel):
 
 @app.post("/api/benchmark/run", status_code=202)
 async def benchmark_run(body: BenchmarkRunRequest):
-    import asyncio as _asyncio
     import uuid as _uuid
 
     from app.benchmark.runner import run_benchmark, summarize
@@ -601,6 +600,52 @@ def compile_explain(src: str, dst: str):
     if src not in twin.asset_ids() or dst not in twin.asset_ids():
         raise HTTPException(422, "src/dst must be twin assets")
     return twin.explain_path(src, dst)
+
+
+@app.get("/api/agents")
+def list_agents(db: Session = Depends(get_db)):
+    from app.agents.framework.registry import all_specs
+
+    out = []
+    for s in all_specs():
+        runs = db.query(models.AgentDecision).filter_by(agent=s.id).count()
+        last = (db.query(models.AgentDecision).filter_by(agent=s.id)
+                .order_by(models.AgentDecision.created_at.desc()).first())
+        out.append({"id": s.id, "name": s.name, "team": s.team, "engine": s.engine, "description": s.description,
+                    "tools": s.tools, "can_propose_actions": s.can_propose_actions,
+                    "prompt_version": s.prompt_version, "prompt_hash": s.prompt_hash,
+                    "scorecard": {"runs": runs, "last_mode": last.mode if last else None,
+                                  "last_confidence": last.confidence if last else None}})
+    return out
+
+
+@app.get("/api/agents/{agent_id}")
+def get_agent(agent_id: str):
+    from app.agents.framework.registry import get_spec
+
+    s = get_spec(agent_id)
+    if not s:
+        raise HTTPException(404, "agent not in registry")
+    return {"id": s.id, "name": s.name, "team": s.team, "engine": s.engine, "description": s.description,
+            "duties": s.duties, "tools": s.tools, "can_propose_actions": s.can_propose_actions,
+            "input_model": s.input_model.__name__, "output_model": s.output_model.__name__,
+            "timeout_s": s.timeout_s, "max_tokens": s.max_tokens, "max_tool_steps": s.max_tool_steps,
+            "prompt_version": s.prompt_version, "prompt_hash": s.prompt_hash}
+
+
+@app.get("/api/agents/{agent_id}/runs")
+def agent_runs(agent_id: str, limit: int = 20, db: Session = Depends(get_db)):
+    rows = (db.query(models.AgentDecision).filter_by(agent=agent_id)
+            .order_by(models.AgentDecision.created_at.desc()).limit(limit).all())
+    return [{"run_id": r.run_id, "decision": r.decision, "confidence": r.confidence, "model": r.model,
+             "mode": r.mode, "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
+
+
+@app.get("/api/experiments/{run_id}/messages")
+def experiment_messages(run_id: str, db: Session = Depends(get_db)):
+    rows = db.query(models.AgentMessageRow).filter_by(run_id=run_id).order_by(models.AgentMessageRow.seq).all()
+    return [{"id": r.id, "from_agent": r.from_agent, "to_agent": r.to_agent, "kind": r.kind,
+             "payload": r.payload, "evidence_refs": r.evidence_refs, "seq": r.seq} for r in rows]
 
 
 @app.get("/api/library")

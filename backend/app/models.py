@@ -176,6 +176,20 @@ class ModelUsage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class AgentMessageRow(Base):
+    __tablename__ = "agent_messages"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String, index=True)
+    from_agent: Mapped[str] = mapped_column(String)
+    to_agent: Mapped[str | None] = mapped_column(String, nullable=True)
+    kind: Mapped[str] = mapped_column(String)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    evidence_refs: Mapped[list] = mapped_column(JSON, default=list)
+    in_reply_to: Mapped[str | None] = mapped_column(String, nullable=True)
+    seq: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class DeviceInstance(Base):
     __tablename__ = "device_instances"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
