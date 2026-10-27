@@ -57,6 +57,7 @@ LEGITIMATE_PAIRS = [
 ALLOWED_ACTIONS = {
     "isolate_asset", "block_connection", "revoke_session", "rotate_credential",
     "apply_patch", "disable_service", "restore_connectivity",
+    "quarantine_vlan", "harden_mgmt", "kill_process", "restore_snapshot",
 }
 
 
@@ -119,6 +120,72 @@ class DigitalTwin:
         self.identities = {k: v for k, v in self.identities.items() if v["asset"] in self.graph} or {
             "user-01": {"asset": self.asset_defs[0]["id"], "session_active": True, "compromised": False, "credential_version": 1}}
         self.containment: list[str] = []
+        self.quarantined: set[str] = set()
+        self.config_diffs: list[dict] = []
+        self.pending_diffs: dict[str, dict] = {}
+        self.config_versions: dict[str, list[dict]] = {}
+        self.device_configs = self._build_device_configs()
+
+    def _build_device_configs(self) -> dict:
+        from app.devices.registry import BUILTIN_DEVICE_MAP
+        from app.netmodel.config import DeviceConfig, Interface, Service, User, Session, Mgmt
+
+        svc_by_type = {"web_server": [Service(name="http", port=80), Service(name="https", port=443)],
+                       "database": [Service(name="postgres", port=5432), Service(name="sql", port=1433)],
+                       "file_server": [Service(name="smb", port=445)],
+                       "identity": [Service(name="ldaps", port=636), Service(name="https", port=443)],
+                       "app_server": [Service(name="https", port=443), Service(name="api", port=8080)],
+                       "sensor": [Service(name="ids", port=0)]}
+        configs: dict[str, dict] = {}
+        ip_octet = 10
+        for a in self.asset_defs:
+            aid = a["id"]
+            ifaces = []
+            for j, nb in enumerate(sorted(set(self.graph.successors(aid)) | set(self.graph.predecessors(aid)))):
+                ip_octet += 1
+                ifaces.append(Interface(name=f"eth{j}", peer=nb, ip=f"10.0.0.{ip_octet}", zone=a["zone"],
+                                        description=f"to {nb}"))
+            users = []
+            for uname, idata in self.identities.items():
+                if idata["asset"] == aid or aid == "identity-provider":
+                    users.append(User(name=uname, role="admin" if "admin" in uname else "user", mfa="admin" not in uname,
+                                      sessions=[Session(id=f"sess-{uname}", active=idata["session_active"], compromised=idata["compromised"])],
+                                      credential_version=idata["credential_version"]))
+            weak = list(a["vulnerabilities"])
+            cfg = DeviceConfig(hostname=aid.upper().replace("-", "")[:10] + "-01", device_id=BUILTIN_DEVICE_MAP.get(aid, "generic"),
+                               interfaces=ifaces, services=svc_by_type.get(a["asset_type"], []), users=users,
+                               weaknesses=weak,
+                               mgmt=Mgmt(telnet="telnet_enabled" in weak, snmp_community="public" if "snmp_public_community" in weak else None))
+            cfg.patches.missing = ["CVE-SYNTH-001"] if weak else []
+            configs[aid] = cfg.model_dump()
+        return configs
+
+    def config_hash(self) -> str:
+        from app.netmodel.compiler import content_hash
+        from app.netmodel.config import DeviceConfig
+
+        cables = [{"a": {"device": s, "port": "eth0"}, "b": {"device": t, "port": "eth0"}}
+                  for s, t, *_ in self.edge_defs]
+        return content_hash({k: DeviceConfig(**v) for k, v in self.device_configs.items()}, cables)
+
+    def cables_list(self) -> list[dict]:
+        return [{"a": {"device": s, "port": "eth0"}, "b": {"device": t, "port": "eth0"}, "media": "copper"}
+                for s, t, *_ in self.edge_defs]
+
+    def explain_path(self, src: str, dst: str) -> dict:
+        path = self.find_path(src, dst)
+        if not path:
+            return {"reachable": False, "path": [], "hops": [], "reason": "no traversable path (links, filtering, or vulnerability gate)"}
+        hops = []
+        for i in range(len(path) - 1):
+            a, b = path[i], path[i + 1]
+            services = self.device_configs.get(b, {}).get("services", [])
+            svc = next((s["name"] for s in services if s.get("enabled")), "transit")
+            weak = self.device_configs.get(b, {}).get("weaknesses", [])
+            hops.append({"from": a, "to": b,
+                         "rule": f"directed arc {a}->{b} active+traversable; service {svc}; "
+                                 + (f"weakness {weak}" if weak else "final target / session-covered hop")})
+        return {"reachable": True, "path": path, "hops": hops, "config_hash": self.config_hash()}
 
     # --- introspection -------------------------------------------------
     def asset_ids(self) -> list[str]:
@@ -161,7 +228,26 @@ class DigitalTwin:
             conns.append({"source": s, "target": t, "trust": trust, "traversable": trav, "types": types,
                           "active": fwd or rev, "dir_forward_active": fwd, "dir_reverse_active": rev,
                           "one_way_blocked": fwd != rev})
-        return {"assets": assets, "connections": conns,
+        from app.devices.registry import BUILTIN_DEVICE_MAP, BY_ID
+
+        devices = []
+        for a in self.asset_defs:
+            aid = a["id"]
+            dev_id = BUILTIN_DEVICE_MAP.get(aid)
+            manifest = BY_ID.get(dev_id or "")
+            links = []
+            for s, t, *_ in self.edge_defs:
+                if aid in (s, t):
+                    peer = t if s == aid else s
+                    state = "down" if (self.isolated[aid] or aid in self.quarantined) else \
+                        "filtered" if not (self.dir_active.get((aid, peer), True)) else "up"
+                    links.append({"peer": peer, "state": state})
+            devices.append({"asset_id": aid, "device_id": dev_id, "model": manifest.model if manifest else aid,
+                            "vendor": manifest.vendor if manifest else "Synthetic",
+                            "ports": [f"{p['prefix']}{p['start'] + i}" for p in (manifest.hardware.model_dump()["ports"] if manifest else [])
+                                      for i in range(p["count"])][:8],
+                            "links": links, "config_hash": self.config_hash()})
+        return {"assets": assets, "connections": conns, "devices": devices,
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
     def snapshot(self) -> dict:
@@ -170,9 +256,16 @@ class DigitalTwin:
                 "vulns": copy.deepcopy(self.vulns),
                 "edge_active": {"||".join(sorted(k)): v for k, v in self.edge_active.items()},
                 "dir_active": {"||".join(k): v for k, v in self.dir_active.items()},
+                "quarantined": sorted(self.quarantined),
+                "device_configs": copy.deepcopy(self.device_configs),
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
     def restore(self, snap: dict) -> None:
+        self.quarantined = set(snap.get("quarantined", []))
+        if not hasattr(self, "config_diffs"):
+            self.config_diffs = []; self.pending_diffs = {}; self.config_versions = {}
+        if "device_configs" in snap:
+            self.device_configs = copy.deepcopy(snap["device_configs"])
         self.status = dict(snap["status"]); self.isolated = dict(snap["isolated"])
         self.service_disabled = dict(snap["service_disabled"]); self.vulns = copy.deepcopy(snap["vulns"])
         self.edge_active = {frozenset(k.split("||") if isinstance(k, str) else k): v for k, v in snap["edge_active"].items()}
@@ -207,7 +300,7 @@ class DigitalTwin:
     def find_path(self, src: str, dst: str) -> list[str] | None:
         if src not in self.graph or dst not in self.graph:
             return None
-        if self.isolated[src] or self.isolated[dst]:
+        if self.isolated[src] or self.isolated[dst] or src in self.quarantined or dst in self.quarantined:
             return None
         q = deque([[src]]); seen = {src}
         while q:
@@ -222,7 +315,7 @@ class DigitalTwin:
                     continue
                 if not self.hop_allowed(nb, dst):
                     continue
-                if nb in seen or self.isolated[nb] or self.service_disabled[nb]:
+                if nb in seen or self.isolated[nb] or self.service_disabled[nb] or nb in self.quarantined:
                     continue
                 seen.add(nb); q.append(path + [nb])
         return None
@@ -292,6 +385,27 @@ class DigitalTwin:
         elif action_type == "disable_service":
             self.service_disabled[asset_id] = True; self.status[asset_id] = "contained"
             self.containment.append(f"disable_service:{asset_id}")
+        elif action_type == "quarantine_vlan":
+            self.quarantined.add(asset_id); self.status[asset_id] = "contained"
+            self.device_configs[asset_id]["quarantine_vlan"] = 999
+            self.device_configs[asset_id]["interfaces"] = [
+                {**i, "vlan": 999, "mode": "access"} for i in self.device_configs[asset_id]["interfaces"]]
+            self.containment.append(f"quarantine:{asset_id}")
+        elif action_type == "harden_mgmt":
+            cfg = self.device_configs[asset_id]
+            cfg["mgmt"] = {"telnet": False, "ssh": True, "http": False, "https": True, "snmp_community": None}
+            cfg["weaknesses"] = [w for w in cfg["weaknesses"] if w not in ("telnet_enabled", "snmp_public_community")]
+            self.vulns[asset_id] = [w for w in self.vulns[asset_id] if w not in ("telnet_enabled", "snmp_public_community")]
+            self.status[asset_id] = "remediated"
+            self.containment.append(f"harden_mgmt:{asset_id}")
+        elif action_type == "kill_process":
+            self.status[asset_id] = "contained" if self.status[asset_id] == "compromised" else self.status[asset_id]
+            self.containment.append(f"kill_process:{params.get('process', 'suspicious')}")
+        elif action_type == "restore_snapshot":
+            self.status[asset_id] = "healthy"
+            self.vulns[asset_id] = []
+            self.device_configs[asset_id]["weaknesses"] = []
+            self.containment.append(f"restore_snapshot:{asset_id}")
         elif action_type == "restore_connectivity":
             if params.get("source") and params.get("target"):  # un-block one connection (self-healing)
                 s, t = params["source"], params["target"]
@@ -307,8 +421,16 @@ class DigitalTwin:
                         if trav:
                             self.dir_active[(t, s)] = True
                 self.containment = [c for c in self.containment if c != f"isolate:{asset_id}"]
+        # configuration is the twin: every action is recorded as a ConfigDiff and config state syncs
+        self.device_configs[asset_id]["isolated"] = self.isolated[asset_id]
+        if action_type == "apply_patch":
+            self.device_configs[asset_id]["weaknesses"] = []
+            self.device_configs[asset_id]["patches"] = {"level": "current", "missing": []}
+        diff = {"device_id": asset_id, "action": action_type, "params": params,
+                "config_hash_after": self.config_hash()}
+        self.config_diffs.append(diff)
         return {"action_type": action_type, "asset_id": asset_id, "before_status": before,
-                "after_status": self.status[asset_id], "params": params}
+                "after_status": self.status[asset_id], "params": params, "config_diff": diff}
 
     def _identity_for(self, params: dict, asset_id: str) -> str:
         if params.get("identity") in self.identities:

@@ -371,14 +371,16 @@ async def benchmark_run(body: BenchmarkRunRequest):
     def _progress(done: int, total: int, _row: dict) -> None:
         _bench_runs[run_id]["done"] = done
 
-    async def _job() -> None:
+    def _job() -> None:
         try:
-            rows = await _asyncio.to_thread(run_benchmark, body.n, body.seed, _progress)
+            rows = run_benchmark(body.n, body.seed, _progress)
             _bench_runs[run_id].update({"state": "COMPLETED", "rows": rows, "summary": summarize(rows)})
         except Exception as e:  # noqa: BLE001 - honest failure
             _bench_runs[run_id].update({"state": "FAILED", "error": f"{type(e).__name__}: {e}"})
 
-    _asyncio.create_task(_job())
+    import threading
+
+    threading.Thread(target=_job, daemon=True, name=f"benchmark-{run_id}").start()
     return {"run_id": run_id, "state": "RUNNING", "n": body.n, "seed": body.seed, "mode": body.mode}
 
 
@@ -452,6 +454,153 @@ def devices_builtin_map():
     from app.devices.registry import BUILTIN_DEVICE_MAP
 
     return BUILTIN_DEVICE_MAP
+
+
+_twin_ws: set = set()
+
+
+@app.websocket("/ws/twin")
+async def ws_twin(ws: WebSocket):
+    await ws.accept()
+    _twin_ws.add(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _twin_ws.discard(ws)
+
+
+async def _broadcast_twin_updated() -> None:
+    payload = json.dumps({"event_type": "twin_updated", "twin": orchestrator.TWIN.to_dict()})
+    for ws in list(_twin_ws):
+        try:
+            await ws.send_text(payload)
+        except Exception:  # noqa: BLE001
+            _twin_ws.discard(ws)
+
+
+@app.get("/api/twin/devices/{asset_id}/config")
+def get_device_config(asset_id: str):
+    twin = orchestrator.TWIN
+    if asset_id not in twin.device_configs:
+        raise HTTPException(404, "device not in twin")
+    return {"asset_id": asset_id, "config": twin.device_configs[asset_id], "config_hash": twin.config_hash(),
+            "version": len(twin.config_versions.get(asset_id, [])) + 1}
+
+
+class StageDiffRequest(BaseModel):
+    diff: dict
+    author: str = "human"
+
+
+@app.post("/api/twin/devices/{asset_id}/config/diff")
+def stage_device_diff(asset_id: str, body: StageDiffRequest, db: Session = Depends(get_db)):
+    twin = orchestrator.TWIN
+    if asset_id not in twin.device_configs:
+        raise HTTPException(404, "device not in twin")
+    twin.pending_diffs[asset_id] = body.diff
+    row = models.ConfigCommit(device_id=asset_id, status="pending", diff=body.diff)
+    db.add(row); db.commit(); db.refresh(row)
+    return {"staged": True, "commit_id": row.id, "pending": body.diff}
+
+
+@app.get("/api/twin/devices/{asset_id}/config/pending")
+def get_pending_diff(asset_id: str):
+    return {"asset_id": asset_id, "pending": orchestrator.TWIN.pending_diffs.get(asset_id)}
+
+
+@app.post("/api/twin/devices/{asset_id}/config/preview")
+def preview_device_diff(asset_id: str, body: StageDiffRequest):
+    """Compile on a clone with the diff applied; report which scenario paths open/close."""
+    twin = orchestrator.TWIN
+    if asset_id not in twin.device_configs:
+        raise HTTPException(404, "device not in twin")
+    clone = twin.clone()
+    _apply_config_diff(clone, asset_id, body.diff)
+    pairs = [(s["source_asset"], s["target_asset"]) for s in SCENARIOS.values()]
+    changes = []
+    for src, dst in pairs:
+        before = twin.find_path(src, dst) is not None
+        after = clone.find_path(src, dst) is not None
+        if before != after:
+            changes.append({"src": src, "dst": dst, "before_reachable": before, "after_reachable": after})
+    return {"changes": changes, "config_hash_after": clone.config_hash()}
+
+
+def _apply_config_diff(twin, asset_id: str, diff: dict) -> None:
+    cfg = twin.device_configs[asset_id]
+    for op in diff.get("ops", []):
+        if op.get("op") == "action":
+            twin.apply_action(op["value"]["action_type"], op["value"].get("asset_id", asset_id), op["value"].get("params", {}))
+        elif op.get("op") == "set":
+            parts = op["path"].split(".")
+            node = cfg
+            for p in parts[:-1]:
+                node = node.setdefault(p, {}) if isinstance(node, dict) else node[int(p)]
+            if isinstance(node, dict):
+                node[parts[-1]] = op.get("value")
+            # keep twin graph state in sync for the fields the engine reads
+            if op["path"] == "isolated":
+                twin.isolated[asset_id] = bool(op.get("value"))
+            if op["path"] == "weaknesses":
+                twin.vulns[asset_id] = list(op.get("value") or [])
+        elif op.get("op") == "add_acl_deny":
+            cfg.setdefault("acls", []).append({"name": "CYBERGENESIS", "entries": [
+                {"seq": 10, "action": "deny", "proto": "ip", "src": "any", "dst": "any", "dst_port": None, "log": True}]})
+    twin.config_versions.setdefault(asset_id, []).append(
+        {"version": len(twin.config_versions.get(asset_id, [])) + 1, "config": cfg})
+
+
+@app.post("/api/twin/devices/{asset_id}/config/commit")
+async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
+    twin = orchestrator.TWIN
+    diff = twin.pending_diffs.pop(asset_id, None)
+    if diff is None:
+        raise HTTPException(409, "no pending diff for this device")
+    # policy gate: any action ops must be allowlisted
+    for op in diff.get("ops", []):
+        if op.get("op") == "action":
+            a = op["value"]
+            d = policy_engine.evaluate(a["action_type"], a.get("asset_id", asset_id), a.get("params", {}), twin)
+            if not d.approved:
+                row = models.ConfigCommit(device_id=asset_id, status="rejected", diff=diff,
+                                          verification={"approved": False, "reasons": d.reasons})
+                db.add(row); db.commit()
+                raise HTTPException(403, detail={"status": "rejected", "reasons": d.reasons})
+    _apply_config_diff(twin, asset_id, diff)
+    row = models.ConfigCommit(device_id=asset_id, status="committed", diff=diff,
+                              verification={"config_hash": twin.config_hash()})
+    db.add(row); db.commit()
+    twin.config_versions.setdefault(asset_id, []).append(
+        {"version": len(twin.config_versions.get(asset_id, [])), "config": twin.device_configs[asset_id]})
+    await _broadcast_twin_updated()
+    return {"committed": True, "asset_id": asset_id, "config_hash": twin.config_hash(), "twin": twin.to_dict()}
+
+
+@app.post("/api/twin/devices/{asset_id}/config/rollback/{version}")
+async def rollback_device_config(asset_id: str, version: int):
+    twin = orchestrator.TWIN
+    versions = twin.config_versions.get(asset_id, [])
+    match = next((v for v in versions if v["version"] == version), None)
+    if not match:
+        raise HTTPException(404, "config version not found")
+    import copy as _copy
+
+    twin.device_configs[asset_id] = _copy.deepcopy(match["config"])
+    twin.vulns[asset_id] = list(match["config"].get("weaknesses", []))
+    twin.isolated[asset_id] = bool(match["config"].get("isolated", False))
+    await _broadcast_twin_updated()
+    return {"rolled_back": True, "asset_id": asset_id, "version": version}
+
+
+@app.get("/api/twin/compile/explain")
+def compile_explain(src: str, dst: str):
+    twin = orchestrator.TWIN
+    if src not in twin.asset_ids() or dst not in twin.asset_ids():
+        raise HTTPException(422, "src/dst must be twin assets")
+    return twin.explain_path(src, dst)
 
 
 @app.get("/api/library")

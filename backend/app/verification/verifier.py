@@ -40,22 +40,25 @@ def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, s
     rng = random.Random(seed)
     hits = 0
     isolated = set(twin.assets_status_isolated())
+    arcs: dict[str, list[tuple[str, float]]] = {}
+    for node in twin.graph.nodes:
+        lst = []
+        for nxt in twin.graph.successors(node):
+            if nxt in isolated or not twin.dir_active.get((node, nxt), False):
+                continue
+            if not twin.graph[node][nxt].get("traversable", False) or not twin.hop_allowed(nxt, tgt):
+                continue
+            dest = postures[nxt]
+            lst.append((nxt, max(0.0, min(0.95, 0.15 + 0.6 * (1 - dest["posture"]) + 0.15 * len(dest["vulnerabilities"])))))
+        arcs[node] = lst
     for _ in range(trials):
         seen = {src}; stack = [src]
         while stack:
             node = stack.pop()
             if node == tgt:
                 break
-            for nxt in twin.graph.successors(node):
-                if nxt in seen or nxt in isolated or not twin.dir_active.get((node, nxt), False):
-                    continue
-                if not twin.graph[node][nxt].get("traversable", False):
-                    continue
-                if not twin.hop_allowed(nxt, tgt):
-                    continue
-                dest = postures[nxt]
-                p = max(0.0, min(0.95, 0.15 + 0.6 * (1 - dest["posture"]) + 0.15 * len(dest["vulnerabilities"])))
-                if rng.random() < p:
+            for nxt, p in arcs.get(node, []):
+                if nxt not in seen and rng.random() < p:
                     seen.add(nxt); stack.append(nxt)
         if tgt in seen:
             hits += 1

@@ -48,6 +48,7 @@ def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
 NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor"}
 PATCHABLE = {"web-server", "app-server", "employee-workstation", "admin-workstation", "file-server"}
 SERVICE_DISABLEABLE = {"web-server", "app-server"}
+QUARANTINABLE = PATCHABLE | {"database", "identity-provider"}
 
 
 def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -> PolicyDecision:
@@ -82,6 +83,12 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
             approved = False; reasons.append("connection already blocked")
     if action_type in ("revoke_session", "rotate_credential") and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):
         approved = False; reasons.append(f"{action_type} only permitted on identity/workstation assets")
+    if action_type == "quarantine_vlan" and asset_id in NEVER_ISOLATE:
+        approved = False; reasons.append(f"quarantining core asset '{asset_id}' is prohibited")
+    if action_type == "kill_process" and twin.status.get(asset_id) not in ("compromised", "suspicious", "contained"):
+        approved = False; reasons.append("kill_process requires a suspicious/compromised asset")
+    if action_type == "restore_snapshot" and asset_id in NEVER_ISOLATE:
+        approved = False; reasons.append("snapshot restore not permitted on core assets")
     if approved:
         reasons.append("allowlisted action, asset in simulation boundary, preconditions satisfied")
     human = approved and action_type == "isolate_asset"

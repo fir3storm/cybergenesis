@@ -33,6 +33,10 @@ DEFENSE_ACTIONS = [
     {"id": "apply_patch", "label": "Apply Patch", "params_contract": "{asset_id}", "description": "Remove simulated vulnerabilities (does not stop active spread)"},
     {"id": "disable_service", "label": "Disable Service", "params_contract": "{asset_id: web/app server}", "description": "Disable an exposed simulated service"},
     {"id": "restore_connectivity", "label": "Restore Connectivity", "params_contract": "{asset_id}", "description": "Undo isolation"},
+    {"id": "quarantine_vlan", "label": "Quarantine VLAN", "params_contract": "{asset_id}", "description": "Move ports to quarantine VLAN 999 (config diff)", "d3fend": "D3-NI"},
+    {"id": "harden_mgmt", "label": "Harden Management", "params_contract": "{asset_id}", "description": "Telnet off, SSH on, SNMP community removed", "d3fend": "D3-ACH"},
+    {"id": "kill_process", "label": "Kill Process", "params_contract": "{asset_id, params:{process}}", "description": "Kill a suspicious synthetic process", "d3fend": "D3-PSA"},
+    {"id": "restore_snapshot", "label": "Restore Snapshot", "params_contract": "{asset_id}", "description": "Revert hypervisor snapshot", "d3fend": "D3-BA"},
 ]
 
 VERIFICATION_KINDS = ["reachability", "identity_access"]

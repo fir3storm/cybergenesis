@@ -176,6 +176,46 @@ class ModelUsage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class DeviceInstance(Base):
+    __tablename__ = "device_instances"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    asset_id: Mapped[str] = mapped_column(String, index=True)
+    device_id: Mapped[str] = mapped_column(String)
+    hostname: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DeviceConfigRow(Base):
+    __tablename__ = "device_configs"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    device_id: Mapped[str] = mapped_column(String, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    author: Mapped[str] = mapped_column(String, default="human")
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    diff: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class CableRow(Base):
+    __tablename__ = "cables"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    a_device: Mapped[str] = mapped_column(String)
+    a_port: Mapped[str] = mapped_column(String)
+    b_device: Mapped[str] = mapped_column(String)
+    b_port: Mapped[str] = mapped_column(String)
+    media: Mapped[str] = mapped_column(String, default="copper")
+
+
+class ConfigCommit(Base):
+    __tablename__ = "config_commits"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_id)
+    device_id: Mapped[str] = mapped_column(String, index=True)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending|committed|rejected
+    diff: Mapped[dict] = mapped_column(JSON, default=dict)
+    verification: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class CustomTwinDefinition(Base):
     """User-designed infrastructure twin (assets + connections)."""
     __tablename__ = "custom_twin_definitions"
