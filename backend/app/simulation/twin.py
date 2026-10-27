@@ -17,7 +17,7 @@ ASSETS = [
     {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-6, 1.2, -1.2], "vulnerabilities": ["permissive_default_rule"]},
     {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.65, "pos": [-4.4, 1.5, -5.2], "vulnerabilities": ["exposed_service"]},
     {"id": "app-server", "name": "Application Server", "asset_type": "app_server", "zone": "internal", "posture": 0.75, "pos": [0.2, 1.2, -0.8], "vulnerabilities": ["overprivileged_service_account"]},
-    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": ["outdated_firmware"]},
+    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": []},
     {"id": "identity-provider", "name": "Identity Provider", "asset_type": "identity", "zone": "identity", "posture": 0.9, "pos": [1.1, 3.0, 3.2], "vulnerabilities": []},
     {"id": "admin-workstation", "name": "Admin Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.8, "pos": [5.5, 1.0, 2.8], "vulnerabilities": []},
     {"id": "employee-workstation", "name": "Employee Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.55, "pos": [-6.2, 0.8, 3.2], "vulnerabilities": ["unpatched_client"]},
@@ -155,6 +155,14 @@ class DigitalTwin:
                     users.append(User(name=uname, role="admin" if "admin" in uname else "user", mfa="admin" not in uname,
                                       sessions=[Session(id=f"sess-{uname}", active=idata["session_active"], compromised=idata["compromised"])],
                                       credential_version=idata["credential_version"]))
+            if a["asset_type"] == "database":
+                # standing app-tier service session: the database is reached through an
+                # active (synthetic) service identity, not through a weakness
+                from app.netmodel.config import Session as _Sess, User as _Usr
+
+                users.append(_Usr(name="svc-app", role="service", mfa=True,
+                                  sessions=[_Sess(id="svc-app-sess", active=True, compromised=False)],
+                                  credential_version=1))
             weak = list(a["vulnerabilities"])
             cfg = DeviceConfig(hostname=aid.upper().replace("-", "")[:10] + "-01", device_id=BUILTIN_DEVICE_MAP.get(aid, "generic"),
                                interfaces=ifaces, services=svc_by_type.get(a["asset_type"], []), users=users,
@@ -290,15 +298,19 @@ class DigitalTwin:
         return [aid for aid, v in self.isolated.items() if v]
 
     def live_graph(self, target: str | None = None) -> nx.DiGraph:
-        """Built from the compiler's adjacency so red team, min-cut and find_path
-        can never disagree. Vulnerability gating is applied by find_path/explain."""
+        """Built from the compiler's adjacency AND the same vulnerability/session
+        gate explain_path applies, so red team, min-cut and find_path never disagree.
+        With a target, a hop is present only if hop_allowed(dest, target) holds."""
         compiled = self._compiled()
         g = nx.DiGraph()
         for a, nbs in compiled.adj.items():
             for b in nbs:
                 up, _why = compiled.link_up(a, b)
-                if up:
-                    g.add_edge(a, b)
+                if not up:
+                    continue
+                if target is not None and not self.hop_allowed(b, target):
+                    continue
+                g.add_edge(a, b)
         return g
 
     def to_dict(self) -> dict:

@@ -146,6 +146,32 @@ def test_f7b_reads_are_pure_and_manual_edits_survive():
     assert t.device_configs["file-server"]["services"][0]["enabled"] is False
 
 
+def test_f7c_gating_parity_property_50_twins():
+    import random
+
+    import networkx as nx
+
+    from app.agents.red_team import enumerate_paths
+    from app.benchmark.generator import generate_pair
+    from app.simulation.twin import DigitalTwin
+
+    rng = random.Random(11)
+    checked = 0
+    for i in range(50):
+        assets, conns, scenario = generate_pair(rng, i)
+        twin = DigitalTwin.from_dict(assets, conns)
+        src, tgt = scenario["source_asset"], scenario["target_asset"]
+        paths = enumerate_paths(twin, src, tgt)
+        found = twin.find_path(src, tgt)
+        if paths:
+            assert found is not None and found in paths, (i, src, tgt, found, paths[:2])
+            g = twin.live_graph(tgt)
+            cut = nx.minimum_edge_cut(g, src, tgt)
+            assert set(cut) <= set(g.edges()), "min-cut edges must be a subset of live_graph edges"
+            checked += 1
+    assert checked >= 10  # most generated pairs are baseline-reachable by construction
+
+
 def test_determinism_hash():
     configs, cables, _ = base()
     assert content_hash(configs, cables) == content_hash(configs, cables)
