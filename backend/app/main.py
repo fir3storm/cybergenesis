@@ -11,6 +11,8 @@ from app.db import get_db, init_db
 from app.integrations.meta_client import meta_client
 from app.orchestration import orchestrator
 from app.policies import engine as policy_engine
+from pydantic import BaseModel
+
 from app.schemas import (CreateCustomExperiment, CreateCustomScenario, CreateCustomTwin,
                          CreateExperiment, TwinActionRequest)
 from app.simulation.component_library import ASSET_TYPES, library
@@ -133,14 +135,23 @@ def get_experiment(run_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/experiments/{run_id}/run")
-async def run_exp(run_id: str, db: Session = Depends(get_db)):
+async def run_exp(run_id: str, step_delay_ms: int | None = None, db: Session = Depends(get_db)):
     r = db.get(models.SimulationRun, run_id)
     if not r:
         raise HTTPException(404, "experiment not found")
     if r.state not in ("IDLE", "FAILED", "COMPLETED"):
         raise HTTPException(409, f"experiment already in state {r.state}")
-    asyncio.create_task(orchestrator.run_experiment(run_id))
-    return {"started": True, "run_id": run_id}
+    delay = None if step_delay_ms is None else max(0, min(step_delay_ms, 2000))
+    asyncio.create_task(orchestrator.run_experiment(run_id, step_delay_ms=delay))
+    return {"started": True, "run_id": run_id, "step_delay_ms": delay}
+
+
+@app.get("/api/experiments/{run_id}/snapshots")
+def exp_snapshots(run_id: str, db: Session = Depends(get_db)):
+    if not db.get(models.SimulationRun, run_id):
+        raise HTTPException(404, "experiment not found")
+    rows = db.query(models.AssetStateSnapshot).filter_by(run_id=run_id).order_by(models.AssetStateSnapshot.created_at).all()
+    return [{"label": r.label, "snapshot": r.snapshot, "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
 @app.post("/api/experiments/{run_id}/cancel")
@@ -300,6 +311,42 @@ def activate_custom_twin(twin_id: str, db: Session = Depends(get_db)):
     twin = DigitalTwin.from_dict(row.assets, row.connections)
     orchestrator.activate_twin(twin)
     return {"activated": True, "id": twin_id, "twin": twin.to_dict()}
+
+
+class FromImageRequest(BaseModel):
+    image_data_url: str
+    name: str = "Whiteboard Twin"
+
+
+@app.post("/api/twins/from-image", status_code=201)
+async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db)):
+    """Muse Spark multimodal: network diagram photo -> validated twin definition."""
+    from app.integrations.meta_client import ProviderUnavailable
+
+    if not body.image_data_url.startswith("data:image/"):
+        raise HTTPException(422, "image_data_url must be a data:image/... URL")
+    prompt = (
+        "Read this network diagram and return ONLY JSON: {\"assets\": [{\"id\": str, \"name\": str, "
+        "\"asset_type\": one of [gateway, firewall, web_server, app_server, database, identity, workstation, file_server, sensor], "
+        "\"zone\": str, \"pos\": [x, y, z]}], \"connections\": [{\"source\": str, \"target\": str, \"traversable\": bool}]}. "
+        "Use lowercase hyphenated ids (e.g. web-server). Lay assets out left-to-right by trust zone, x from -8 to 8, y=1, z spread -4..4. "
+        "Only include assets/connections actually visible in the diagram."
+    )
+    try:
+        data, _usage = await meta_client.chat_vision_json(prompt, body.image_data_url)
+    except ProviderUnavailable as e:
+        raise HTTPException(503, f"Meta vision unavailable: {e}") from e
+    try:
+        twin_body = CreateCustomTwin(name=body.name, description="Generated from uploaded diagram via Meta vision",
+                                     assets=data.get("assets", []), connections=data.get("connections", []))
+    except Exception as e:  # noqa: BLE001 - model output is untrusted
+        raise HTTPException(422, f"model output failed schema validation: {e}") from e
+    _validate_twin(twin_body)
+    row = models.CustomTwinDefinition(name=twin_body.name, description=twin_body.description,
+                                      assets=[a.model_dump() for a in twin_body.assets],
+                                      connections=[c.model_dump() for c in twin_body.connections])
+    db.add(row); db.commit(); db.refresh(row)
+    return _twin_row(row)
 
 
 @app.post("/api/twins/builtin/activate")

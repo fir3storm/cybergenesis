@@ -17,7 +17,9 @@ export const api = {
   scenarios: () => j<Scenario[]>('/api/scenarios'),
   createExperiment: (scenario_id: string, seed = 42) =>
     j<{ id: string }>('/api/experiments', { method: 'POST', body: JSON.stringify({ scenario_id, seed }) }),
-  runExperiment: (id: string) => j<{ started: boolean }>(`/api/experiments/${id}/run`, { method: 'POST' }),
+  runExperiment: (id: string, stepDelayMs?: number) => j<{ started: boolean }>(`/api/experiments/${id}/run${stepDelayMs !== undefined ? `?step_delay_ms=${stepDelayMs}` : ''}`, { method: 'POST' }),
+  snapshots: (id: string) => j<{ label: string; snapshot: { status: Record<string, string> } }[]>(`/api/experiments/${id}/snapshots`),
+  fromImage: (image_data_url: string, name: string) => j<CustomTwinDef>('/api/twins/from-image', { method: 'POST', body: JSON.stringify({ image_data_url, name }) }),
   results: (id: string) => j<RunResult>(`/api/experiments/${id}/results`),
   events: (id: string) => j<SimEvent[]>(`/api/experiments/${id}/events`),
   evidence: (id: string) => j<{ id: string; kind: string; ref: string; summary: string }[]>(`/api/experiments/${id}/evidence`),

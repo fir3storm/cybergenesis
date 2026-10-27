@@ -48,7 +48,7 @@ class MetaModelClient:
         if not self.configured:
             raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
-        body = {"model": self.model, "temperature": 0.2,
+        body = {"model": self.model, "temperature": 0.2, "response_format": {"type": "json_object"},
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         last_err = ""
         for attempt in range(settings.model_max_retries + 1):
@@ -76,6 +76,36 @@ class MetaModelClient:
                "completion_tokens": 0, "latency_ms": 0, "success": False, "error": last_err, "run_id": run_id}
         self.usage.append(rec)
         raise ProviderUnavailable(last_err)
+
+
+    async def chat_vision_json(self, prompt: str, image_data_url: str, run_id: str | None = None) -> tuple[dict, dict]:
+        """Multimodal: send an image + prompt, expect a JSON object back."""
+        if not self.configured:
+            raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
+        headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
+        body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_data_url}},
+                ]}]}
+        started = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=max(settings.model_timeout_seconds, 60)) as c:
+                r = await c.post(f"{self.base}/chat/completions", headers=headers, json=body)
+            if r.status_code >= 400:
+                raise ProviderUnavailable(f"vision call HTTP {r.status_code}")
+            data = r.json()
+            usage = data.get("usage", {}) or {}
+            parsed = _extract_json(data["choices"][0]["message"]["content"])
+            rec = {"model": self.model, "prompt_version": PROMPT_VERSION + "-vision",
+                   "prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0),
+                   "latency_ms": int((time.time() - started) * 1000), "success": True, "run_id": run_id}
+            self.usage.append(rec)
+            return parsed, rec
+        except ProviderUnavailable:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProviderUnavailable(f"vision call failed: {type(e).__name__}: {e}") from e
 
 
 def _extract_json(text: str) -> dict:

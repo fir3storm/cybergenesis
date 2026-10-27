@@ -1,0 +1,1202 @@
+[
+ {
+  "pair": 0,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 1,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 2,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 3,
+  "source": "ws",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 4,
+  "source": "gw",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 5,
+  "source": "ws",
+  "target": "fs",
+  "assets": 3,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 6,
+  "source": "web",
+  "target": "db",
+  "assets": 3,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 7,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 8,
+  "source": "ws",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 9,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 10,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 11,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 12,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 13,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 14,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 15,
+  "source": "ws",
+  "target": "fs",
+  "assets": 3,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 16,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 17,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 18,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 19,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 20,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 21,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 22,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 23,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 24,
+  "source": "gw",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 25,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 26,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 27,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 28,
+  "source": "ws",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 29,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 30,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 31,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 32,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 33,
+  "source": "ws",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 34,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 35,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 36,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 37,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 38,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 39,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 40,
+  "source": "ws",
+  "target": "fs",
+  "assets": 3,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 41,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 42,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 43,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -3,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 44,
+  "source": "gw",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 45,
+  "source": "ws",
+  "target": "fs",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 46,
+  "source": "web",
+  "target": "db",
+  "assets": 4,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 47,
+  "source": "web",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 0,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 48,
+  "source": "ws",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -2,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ },
+ {
+  "pair": 49,
+  "source": "gw",
+  "target": "db",
+  "assets": 5,
+  "none": {
+   "pass": false,
+   "effectiveness": 0.0,
+   "gap": -1,
+   "disrupted": 0
+  },
+  "offline": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  },
+  "simulate": {
+   "pass": true,
+   "effectiveness": 100.0,
+   "gap": 1,
+   "disrupted": 0
+  }
+ }
+]

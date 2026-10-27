@@ -44,6 +44,20 @@
 - [x] Agents are clickable (mouse + keyboard) with an inspector: responsibilities, input/output contract, event/decision activity
 - [x] Commentary shows demo-clock timestamps per stage
 
+## Credibility + frontier pass (2026-10-27)
+- [x] Removed per-scenario defense prescriptions from prompts — model gets action contracts + graph only. Live re-verified: all 4 scenarios PASS, optimality gap 0
+- [x] Real evidence citations: telemetry IDs `tele-<scenario>-<seed>-<n>` end-to-end (observer → investigator → stored evidence)
+- [x] Granular effectiveness (fraction of invariant checks), simulated-timeline times, NetworkX min-edge-cut optimality gap per run
+- [x] Per-run twins (concurrent runs isolated, tested); display twin syncs on finish only
+- [x] Partial approvals no longer accepted (all actions must pass policy); run mode is live/mixed/offline across both AI agents; fallback reasons emitted as `provider_fallback` events and carried in decisions
+- [x] Structured output (`response_format: json_object`) + Pydantic validation; directed graph (DiGraph) reachability
+- [x] Post-PASS status cleanup — file server no longer sits at SUSPICIOUS after a pass
+- [x] Simulate-before-acting: candidate defenses replayed on clones, ranked by blocked→disruption, shown side-by-side; simulation can overrule a non-blocking proposal (recorded)
+- [x] AI red team rounds (max 3): NetworkX path enumeration, Muse Spark chooses among validated paths only, loop re-defends; resilience curve in Verification Lab
+- [x] Whiteboard → twin via Muse Spark vision (`POST /api/twins/from-image` + Designer upload). Live-tested: all 10 assets/types correctly read from a twin screenshot
+- [x] Benchmark: 50 seeded pairs, `scripts/benchmark.py` + `docs/benchmark.md` (none 0%, offline/simulate 100%, mean gap 0.16)
+- [x] UX: cinematic mode, replay player + timeline scrubber over stored snapshots, 1×/2×/4× speed (server step-delay param)
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.

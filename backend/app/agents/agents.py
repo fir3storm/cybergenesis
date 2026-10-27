@@ -3,7 +3,7 @@
 Offline outputs are deterministic, evidence-derived, and always labelled mode=offline.
 """
 
-from app.integrations.meta_client import ProviderUnavailable, meta_client
+from app.integrations.meta_client import meta_client
 from app.schemas import AgentObservation, DefenseProposal, IncidentHypothesis
 
 INVESTIGATOR_SYSTEM = (
@@ -27,12 +27,11 @@ STRATEGIST_SYSTEM = (
     "\"expected_effectiveness\": str, \"operational_impact\": str, \"confidence\": float}. Prefer least disruptive effective action."
 )
 
-ACTION_SEMANTICS = (
+CONTEXT_NOTE = (
     "Topology connections (source-target, traversable ones carry attack/data paths), live asset states, and the current "
-    "attack path are given below. For ransomware-like spread, isolating the compromised source asset is the least disruptive "
-    "action that blocks the path. For lateral movement or data exfiltration, block_connection on the final edge into the "
-    "protected target (with both source and target params) is the choke point. For compromised identity, revoke_session AND "
-    "rotate_credential on identity-provider for the named identity."
+    "attack path are given below. Work out for yourself which allowlisted action's direct mechanical effect satisfies "
+    "the invariant with the least operational disruption. No scenario-specific prescription is provided: reason from "
+    "the graph, the asset states, and the action contracts."
 )
 
 
@@ -53,7 +52,7 @@ def observe(telemetry: list[dict]) -> AgentObservation:
     else:
         atype, conf, summary = "none", 0.3, "No anomaly pattern matched"
     return AgentObservation(anomalous=bool(bursts or auth_fail or net), asset_ids=assets,
-                            event_ids=[f"evt-{i}" for i in range(len(telemetry))],
+                            event_ids=[str(e.get("id") or f"tele-{i}") for i, e in enumerate(telemetry)],
                             anomaly_type=atype, summary=summary, confidence=conf)
 
 
@@ -72,16 +71,16 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
         h = IncidentHypothesis(**{**data, "model": meta_client.model, "mode": "live",
                                   "evidence_refs": obs.event_ids, "affected_assets": data.get("affected_assets", obs.asset_ids)})
         return h
-    except (ProviderUnavailable, Exception) as e:  # fallback is deterministic + labelled
-        if not isinstance(e, ProviderUnavailable):
-            pass
+    except Exception as e:  # fallback is deterministic + labelled with the reason
+        reason = f"{type(e).__name__}: {e}"[:220]
         confirmed = [obs.summary, f"Source asset {scenario['source_asset']} shows synthetic malicious-pattern telemetry",
                      f"Protected target: {scenario['target_asset']}"]
         return IncidentHypothesis(
-            hypothesis=f"Synthetic {scenario['name']} incident originating at {scenario['source_asset']} threatening {scenario['target_asset']} (offline deterministic analysis of real twin telemetry)",
+            hypothesis=f"Synthetic {scenario['name']} incident originating at {scenario['source_asset']} threatening {scenario['target_asset']} (offline deterministic analysis; live Investigator unavailable: {reason})",
             affected_assets=obs.asset_ids, threat_level=scenario.get("severity", "high"),
             confirmed=confirmed, speculation=["Adversary intent beyond the simulated objective is not inferred"],
-            evidence_refs=obs.event_ids, confidence=0.86, model="deterministic-offline", mode="offline")
+            evidence_refs=obs.event_ids, confidence=0.86, model="deterministic-offline", mode="offline",
+            fallback_reason=reason)
 
 
 async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None) -> DefenseProposal:
@@ -93,7 +92,7 @@ async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, 
         states = ", ".join(f"{a['id']}={a['status'].upper()}(zone={a['zone']}, vulns={a['vulnerabilities']})" for a in d["assets"])
         context += (f" Source={scenario['source_asset']} Target={scenario['target_asset']} Identity={scenario.get('identity')}. "
                     f"Traversable connections: {edges}. Current attack path: {path}. Live asset states: {states}. "
-                    f"Identities: {d['identities']}. {ACTION_SEMANTICS}")
+                    f"Identities: {d['identities']}. {CONTEXT_NOTE}")
     try:
         from app.policies.engine import evaluate as _evaluate
 
@@ -106,18 +105,21 @@ async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, 
             if twin is None:
                 return p
             verdicts = [_evaluate(a.action_type, a.asset_id, a.params, twin) for a in p.actions]
-            if any(v.approved for v in verdicts):
+            if all(v.approved for v in verdicts):
                 return p
-            # bounded retry with deterministic policy feedback — still the model's decision
-            feedback = (" Your previous proposal was REJECTED by policy: "
+            # bounded retry with deterministic policy feedback — still the model's decision.
+            # ALL actions must be approved; partial approval is not accepted.
+            feedback = (" Your previous proposal was REJECTED by policy (all actions must be approved): "
                         + "; ".join(f"{v.action_type} on {v.asset_id}: {', '.join(v.reasons)}" for v in verdicts)
-                        + ". Propose a corrected allowlisted action that achieves the invariant.")
+                        + ". Propose a corrected allowlisted action set that achieves the invariant.")
         raise ValueError("live proposal rejected by policy twice")
-    except Exception:  # noqa: BLE001 - honest offline fallback below
+    except Exception as e:  # noqa: BLE001 - honest, reason-carrying offline fallback
         actions = scenario["expected_defense"]
+        reason = f"{type(e).__name__}: {e}"[:220]
         return DefenseProposal(
             actions=actions,
-            justification=f"Least-disruptive allowlisted containment for {scenario['name']}: {scenario['invariant']} (offline deterministic proposal derived from scenario policy, labelled as such)",
+            justification=f"Offline deterministic proposal (live Strategist unavailable: {reason}). Scenario-policy containment for {scenario['name']}: {scenario['invariant']}",
             expected_effectiveness="Blocks the simulated attack objective; verified independently by replay",
             operational_impact="Limited to the simulated source/choke-point; legitimate-path disruption measured after execution",
-            confidence=0.84, model="deterministic-offline", mode="offline", evidence_refs=hyp.evidence_refs)
+            confidence=0.84, model="deterministic-offline", mode="offline", evidence_refs=hyp.evidence_refs,
+            fallback_reason=reason)

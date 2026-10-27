@@ -1,9 +1,29 @@
-"""Independent verification: replay the same attack objective on a clone. Computed, never hardcoded."""
+"""Independent verification: replay the same attack objective. Computed, never hardcoded."""
 
-import time
+import networkx as nx
 
 from app.schemas import VerificationResult
 from app.simulation.twin import DigitalTwin
+
+
+def _min_edge_cut(baseline: DigitalTwin, scenario: dict) -> int | None:
+    if scenario["verification_kind"] != "reachability":
+        return None
+    g = nx.Graph()
+    for c in baseline.to_dict()["connections"]:
+        if c["traversable"] and c["active"]:
+            g.add_edge(c["source"], c["target"])
+    try:
+        return len(nx.minimum_edge_cut(g, scenario["source_asset"], scenario["target_asset"]))
+    except Exception:  # noqa: BLE001 - no path / missing node -> optimum 0
+        return 0
+
+
+def _edges_removed(baseline: DigitalTwin, after: DigitalTwin) -> int:
+    # traversable edges only — comparable to the minimum edge cut below
+    b = {(c["source"], c["target"]) for c in baseline.to_dict()["connections"] if c["active"] and c["traversable"]}
+    a = {(c["source"], c["target"]) for c in after.to_dict()["connections"] if c["active"] and c["traversable"]}
+    return len(b - a)
 
 
 def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
@@ -23,20 +43,28 @@ def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
     checks.append({"name": "containment_recorded", "passed": len(after.containment) > 0,
                    "detail": f"containment={after.containment}"})
     disrupted = after.legitimate_disrupted(baseline)
-    total_objectives = max(len(scenario.get("objectives", [1])), 1)
-    blocked = total_objectives if after_result["objective_blocked"] else 0
+    passed_checks = sum(1 for c in checks if c["passed"])
+    optimum = _min_edge_cut(baseline, scenario)
+    removed = _edges_removed(baseline, after)
     metrics = {
         "baseline_reachable_or_granted": not baseline_result["objective_blocked"],
         "after_reachable_or_granted": not after_result["objective_blocked"],
         "baseline_path": baseline_result.get("path"),
         "after_path": after_result.get("path"),
-        "defense_effectiveness_pct": round(100.0 * blocked / total_objectives, 1),
+        # granular: fraction of independent invariant checks passed (partial defenses score partially)
+        "defense_effectiveness_pct": round(100.0 * passed_checks / len(checks), 1),
+        "checks_passed": passed_checks,
+        "checks_total": len(checks),
+        "primary_objective_blocked": bool(after_result["objective_blocked"]),
         "operational_impact_disrupted_legit_paths": disrupted,
+        "optimal_edge_cut": optimum,
+        "defense_edges_removed": removed,
+        "optimality_gap": (removed - optimum) if optimum is not None else None,
         "time_to_detect_s": round(t_detected - t_attack_start, 3),
         "time_to_contain_s": round(t_contained - t_detected, 3) if t_contained else None,
-        "verified_at_monotonic": time.monotonic(),
+        "time_basis": "simulated telemetry timeline (event offsets), not wall-clock demo delays",
     }
     passed = all(c["passed"] for c in checks)
-    outcome = "PASS" if passed else "FAIL"
-    return VerificationResult(outcome=outcome, invariant=scenario["invariant"], checks=checks,
-                              metrics=metrics, evidence_refs=[f"check:{c['name']}" for c in checks])
+    return VerificationResult(outcome="PASS" if passed else "FAIL", invariant=scenario["invariant"],
+                              checks=checks, metrics=metrics,
+                              evidence_refs=[f"check:{c['name']}" for c in checks])

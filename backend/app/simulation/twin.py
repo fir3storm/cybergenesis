@@ -90,7 +90,7 @@ class DigitalTwin:
         return cls(defs, edges)
 
     def reset(self) -> None:
-        self.graph = nx.Graph()
+        self.graph = nx.DiGraph()
         self.status: dict[str, str] = {}
         self.isolated: dict[str, bool] = {}
         self.service_disabled: dict[str, bool] = {}
@@ -103,7 +103,10 @@ class DigitalTwin:
             self.vulns[a["id"]] = list(a["vulnerabilities"])
         self.edge_active: dict[frozenset, bool] = {}
         for s, t, trust, trav, types in self.edge_defs:
+            # directed arcs both ways for data connections; auth/monitoring arcs keep listed direction
             self.graph.add_edge(s, t, trust=trust, traversable=trav, types=types)
+            if trav:
+                self.graph.add_edge(t, s, trust=trust, traversable=trav, types=types)
             self.edge_active[frozenset((s, t))] = True
         self.identities = {
             "admin-01": {"asset": "admin-workstation", "session_active": False, "compromised": False, "credential_version": 1},
@@ -118,13 +121,16 @@ class DigitalTwin:
     def asset_ids(self) -> list[str]:
         return [a["id"] for a in self.asset_defs]
 
+    def assets_status_isolated(self) -> list[str]:
+        return [aid for aid, v in self.isolated.items() if v]
+
     def to_dict(self) -> dict:
         assets = []
         for a in self.asset_defs:
             aid = a["id"]
             assets.append({**a, "status": self.status[aid], "isolated": self.isolated[aid],
                            "service_disabled": self.service_disabled[aid], "vulnerabilities": list(self.vulns[aid]),
-                           "connected": sorted(self.graph.neighbors(aid))})
+                           "connected": sorted(set(self.graph.successors(aid)) | set(self.graph.predecessors(aid)))})
         conns = []
         for s, t, trust, trav, types in self.edge_defs:
             conns.append({"source": s, "target": t, "trust": trust, "traversable": trav, "types": types,
@@ -173,7 +179,7 @@ class DigitalTwin:
             node = path[-1]
             if node == dst:
                 return path
-            for nb in self.graph.neighbors(node):
+            for nb in self.graph.successors(node):
                 key = frozenset((node, nb))
                 if not self.edge_active.get(key, False):
                     continue
@@ -255,7 +261,7 @@ class DigitalTwin:
             asset = step["asset"]
             if asset in self.status and self.status[asset] not in ("contained",):
                 self.status[asset] = "suspicious" if i < len(scenario["attack_steps"]) - 1 else "compromised"
-            events.append({"event_type": step["type"], "asset_id": asset, "synthetic": True,
+            events.append({"id": f"tele-{scenario['id']}-{seed}-{i}", "event_type": step["type"], "asset_id": asset, "synthetic": True,
                            "message": step["description"], "offset_ms": 400 * (i + 1),
                            "severity": "high" if i >= 1 else "medium",
                            "detail": {"step": i, "seed": seed}})
@@ -263,7 +269,7 @@ class DigitalTwin:
             self.status[src] = "compromised"
             if self.reachable(src, tgt):
                 self.status[tgt] = "suspicious"
-                events.append({"event_type": "file_modification_burst", "asset_id": tgt, "synthetic": True,
+                events.append({"id": f"tele-{scenario['id']}-{seed}-spread", "event_type": "file_modification_burst", "asset_id": tgt, "synthetic": True,
                                "message": f"Synthetic shared-file modifications spreading ({180 + rng.randint(0, 60)} files/min)",
                                "offset_ms": 2400, "severity": "critical", "detail": {"spread": True}})
         if scenario.get("identity"):

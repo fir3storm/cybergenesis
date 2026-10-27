@@ -83,6 +83,51 @@ function TwinView({ twin }: { twin: Twin }) {
   )
 }
 
+interface Candidate { label: string; origin: string; blocked: boolean; disrupted: number | null; feasible: boolean; detail: string }
+interface Round { round: number; path: string[] | null; effectiveness_pct: number; outcome: string; red_team_mode: string | null }
+
+export function CandidatesPanel() {
+  const s = useStore()
+  const cands = (s.results?.verification?.metrics.candidates as Candidate[] | undefined) ?? []
+  const m = s.results?.verification?.metrics
+  if (!cands.length) return null
+  return (
+    <section className="rounded-xl border border-slate-800 glass-panel p-3">
+      <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">SIMULATE-BEFORE-ACTING · CANDIDATES</h2>
+      {cands.map((c, i) => (
+        <div key={i} className={`mb-1 rounded px-2 py-1.5 text-xs ${i === 0 ? 'bg-emerald-950/50 border border-emerald-800' : 'bg-slate-950/60'}`}>
+          <span className={c.blocked ? 'text-emerald-300' : 'text-red-300'}>{c.blocked ? '✓ blocks' : '✗ fails'}</span>{' '}
+          <b>{c.label}</b> <span className="text-slate-500">[{c.origin}]</span>
+          <span className="text-slate-400"> · disruption: {c.disrupted ?? '—'}</span>
+          {i === 0 && <span className="ml-1 rounded bg-emerald-600 px-1 text-[9px] font-bold text-slate-950">SELECTED</span>}
+        </div>
+      ))}
+      {m && <p className="mt-1 font-mono text-[10px] text-slate-400">
+        Optimality: NetworkX min edge cut = {String(m.optimal_edge_cut ?? '—')} · defense removed {String(m.defense_edges_removed ?? '—')} edges · gap = {String(m.optimality_gap ?? '—')}
+      </p>}
+    </section>
+  )
+}
+
+export function ResilienceCurve() {
+  const s = useStore()
+  const rounds = (s.results?.verification?.metrics.rounds as Round[] | undefined) ?? []
+  if (!rounds.length) return null
+  const pts = rounds.map((r, i) => `${30 + i * 90},${90 - (r.effectiveness_pct / 100) * 70}`).join(' ')
+  return (
+    <section className="mt-4 rounded-xl border border-slate-800 glass-panel p-4">
+      <h2 className="font-bold text-cyan-200">Resilience Curve — Red Team Rounds</h2>
+      <svg viewBox={`0 0 ${60 + rounds.length * 90} 110`} className="mt-2 w-full max-w-md" role="img" aria-label="Resilience curve over red-team rounds">
+        <line x1={25} y1={15} x2={25} y2={92} stroke="#334155" /><line x1={25} y1={92} x2={55 + rounds.length * 90} y2={92} stroke="#334155" />
+        <polyline points={pts} fill="none" stroke="#34d399" strokeWidth={2.5} />
+        {rounds.map((r, i) => <g key={r.round}><circle cx={30 + i * 90} cy={90 - (r.effectiveness_pct / 100) * 70} r={5} fill={r.outcome === 'PASS' ? '#34d399' : '#ef4444'} />
+          <text x={30 + i * 90} y={106} textAnchor="middle" fill="#94a3b8" fontSize={9}>R{r.round} · {r.effectiveness_pct}%</text></g>)}
+      </svg>
+      {rounds.map((r) => <p key={r.round} className="text-xs text-slate-300">Round {r.round}: {r.path ? r.path.join(' → ') : 'initial attack'} → {r.outcome} <span className="text-slate-500">({r.effectiveness_pct}% checks{r.red_team_mode ? `, red team ${r.red_team_mode}` : ''})</span></p>)}
+    </section>
+  )
+}
+
 /** Plain-language attack chain: reads left-to-right without needing the 3D view. */
 function AttackChain() {
   const s = useStore()
@@ -144,6 +189,11 @@ export default function App() {
   const s = useStore()
   const [commentaryOn, setCommentaryOn] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState('incident_investigator')
+  const [speed, setSpeed] = useState(1)
+  const [cinematic, setCinematic] = useState(false)
+  const [replayIdx, setReplayIdx] = useState<number | null>(null)
+  const [replayPlaying, setReplayPlaying] = useState(false)
+  const [snapshots, setSnapshots] = useState<{ label: string; snapshot: { status: Record<string, string> } }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
 
@@ -163,6 +213,7 @@ export default function App() {
       const t = await api.twin(); s.set({ twin: t })
       if (r.run.state === 'COMPLETED' || r.run.state === 'FAILED') {
         stopPoll()
+        api.snapshots(id).then(setSnapshots).catch(() => undefined)
         const base = useStore.getState().replayBaseline
         if (base) {
           const evs = await api.events(id)
@@ -185,7 +236,7 @@ export default function App() {
       await api.reset()
       const created = await api.createExperiment(scenarioId, 42)
       s.set({ runId: created.id })
-      await api.runExperiment(created.id)
+      await api.runExperiment(created.id, Math.round(350 / speed))
       wsRef.current?.close()
       const ws = new WebSocket(`${WS}/ws/experiments/${created.id}`)
       wsRef.current = ws
@@ -208,7 +259,7 @@ export default function App() {
     try {
       const created = await api.createCustomExperiment({ custom_scenario_id: customScenarioId, custom_twin_id: customTwinId, seed: 42 })
       s.set({ runId: created.id })
-      await api.runExperiment(created.id)
+      await api.runExperiment(created.id, Math.round(350 / speed))
       wsRef.current?.close()
       const ws = new WebSocket(`${WS}/ws/experiments/${created.id}`)
       wsRef.current = ws
@@ -250,11 +301,28 @@ export default function App() {
     }).catch((e) => s.set({ error: (e as Error).message }))
   }
 
+  // Replay player: step through the stored event timeline (attack -> defense -> proof)
+  useEffect(() => {
+    if (!replayPlaying) return
+    const iv = window.setInterval(() => {
+      setReplayIdx((cur) => {
+        const next = (cur ?? -1) + 1
+        if (next >= s.events.length) { setReplayPlaying(false); return cur }
+        const ev = s.events[next]
+        if (ev?.asset_id) s.set({ selectedAsset: ev.asset_id })
+        return next
+      })
+    }, Math.round(650 / speed))
+    return () => window.clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayPlaying, s.events.length, speed])
+
   // Keyboard shortcuts: Space=run, R=reset, 1-4=select scenario (ignored while typing)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON') return
+      if (e.key === 'Escape') { setCinematic(false); return }
       const st = useStore.getState()
       if (e.key === ' ') { e.preventDefault(); if (st.view === 'twin' || st.view === 'experiment') void runDemo(st.scenarioId) }
       else if (e.key.toLowerCase() === 'r') void resetAll()
@@ -429,7 +497,11 @@ export default function App() {
               <h1 className="text-2xl font-black text-cyan-200">Autonomous Experiment Console</h1>
               <p className="text-xs text-slate-400">Select a scenario → run the closed loop → watch agents reason, policy gate, defend, and verify. Seed 42 (deterministic).</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs" role="group" aria-label="Demo speed">
+                {[1, 2, 4].map((v) => <button key={v} onClick={() => setSpeed(v)} className={`px-2 py-2 ${speed === v ? 'bg-cyan-600 text-white' : 'text-slate-300'}`}>{v}×</button>)}
+              </div>
+              <button onClick={() => setCinematic(true)} className="rounded-lg border border-violet-600 px-3 py-2 text-sm text-violet-200">⛶ Cinematic</button>
               <button onClick={() => void runDemo()} className="flex items-center gap-1 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950"><Play size={14} /> RUN EXPERIMENT</button>
               <button onClick={() => void resetAll()} className="flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-2 text-sm"><RotateCcw size={14} /> Reset</button>
               <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-3 py-2 text-sm disabled:opacity-40"><Download size={14} className="inline" /> JSON</button>
@@ -467,9 +539,22 @@ export default function App() {
               <AttackChain />
               <section className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-800 glass-panel p-3" aria-label="Live event timeline">
                 <h2 className="mb-2 flex items-center gap-1 text-xs font-bold tracking-wider text-cyan-300"><Activity size={13} /> LIVE EVENT TIMELINE <span className="font-mono text-slate-500">· state: {s.runState}</span></h2>
+                {s.events.length > 0 && (
+                  <div className="mb-2 flex items-center gap-2 rounded bg-slate-950/70 px-2 py-1.5">
+                    <button onClick={() => { setReplayIdx(replayIdx === null ? -1 : replayIdx); setReplayPlaying(!replayPlaying) }} className="rounded bg-cyan-600 px-2 py-0.5 text-[11px] font-bold">{replayPlaying ? '❚❚ Pause replay' : '▶ Replay attack'}</button>
+                    <input type="range" min={0} max={Math.max(s.events.length - 1, 0)} value={replayIdx ?? s.events.length - 1}
+                      onChange={(e) => { const i = Number(e.target.value); setReplayIdx(i); const ev = s.events[i]; if (ev?.asset_id) s.set({ selectedAsset: ev.asset_id }) }}
+                      className="flex-1" aria-label="Timeline scrubber" />
+                    <span className="font-mono text-[10px] text-slate-400">{(replayIdx ?? s.events.length - 1) + 1}/{s.events.length}</span>
+                    {snapshots.map((sn) => <span key={sn.label} className="rounded-full border border-slate-700 px-1.5 py-0.5 font-mono text-[9px] text-slate-400">{sn.label}: {Object.values(sn.snapshot.status).filter((v) => v === 'compromised').length}✗ {Object.values(sn.snapshot.status).filter((v) => v === 'healthy' || v === 'remediated').length}✓</span>)}
+                  </div>
+                )}
+                {replayIdx !== null && s.events[replayIdx] && (
+                  <p className="mb-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200">Replay @{replayIdx + 1}: [{s.events[replayIdx].event_type}] {s.events[replayIdx].message}</p>
+                )}
                 {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet — press RUN EXPERIMENT. (Space also runs, R resets, 1–4 pick a scenario.)</p>}
                 {[...s.events].reverse().map((e, i) => (
-                  <div key={i} className="border-b border-slate-800 py-1 text-xs">
+                  <div key={i} className={`border-b border-slate-800 py-1 text-xs ${replayIdx === s.events.length - 1 - i ? 'bg-amber-500/15' : ''}`}>
                     <span className="font-mono text-cyan-400">{e.event_type}</span>
                     {e.agent && <span className="text-violet-300"> · {e.agent}</span>}
                     {e.asset_id && <span className="text-amber-300"> · {e.asset_id}</span>}
@@ -499,6 +584,7 @@ export default function App() {
                   <div key={i} className={`text-xs ${p.approved ? 'text-emerald-300' : 'text-red-300'}`}>{p.approved ? '✓ POLICY APPROVED' : '✗ POLICY REJECTED'}: {p.action_type} on {p.asset_id}</div>
                 ))}
               </section>
+              <CandidatesPanel />
               <section className="rounded-xl border border-slate-800 glass-panel p-3">
                 <h2 className="mb-1 text-xs font-bold tracking-wider text-cyan-300">OUTCOME</h2>
                 {s.results?.verification ? (
@@ -620,6 +706,8 @@ export default function App() {
               <ul className="mt-4 space-y-1 text-sm">{s.results.verification.checks.map((c) => (
                 <li key={c.name} className={c.passed ? 'text-emerald-300' : 'text-red-300'}>{c.passed ? '✓' : '✗'} {c.name} — <span className="text-slate-300">{c.detail}</span></li>))}
               </ul>
+              <ResilienceCurve />
+              <div className="mt-4"><CandidatesPanel /></div>
               <p className="mt-4 text-slate-300 font-semibold">CYBERGENESIS does not merely detect cyberattacks. It tests defenses and verifies resilience.</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button onClick={() => void runDemo(s.scenarioId, true)} className="flex items-center gap-1 rounded bg-cyan-600 px-3 py-2 text-xs font-bold"><RotateCcw size={13} /> Replay with Seed 42</button>
@@ -648,6 +736,20 @@ export default function App() {
           <button onClick={() => void resetAll()} className="rounded bg-red-500/80 px-4 py-2 font-semibold text-white">Reset twin &amp; clear current run view</button>
           <button onClick={exportReport} disabled={!s.runId} className="ml-2 rounded border border-slate-600 px-4 py-2 disabled:opacity-40"><Download size={14} className="inline" /> Export report JSON</button>
         </main>
+      )}
+
+      {cinematic && (
+        <div className="fixed inset-0 z-50 bg-[#020617]/97 p-4" role="dialog" aria-label="Cinematic twin mode">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="font-mono text-xs tracking-widest text-cyan-300">CINEMATIC — {scenario?.name ?? 'DIGITAL TWIN'} · stage {s.runState}</span>
+            <button onClick={() => setCinematic(false)} className="rounded-full border border-slate-600 px-3 py-1 text-xs">✕ Exit (Esc)</button>
+          </div>
+          <div className="h-[78vh] rounded-2xl border border-cyan-900 overflow-hidden">
+            {s.twin ? <TwinView twin={s.twin} /> : <SkeletonTwin />}
+          </div>
+          <AttackChain />
+          <p className="mt-2 text-center text-sm text-violet-200" aria-live="polite">{commentary}</p>
+        </div>
       )}
 
       <footer className="border-t border-slate-800 px-4 py-3 text-center text-[11px] text-slate-500">

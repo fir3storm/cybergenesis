@@ -41,6 +41,55 @@ def test_from_dict_and_stable_seed():
         t.apply_attack({**sc, "attack_steps": [{"type": "run_shellcode", "asset": "ws-1", "description": "x"}]})
 
 
+def test_candidates_optimality_and_red_team():
+    from app.agents.red_team import enumerate_paths
+    from app.simulation.candidates import evaluate_candidates
+
+    t = DigitalTwin.from_dict(CUSTOM_TWIN["assets"], CUSTOM_TWIN["connections"])
+    sc = {"id": "lab", "source_asset": "ws-1", "target_asset": "fs-1", "verification_kind": "reachability",
+          "objectives": ["x"], "attack_steps": [{"type": "file_modification_burst", "asset": "ws-1", "description": "b"}]}
+    base = t.clone(); t.apply_attack(sc, seed=1)
+    cands = evaluate_candidates(t, base, sc, [{"action_type": "apply_patch", "asset_id": "ws-1", "params": {}}])
+    by_label = {c["label"]: c for c in cands}
+    assert by_label["Agent proposal"]["blocked"] is False  # patch alone does not stop spread
+    assert cands[0]["blocked"] is True  # best trade-off ranked first
+    # twin with two disjoint paths: red team must find the alternate after the first is cut
+    assets = [{"id": n, "name": n, "asset_type": "workstation", "zone": "z", "pos": [0, 1, 0]} for n in ("a", "b", "c", "d")]
+    conns = [{"source": "a", "target": "b"}, {"source": "b", "target": "d"},
+             {"source": "a", "target": "c"}, {"source": "c", "target": "d"}]
+    t2 = DigitalTwin.from_dict(assets, conns)
+    assert len(enumerate_paths(t2, "a", "d")) == 2
+    t2.apply_action("block_connection", "a", {"source": "a", "target": "b"})
+    remaining = enumerate_paths(t2, "a", "d")
+    assert remaining == [["a", "c", "d"]]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_isolated_twins_and_metrics():
+    import asyncio as _asyncio
+
+    from app.db import SessionLocal
+    from app import models as _models
+
+    ids = []
+    for _ in range(2):
+        c = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42})
+        ids.append(c.json()["id"])
+    await _asyncio.gather(*(run_experiment(i) for i in ids))
+    for rid in ids:
+        res = client.get(f"/api/experiments/{rid}/results").json()
+        assert res["run"]["state"] == "COMPLETED" and res["verification"]["outcome"] == "PASS"
+        m = res["verification"]["metrics"]
+        assert m["checks_total"] == 3 and m["optimal_edge_cut"] == 2 and m["optimality_gap"] == 0
+        assert m["candidates"] and m["rounds"] and m["time_basis"].startswith("simulated")
+        dec = res["decisions"][1]  # investigator: real telemetry evidence ids, not evt-N
+        assert all(r.startswith("tele-") for r in dec["evidence_refs"]), dec
+        db = SessionLocal()
+        labels = {r.label for r in db.query(_models.AssetStateSnapshot).filter_by(run_id=rid).all()}
+        db.close()
+        assert {"baseline", "attacked", "post_remediation"} <= labels
+
+
 def test_library_catalog():
     lib = client.get("/api/library").json()
     assert len(lib["asset_types"]) == 9 and len(lib["attack_steps"]) == 8 and len(lib["defense_actions"]) == 7

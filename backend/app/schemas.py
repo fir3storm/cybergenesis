@@ -22,6 +22,7 @@ class IncidentHypothesis(BaseModel):
     confidence: float = Field(ge=0, le=1, default=0.5)
     model: str = "deterministic"
     mode: str = "offline"
+    fallback_reason: str | None = None
 
 
 class AttackScenarioPlan(BaseModel):
@@ -47,6 +48,7 @@ class DefenseProposal(BaseModel):
     model: str = "deterministic"
     mode: str = "offline"
     evidence_refs: list[str] = []
+    fallback_reason: str | None = None
 
 
 class PolicyDecision(BaseModel):
