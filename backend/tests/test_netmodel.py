@@ -91,6 +91,43 @@ def test_f1_ingress_acl_removes_and_restores_scenario_path():
     assert t.find_path("employee-workstation", "file-server") is not None, "removing the ACL must restore the path"
 
 
+def test_f2_permit_above_deny_wins_and_implicit_deny():
+    configs, cables, cats = base()
+    configs["a"].acls = [Acl(name="OUT", entries=[
+        AclEntry(seq=20, action="deny", dst="any"),
+        AclEntry(seq=10, action="permit", dst="b"),  # lower seq = first match, permit stops evaluation
+    ])]
+    configs["a"].interfaces[0].acl_out = "OUT"
+    assert compile_twin(configs, cables, cats).explain("a", "b")["reachable"]
+    configs["a"].acls = [Acl(name="OUT", entries=[AclEntry(seq=10, action="deny", dst="other-host")])]
+    assert not compile_twin(configs, cables, cats).explain("a", "b")["reachable"], "bound ACL with no match = implicit deny"
+
+
+def test_f2_missing_port_refused_and_multi_service():
+    configs, cables, cats = base()
+    cables[0]["b"]["port"] = "eth9"  # port does not exist on fw
+    result = compile_twin(configs, cables, cats).explain("a", "b")
+    assert not result["reachable"]
+    configs, cables, cats = base()
+    from app.netmodel.config import Service
+
+    configs["b"].services = [Service(name="https", port=443), Service(name="smb", port=445)]
+    configs["fw"].fw_policies = [FwPolicy(id=1, name="deny-https", action="deny", service="https"),
+                                 FwPolicy(id=2, name="allow-smb", action="allow", service="smb")]
+    # https denied at the firewall, smb allowed: every enabled service is considered
+    assert compile_twin(configs, cables, cats).explain("a", "b")["reachable"]
+
+
+def test_f2_lru_cache_bounded():
+    from app.netmodel.compiler import cache_size, compile_twin as ct
+
+    for i in range(260):
+        c, cb, cats = base()
+        c["b"].hostname = f"B-{i}"
+        ct(c, cb, cats)
+    assert cache_size() <= 256
+
+
 def test_determinism_hash():
     configs, cables, _ = base()
     assert content_hash(configs, cables) == content_hash(configs, cables)

@@ -171,8 +171,14 @@ class DigitalTwin:
                   for s, t, *_ in self.edge_defs]
         return content_hash({k: DeviceConfig(**v) for k, v in self.device_configs.items()}, cables)
 
+    def _port_for(self, device: str, peer: str) -> str:
+        for i in self.device_configs.get(device, {}).get("interfaces", []):
+            if i.get("peer") == peer:
+                return i["name"]
+        return "eth0"
+
     def cables_list(self) -> list[dict]:
-        """Traversable connections only, with the currently-active directed arcs as pairs."""
+        """Traversable connections only, with actual cable ports and active directed arcs."""
         out = []
         for s, t, _trust, trav, _types in self.edge_defs:
             if not trav:
@@ -182,7 +188,7 @@ class DigitalTwin:
                 pairs.append((s, t))
             if self.dir_active.get((t, s), False):
                 pairs.append((t, s))
-            out.append({"a": {"device": s, "port": "eth0"}, "b": {"device": t, "port": "eth0"},
+            out.append({"a": {"device": s, "port": self._port_for(s, t)}, "b": {"device": t, "port": self._port_for(t, s)},
                         "media": "copper", "pairs": pairs})
         return out
 
