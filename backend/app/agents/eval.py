@@ -16,6 +16,26 @@ from app.verification.verifier import verify
 import random
 
 
+def identity_recall(twin, guardian_out) -> float:
+    """Exact (identity, jewel) pair matching — not counts."""
+    jewels = [a["id"] for a in twin.to_dict()["assets"] if a["asset_type"] in ("database", "file_server")]
+    truth = {(name, j) for name, idn in twin.identities.items() for j in jewels if twin.find_path(idn["asset"], j)}
+    if not truth:
+        return 1.0
+    found = {(p.get("identity"), p.get("to")) for p in guardian_out.privilege_paths}
+    return round(len(truth & found) / len(truth), 3)
+
+
+def deception_trip(twin, scenario: dict) -> float:
+    """1.0 if red's chosen campaign path touches a decoy, else 0.0."""
+    from app.agents.red_team import _offline_campaign
+
+    camp = _offline_campaign(twin, scenario["source_asset"], scenario["target_asset"])
+    if camp is None or not camp.path:
+        return 0.0
+    return 1.0 if any(n in twin.decoys for n in camp.path) else 0.0
+
+
 def _bucketize(pairs: list[tuple[float, bool]]) -> list[dict]:
     buckets = [{"bucket": f"{i / 5:.1f}-{(i + 1) / 5:.1f}", "n": 0, "correct": 0} for i in range(5)]
     for conf, ok in pairs:
@@ -95,11 +115,12 @@ async def run_eval(n: int = 10, seed: int = 7, mode: str = "offline", progress=N
         found_weak = {(f["device"], f["weakness"]) for f in aud.output.findings}
         auditor["tp"] += len(truth_weak & found_weak); auditor["fp"] += len(found_weak - truth_weak); auditor["fn"] += len(truth_weak - found_weak)
 
-        # identity guardian recall
+        # identity guardian recall (exact pair matching)
         guard = await build_agent("identity_guardian").run(ctx, io.TextIn())
         jewels = [a["id"] for a in base.to_dict()["assets"] if a["asset_type"] in ("database", "file_server")]
         truth_paths = sum(1 for name, idn in base.identities.items() for j in jewels if base.find_path(idn["asset"], j))
-        identity["total"] += truth_paths; identity["found"] += min(len(guard.output.privilege_paths), truth_paths)
+        identity["total"] += truth_paths
+        identity["found"] += round(identity_recall(base, guard.output) * truth_paths)
 
         # deception: deploy on the attack path, does red's shortest path trip it?
         dec = attacked.clone()
@@ -107,8 +128,7 @@ async def run_eval(n: int = 10, seed: int = 7, mode: str = "offline", progress=N
                                                   io.ExecuteIn(actions=[{"action_type": "deploy_decoy", "asset_id": scenario["target_asset"],
                                                                          "params": {"kind": "honeypot_host", "name": f"decoy-eval-{i}"}}]))
         deception["deployed"] += 1
-        p = dec.find_path(scenario["source_asset"], scenario["target_asset"])
-        deception["tripped"] += int(bool(p and any(x in dec.decoys for x in p)))
+        deception["tripped"] += deception_trip(dec, scenario)
 
         # config engineer parse success / semantic equality
         for action in scenario["expected_defense"][:1]:

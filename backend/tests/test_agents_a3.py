@@ -51,6 +51,27 @@ async def test_prompt_injection_in_telemetry_is_not_obeyed():
     assert evaluate("isolate_asset", "database", {}, twin).approved is False  # policy still blocks it deterministically
 
 
+@pytest.mark.asyncio
+async def test_f4_eval_exact_pairs_and_decoy_lure():
+    from app.agents.eval import deception_trip, identity_recall
+    from app.agents.framework.new_agents import IdentityGuardianAgent  # noqa: F401
+
+    twin = DigitalTwin()
+    twin.identities["admin-01"]["session_active"] = True
+    twin.identities["admin-01"]["compromised"] = True
+    guard = await build_agent("identity_guardian").run(ctx(twin), io.TextIn())
+    assert identity_recall(twin, guard.output) == 1.0  # perfect agent
+    from app.agents.framework.io import IdentityOut
+
+    assert identity_recall(twin, IdentityOut()) == 0.0  # empty agent
+
+    ex = await build_agent("defense_executor").run(ctx(twin), io.ExecuteIn(
+        actions=[{"action_type": "deploy_decoy", "asset_id": "web-server", "params": {"kind": "honeypot_host", "name": "decoy-lure-1"}}]))
+    assert ex.output.success
+    scenario = {"source_asset": "internet", "target_asset": "database"}
+    assert deception_trip(twin, scenario) in (0.0, 1.0)  # measured from red's chosen campaign path
+
+
 def test_commander_validator():
     bad = CommanderPlan(plan=[PlanStep(step=1, agents=["observer"]), PlanStep(step=2, agents=["defense_strategist"])])
     reasons = validate_plan(bad, set(REGISTRY))

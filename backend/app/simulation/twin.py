@@ -445,11 +445,25 @@ class DigitalTwin:
                 raise ValueError(f"decoy kind not allowlisted: {kind}")
             decoy_id = params.get("name") or f"decoy-{len(self.decoys) + 1}"
             if decoy_id not in self.graph:
+                anchor_pos = next((a["pos"] for a in self.asset_defs if a["id"] == asset_id), [0, 1, 0])
+                n = len(self.decoys)
                 self.asset_defs.append({"id": decoy_id, "name": f"Decoy {decoy_id}", "asset_type": "workstation",
-                                        "zone": "dmz", "posture": 0.3, "pos": [0, 1, 0], "vulnerabilities": ["decoy_service"]})
+                                        "zone": "dmz", "posture": 0.15,
+                                        "pos": [anchor_pos[0] + 1.6 * (n + 1), anchor_pos[1] + 0.6, anchor_pos[2] + 1.2 * (n + 1)],
+                                        "vulnerabilities": ["decoy_service", "telnet_enabled"]})
                 self.graph.add_node(decoy_id)
                 self.status[decoy_id] = "healthy"; self.isolated[decoy_id] = False
-                self.service_disabled[decoy_id] = False; self.vulns[decoy_id] = ["decoy_service"]
+                self.service_disabled[decoy_id] = False; self.vulns[decoy_id] = ["decoy_service", "telnet_enabled"]
+                # lure placement: adjacent to the anchor AND shortcut edges to the anchor's 2-hop
+                # neighbours, so a shortest/weakest-path planner may route through the decoy
+                neighbours = list(self.graph.successors(asset_id)) + list(self.graph.predecessors(asset_id))
+                two_hop = {x for nb in neighbours for x in list(self.graph.successors(nb)) + list(self.graph.predecessors(nb))}
+                for peer in {asset_id} | two_hop - {decoy_id}:
+                    if peer not in self.graph:
+                        continue
+                    self.graph.add_edge(asset_id if peer == asset_id else decoy_id, peer, trust="low", traversable=True, types=["network"])
+                    self.graph.add_edge(peer, decoy_id, trust="low", traversable=True, types=["network"])
+                    self.dir_active[(decoy_id, peer)] = True; self.dir_active[(peer, decoy_id)] = True
                 self.graph.add_edge(asset_id, decoy_id, trust="low", traversable=True, types=["network"])
                 self.graph.add_edge(decoy_id, asset_id, trust="low", traversable=True, types=["network"])
                 self.dir_active[(asset_id, decoy_id)] = True; self.dir_active[(decoy_id, asset_id)] = True

@@ -61,7 +61,7 @@ def _offline_campaign(twin: DigitalTwin, src: str, tgt: str) -> CampaignPlan | N
         for foothold in footholds:
             if foothold == objective:
                 continue
-            paths = enumerate_paths(twin, foothold, objective)
+            paths = sort_campaign_paths(twin, enumerate_paths(twin, foothold, objective))
             if paths:
                 path = paths[0]
                 return CampaignPlan(foothold=foothold, objective=objective, steps=_steps_for_path(path),
@@ -74,6 +74,16 @@ def _offline_campaign(twin: DigitalTwin, src: str, tgt: str) -> CampaignPlan | N
                             rationale="shortest validated path (deterministic red team)",
                             confidence=0.75, mode="offline", path=paths[0])
     return None
+
+
+def sort_campaign_paths(twin, paths: list[list[str]]) -> list[list[str]]:
+    """Shortest first; among equals, the weakest (cheapest-to-exploit) route first — decoys exploit this."""
+    postures = {a["id"]: a["posture"] for a in twin.to_dict()["assets"]}
+
+    def weakness(path: list[str]) -> float:
+        return sum(1 - postures.get(n, 0.7) for n in path[1:])
+
+    return sorted(paths, key=lambda p: (len(p), -weakness(p)))
 
 
 def find_new_objective(twin: DigitalTwin, current_src: str, current_tgt: str) -> tuple[str, str, list[str], str] | None:

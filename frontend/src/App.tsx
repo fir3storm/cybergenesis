@@ -102,6 +102,8 @@ export function CommanderPlanView() {
   const s = useStore()
   const ev = [...s.events].reverse().find((e) => e.event_type === 'commander_plan')
   const plan = (ev?.payload?.plan ?? []) as { step: number; agents: string[]; why: string }[]
+  const finishedSteps = new Set(s.events.filter((e) => e.event_type === 'plan_step_finished').map((e) => (e.payload?.step as number)))
+  const startedSteps = new Set(s.events.filter((e) => e.event_type === 'plan_step_started').map((e) => (e.payload?.step as number)))
   const stageIdx = Math.max(STAGES.indexOf(s.runState), 0)
   if (!ev) return null
   return (
@@ -110,8 +112,8 @@ export function CommanderPlanView() {
       <p className="text-[11px] text-slate-400">{ev.message}</p>
       <ol className="mt-2 space-y-1">
         {plan.map((p, i) => (
-          <li key={p.step} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${i === Math.min(stageIdx, plan.length - 1) && s.runState !== 'IDLE' ? 'bg-violet-500/25 border border-violet-400' : i < stageIdx ? 'text-emerald-300' : 'text-slate-300'}`}>
-            <span className="font-mono">{i < stageIdx || s.runState === 'COMPLETED' ? '✓' : i === stageIdx ? '▶' : '·'} step {p.step}</span>
+          <li key={p.step} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${startedSteps.has(p.step) && !finishedSteps.has(p.step) ? 'bg-violet-500/25 border border-violet-400 animate-pulse' : finishedSteps.has(p.step) || i < stageIdx ? 'text-emerald-300' : 'text-slate-300'}`}>
+            <span className="font-mono">{finishedSteps.has(p.step) || i < stageIdx || s.runState === 'COMPLETED' ? '✓' : startedSteps.has(p.step) ? '▶ running' : '·'} step {p.step}</span>
             <b>{p.agents.join(' + ')}</b><span className="text-slate-500">{p.why}</span>
           </li>
         ))}

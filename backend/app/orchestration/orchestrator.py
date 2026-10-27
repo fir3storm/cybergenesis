@@ -171,6 +171,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         if run_id in _cancelled:
             raise asyncio.CancelledError()
         # Incident Commander plans the run (validated DAG); execution follows the mandatory backbone regardless
+        commander_plan = None
         try:
             from app.agents.framework.adapters import build_agent as _build_agent
             from app.agents.framework.base import AgentContext as _AgentContext
@@ -178,6 +179,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
             _cmd = await _build_agent("incident_commander").run(
                 _AgentContext(run_id=run_id, twin=twin, scenario=scenario), _agent_io.TextIn(text=scenario["name"]))
+            commander_plan = _cmd.output
             emit("commander_plan", f"Commander plan ({_cmd.mode}): {len(_cmd.output.plan)} steps — {_cmd.output.stop_condition}",
                  agent="incident_commander", payload=_cmd.output.model_dump())
             db.add(models.AgentDecision(run_id=run_id, agent="incident_commander", decision=f"plan: {[s.agents for s in _cmd.output.plan]}",
@@ -207,23 +209,56 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         await set_state("TELEMETRY_COLLECTED", f"{len(telemetry)} synthetic telemetry events collected", "observer")
         obs = agents.observe(telemetry)
-        try:  # assurance agents publish to the bus/record (deterministic; cannot block the loop)
-            from app.agents.framework.adapters import build_agent as _ba
-            from app.agents.framework.base import AgentContext as _AC
-            from app.agents.framework import io as _aio
+        # assurance agents publish to the bus/record; failures are honest, never silently swallowed
+        from app.agents.framework.adapters import build_agent as _ba
+        from app.agents.framework.base import AgentContext as _AC
+        from app.agents.framework import io as _aio
 
-            _ctx = _AC(run_id=run_id, twin=twin, scenario=scenario, telemetry=telemetry, baseline_twin=baseline_twin)
-            for _aid, _inp in (("threat_intel_analyst", _aio.TelemetryIn(telemetry=telemetry)),
-                               ("attack_surface_mapper", _aio.TextIn()),
-                               ("identity_guardian", _aio.TextIn())):
+        _ctx = _AC(run_id=run_id, twin=twin, scenario=scenario, telemetry=telemetry, baseline_twin=baseline_twin)
+        for _aid, _inp in (("threat_intel_analyst", _aio.TelemetryIn(telemetry=telemetry)),
+                           ("attack_surface_mapper", _aio.TextIn()),
+                           ("identity_guardian", _aio.TextIn())):
+            try:
                 _r = await _ba(_aid).run(_ctx, _inp)
                 emit("agent_decision", _r.output.summary, agent=_aid, payload={"mode": _r.mode})
                 db.add(models.AgentDecision(run_id=run_id, agent=_aid, decision=_r.output.summary,
                                             justification="assurance analysis (deterministic/hybrid)", confidence=_r.output.confidence,
-                                            model=_r.model, mode=_r.mode, evidence_refs=_r.evidence_refs, asset_ids=[]))
+                                            model=_r.model, mode=_r.mode, evidence_refs=_r.evidence_refs, asset_ids=[],
+                                            data={"fallback_reason": _r.fallback_reason}))
+            except Exception as _e:  # noqa: BLE001 - record the failure, keep the loop honest and moving
+                _reason = f"{type(_e).__name__}: {_e}"[:220]
+                emit("provider_fallback", f"{_aid} failed: {_reason}", agent=_aid)
+                db.add(models.AgentDecision(run_id=run_id, agent=_aid, decision="agent failed",
+                                            justification=_reason, confidence=0.0, model="deterministic",
+                                            mode="offline", evidence_refs=[], asset_ids=[],
+                                            data={"fallback_reason": _reason}))
             db.commit()
-        except Exception:  # noqa: BLE001 - assurance agents are additive
-            pass
+
+        # execute the Commander's optional (non-backbone) steps in plan order, max 4 concurrent
+        if commander_plan is not None:
+            _sem = asyncio.Semaphore(4)
+            _backbone = {"observer", "incident_investigator", "defense_strategist", "defense_executor", "verification_scientist"}
+
+            async def _run_optional(_aid: str):
+                async with _sem:
+                    try:
+                        _inp = _aio.TelemetryIn(telemetry=telemetry) if _aid == "threat_intel_analyst" else _aio.TextIn()
+                        return await _ba(_aid).run(_ctx, _inp)
+                    except Exception:  # noqa: BLE001 - reported by caller
+                        return None
+
+            for _step in commander_plan.plan:
+                _optional = [a for a in _step.agents if a not in _backbone]
+                if not _optional:
+                    continue
+                for _aid in _optional:
+                    emit("plan_step_started", f"Commander step {_step.step}: {_aid} starting", agent="incident_commander",
+                         payload={"step": _step.step, "agent": _aid})
+                _results = await asyncio.gather(*[_run_optional(a) for a in _optional]) \
+                    if _step.parallel else [await _run_optional(_optional[0])]
+                for _aid, _r in zip(_optional, _results):
+                    emit("plan_step_finished", f"Commander step {_step.step}: {_aid} {'done' if _r else 'failed'}",
+                         agent="incident_commander", payload={"step": _step.step, "agent": _aid, "ok": _r is not None})
         db.add(models.AgentDecision(run_id=run_id, agent="observer", decision=obs.anomaly_type,
                                     justification=obs.summary, confidence=obs.confidence, model="deterministic",
                                     mode="offline", evidence_refs=obs.event_ids, asset_ids=obs.asset_ids)); db.commit()
@@ -467,12 +502,20 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                   "source_asset": plan.foothold, "target_asset": plan.objective,
                                   "attack_steps": [s.model_dump() for s in plan.steps], "identity": None}
                 if twin.decoys.intersection(chosen_path):
-                    emit("decoy_tripped", f"DECOY TRIPPED: red campaign touched a decoy on path {' -> '.join(chosen_path)} — high-confidence detection",
+                    emit("decoy_tripped", f"DECOY TRIPPED: red campaign touched a decoy on path {' -> '.join(chosen_path)} — high-confidence detection; branch frozen",
                          agent="observer", asset_id=next(iter(twin.decoys.intersection(chosen_path))),
                          payload={"decoys": sorted(twin.decoys.intersection(chosen_path))})
+                    emit("telemetry", f"Decoy telemetry: traversal frozen at {next(iter(twin.decoys.intersection(chosen_path)))}",
+                         agent="observer", payload={"event_type": "security_detection", "asset_id": next(iter(twin.decoys.intersection(chosen_path)))})
                     db.add(models.AgentDecision(run_id=run_id, agent="observer", decision="decoy_tripped",
-                                                justification="red traversal touched a decoy asset", confidence=0.99,
+                                                justification="red traversal touched a decoy asset; branch frozen", confidence=0.99,
                                                 model="deterministic", mode="offline", evidence_refs=[], asset_ids=chosen_path)); db.commit()
+                    rounds.append({"round": round_num, "foothold": plan.foothold, "objective": plan.objective,
+                                   "path": chosen_path, "red_mode": plan.mode, "blue_mode": "detection",
+                                   "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
+                                   "resilience_score": resilience_now(), "outcome": "DECOY_TRIPPED",
+                                   "disrupted": 0, "red_team_mode": plan.mode})
+                    break
                 red_telemetry = twin.apply_attack(round_scenario, seed=run.seed + round_num)
                 for e in red_telemetry:
                     e["id"] = f"tele-red-{run_id[:6]}-{round_num}-{e['id'].rsplit('-', 1)[-1]}"
