@@ -3,7 +3,6 @@
 import copy
 import random
 import zlib
-from collections import deque
 
 import networkx as nx
 
@@ -18,7 +17,7 @@ ASSETS = [
     {"id": "firewall", "name": "Firewall", "asset_type": "firewall", "zone": "perimeter", "posture": 0.9, "pos": [-6, 1.2, -1.2], "vulnerabilities": ["permissive_default_rule"]},
     {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.65, "pos": [-4.4, 1.5, -5.2], "vulnerabilities": ["exposed_service"]},
     {"id": "app-server", "name": "Application Server", "asset_type": "app_server", "zone": "internal", "posture": 0.75, "pos": [0.2, 1.2, -0.8], "vulnerabilities": ["overprivileged_service_account"]},
-    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": []},
+    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.85, "pos": [7.4, 1.3, -2.6], "vulnerabilities": ["outdated_firmware"]},
     {"id": "identity-provider", "name": "Identity Provider", "asset_type": "identity", "zone": "identity", "posture": 0.9, "pos": [1.1, 3.0, 3.2], "vulnerabilities": []},
     {"id": "admin-workstation", "name": "Admin Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.8, "pos": [5.5, 1.0, 2.8], "vulnerabilities": []},
     {"id": "employee-workstation", "name": "Employee Workstation", "asset_type": "workstation", "zone": "endpoints", "posture": 0.55, "pos": [-6.2, 0.8, 3.2], "vulnerabilities": ["unpatched_client"]},
@@ -132,7 +131,9 @@ class DigitalTwin:
         from app.devices.registry import BUILTIN_DEVICE_MAP
         from app.netmodel.config import DeviceConfig, Interface, Service, User, Session, Mgmt
 
-        svc_by_type = {"web_server": [Service(name="http", port=80), Service(name="https", port=443)],
+        svc_by_type = {"gateway": [Service(name="https", port=443)],
+                       "firewall": [Service(name="https", port=443), Service(name="ssh", port=22)],
+                       "web_server": [Service(name="http", port=80), Service(name="https", port=443)],
                        "database": [Service(name="postgres", port=5432), Service(name="sql", port=1433)],
                        "file_server": [Service(name="smb", port=445)],
                        "identity": [Service(name="ldaps", port=636), Service(name="https", port=443)],
@@ -171,23 +172,63 @@ class DigitalTwin:
         return content_hash({k: DeviceConfig(**v) for k, v in self.device_configs.items()}, cables)
 
     def cables_list(self) -> list[dict]:
-        return [{"a": {"device": s, "port": "eth0"}, "b": {"device": t, "port": "eth0"}, "media": "copper"}
-                for s, t, *_ in self.edge_defs]
+        """Traversable connections only, with the currently-active directed arcs as pairs."""
+        out = []
+        for s, t, _trust, trav, _types in self.edge_defs:
+            if not trav:
+                continue
+            pairs = []
+            if self.dir_active.get((s, t), False):
+                pairs.append((s, t))
+            if self.dir_active.get((t, s), False):
+                pairs.append((t, s))
+            out.append({"a": {"device": s, "port": "eth0"}, "b": {"device": t, "port": "eth0"},
+                        "media": "copper", "pairs": pairs})
+        return out
+
+    def _sync_configs_from_flags(self) -> None:
+        """Old twin flags are inputs only: sync them INTO device_configs before compiling."""
+        for aid, cfg in self.device_configs.items():
+            cfg["isolated"] = bool(self.isolated.get(aid, False))
+            cfg["quarantine_vlan"] = 999 if aid in self.quarantined else None
+            cfg["weaknesses"] = list(self.vulns.get(aid, []))
+            cfg["patches"] = {"level": "current", "missing": []} if not self.vulns.get(aid) else \
+                {"level": cfg.get("patches", {}).get("level", "behind"), "missing": cfg.get("patches", {}).get("missing", ["CVE-SYNTH-001"])}
+            for svc in cfg.get("services", []):
+                svc["enabled"] = not self.service_disabled.get(aid, False)
+
+    def _categories(self) -> dict[str, str]:
+        return {a["id"]: ("firewall" if a["asset_type"] == "firewall" else a["asset_type"]) for a in self.asset_defs}
+
+    def _compiled(self, exclude: set[str] | None = None):
+        from app.netmodel.compiler import compile_twin
+        from app.netmodel.config import DeviceConfig
+
+        self._sync_configs_from_flags()
+        configs = {}
+        for aid, cfg in self.device_configs.items():
+            c = DeviceConfig(**cfg)
+            if exclude and aid in exclude:
+                c.isolated = True
+            configs[aid] = c
+        return compile_twin(configs, self.cables_list(), self._categories())
 
     def explain_path(self, src: str, dst: str) -> dict:
-        path = self.find_path(src, dst)
-        if not path:
-            return {"reachable": False, "path": [], "hops": [], "reason": "no traversable path (links, filtering, or vulnerability gate)"}
-        hops = []
-        for i in range(len(path) - 1):
-            a, b = path[i], path[i + 1]
-            services = self.device_configs.get(b, {}).get("services", [])
-            svc = next((s["name"] for s in services if s.get("enabled")), "transit")
-            weak = self.device_configs.get(b, {}).get("weaknesses", [])
-            hops.append({"from": a, "to": b,
-                         "rule": f"directed arc {a}->{b} active+traversable; service {svc}; "
-                                 + (f"weakness {weak}" if weak else "final target / session-covered hop")})
-        return {"reachable": True, "path": path, "hops": hops, "config_hash": self.config_hash()}
+        """Source of truth: the netmodel compiler. Intermediate hops still honour the
+        vulnerability gate — failing intermediates are excluded and the compile retried."""
+        exclude: set[str] = set()
+        for _ in range(len(self.asset_defs) + 1):
+            compiled = self._compiled(exclude)
+            result = compiled.explain(src, dst)
+            if not result["reachable"]:
+                return {**result, "config_hash": self.config_hash()}
+            path = result["path"]
+            bad = next((n for n in path[1:-1] if not self.hop_allowed(n, dst)), None)
+            if bad is None:
+                return {**result, "config_hash": self.config_hash()}
+            exclude.add(bad)
+        return {"reachable": False, "path": [], "hops": [], "reason": "all paths blocked by vulnerability gate",
+                "config_hash": self.config_hash()}
 
     # --- introspection -------------------------------------------------
     def asset_ids(self) -> list[str]:
@@ -197,23 +238,15 @@ class DigitalTwin:
         return [aid for aid, v in self.isolated.items() if v]
 
     def live_graph(self, target: str | None = None) -> nx.DiGraph:
-        """The one shared directed graph: exactly the arcs find_path can traverse.
-        enumerate_paths (red team) and find_path must never disagree — both use this.
-        Vulnerability gating is target-relative, so callers that know the objective
-        should pass it; without a target, intermediate hops require a vulnerability."""
+        """Built from the compiler's adjacency so red team, min-cut and find_path
+        can never disagree. Vulnerability gating is applied by find_path/explain."""
+        compiled = self._compiled()
         g = nx.DiGraph()
-        for u, v, data in self.graph.edges(data=True):
-            if not (data.get("traversable") and self.dir_active.get((u, v), False)):
-                continue
-            if target is None:
-                if not (self.vulns.get(v) or any(i["compromised"] for i in self.identities.values())):
-                    continue
-            elif not self.hop_allowed(v, target):
-                continue
-            g.add_edge(u, v)
-        for aid in self.assets_status_isolated():
-            if aid in g:
-                g.remove_node(aid)
+        for a, nbs in compiled.adj.items():
+            for b in nbs:
+                up, _why = compiled.link_up(a, b)
+                if up:
+                    g.add_edge(a, b)
         return g
 
     def to_dict(self) -> dict:
@@ -304,25 +337,8 @@ class DigitalTwin:
     def find_path(self, src: str, dst: str) -> list[str] | None:
         if src not in self.graph or dst not in self.graph:
             return None
-        if self.isolated[src] or self.isolated[dst] or src in self.quarantined or dst in self.quarantined:
-            return None
-        q = deque([[src]]); seen = {src}
-        while q:
-            path = q.popleft()
-            node = path[-1]
-            if node == dst:
-                return path
-            for nb in self.graph.successors(node):
-                if not self.dir_active.get((node, nb), False):
-                    continue
-                if not self.graph[node][nb].get("traversable", False):
-                    continue
-                if not self.hop_allowed(nb, dst):
-                    continue
-                if nb in seen or self.isolated[nb] or self.service_disabled[nb] or nb in self.quarantined:
-                    continue
-                seen.add(nb); q.append(path + [nb])
-        return None
+        result = self.explain_path(src, dst)
+        return result["path"] if result["reachable"] else None
 
     def legitimate_disrupted(self, baseline: "DigitalTwin") -> int:
         disrupted = 0

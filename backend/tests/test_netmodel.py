@@ -70,6 +70,27 @@ def test_patch_removes_weakness_traversal_and_session_allows():
     assert compile_twin(configs, cables, cats).explain("a", "b")["reachable"]
 
 
+def test_f1_ingress_acl_removes_and_restores_scenario_path():
+    from app.simulation.twin import DigitalTwin
+
+    t = DigitalTwin()
+    assert t.find_path("employee-workstation", "file-server") is not None
+    cfg = t.device_configs["file-server"]
+    direct = next(i for i in cfg["interfaces"] if i.get("peer") == "employee-workstation")
+    direct["acl_in"] = "IN1"
+    cfg["acls"] = [{"name": "IN1", "entries": [
+        {"seq": 10, "action": "deny", "proto": "ip", "src": "any", "dst": "any", "dst_port": None, "log": True}]}]
+    path = t.find_path("employee-workstation", "file-server")
+    assert path != ["employee-workstation", "file-server"], "ingress ACL must remove the direct scenario path"
+    for i in cfg["interfaces"]:  # bind on every ingress interface of the target: no reroute remains
+        i["acl_in"] = "IN1"
+    assert t.find_path("employee-workstation", "file-server") is None
+    for i in cfg["interfaces"]:
+        i["acl_in"] = None
+    cfg["acls"] = []
+    assert t.find_path("employee-workstation", "file-server") is not None, "removing the ACL must restore the path"
+
+
 def test_determinism_hash():
     configs, cables, _ = base()
     assert content_hash(configs, cables) == content_hash(configs, cables)

@@ -61,8 +61,10 @@ class CompiledTwin:
         self.hash = content_hash(configs, cables)
         self.adj: dict[str, list[str]] = {k: [] for k in configs}
         for c in cables:
-            self.adj[c["a"]["device"]].append(c["b"]["device"])
-            self.adj[c["b"]["device"]].append(c["a"]["device"])
+            pairs = c["pairs"] if c.get("pairs") is not None else [(c["a"]["device"], c["b"]["device"]), (c["b"]["device"], c["a"]["device"])]
+            for a, b in pairs:
+                if b not in self.adj[a]:
+                    self.adj[a].append(b)
 
     def link_up(self, a: str, b: str) -> tuple[bool, str]:
         ca, cb = self.configs.get(a), self.configs.get(b)
