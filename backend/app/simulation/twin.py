@@ -163,6 +163,13 @@ class DigitalTwin:
             configs[aid] = cfg.model_dump()
         return configs
 
+    def stage_diff(self, asset_id: str, diff: dict) -> None:
+        """Pending diffs are an append-only list per device — never overwritten."""
+        self.pending_diffs.setdefault(asset_id, [])
+        if isinstance(self.pending_diffs[asset_id], dict):  # legacy single-diff shape
+            self.pending_diffs[asset_id] = [self.pending_diffs[asset_id]]
+        self.pending_diffs[asset_id].append(diff)
+
     def config_hash(self) -> str:
         from app.netmodel.compiler import content_hash
         from app.netmodel.config import DeviceConfig

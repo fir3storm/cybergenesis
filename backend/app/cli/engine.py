@@ -67,6 +67,39 @@ def parse_config_text(dialect: str, text: str) -> dict:
     return cfg
 
 
+def parse_acl_command(command: str) -> dict | None:
+    """Typed ACL grammar: access-list NAME [seq N] deny|permit proto src dst [eq port]
+    (and dialect spellings: 'acl NAME ...', FortiOS 'set action deny', PAN-OS 'set rulebase ... action deny')."""
+    low = command.strip().lower()
+    tokens = low.replace(",", " ").split()
+    action = next((t for t in tokens if t in ("deny", "permit", "allow", "drop")), None)
+    if not action:
+        return None
+    action = "deny" if action in ("deny", "drop") else "permit"
+    name = "CYBERGENESIS"
+    seq = 10
+    if "seq" in tokens:
+        try:
+            seq = int(tokens[tokens.index("seq") + 1])
+        except (ValueError, IndexError):
+            pass
+    if tokens and tokens[0] in ("access-list", "acl") and len(tokens) > 1:
+        name = tokens[1].upper()
+    protos = ("tcp", "udp", "icmp", "ip", "any")
+    proto = next((t for t in tokens if t in protos), "ip")
+    rest = [t for t in tokens if t not in ("access-list", "acl", name.lower(), "seq", str(seq), action, proto)]
+    src = rest[0] if rest else "any"
+    dst = rest[1] if len(rest) > 1 else "any"
+    port = None
+    if "eq" in tokens:
+        try:
+            port = int(tokens[tokens.index("eq") + 1])
+        except (ValueError, IndexError):
+            pass
+    entry = {"seq": seq, "action": action, "proto": proto, "src": src, "dst": dst, "dst_port": port, "log": True}
+    return {"ops": [{"op": "add_acl_entry", "value": {"name": name, "entry": entry}}]}
+
+
 def parse_command(dialect: str, cfg: dict, command: str) -> tuple[str, dict | None]:
     """Returns (output, staged_diff_or_None). Abbreviations: unique prefixes expanded by callers' help."""
     cmd = command.strip()
@@ -90,9 +123,18 @@ def parse_command(dialect: str, cfg: dict, command: str) -> tuple[str, dict | No
     if low.startswith(("show version", "get system status", "show system info")):
         return f"{asset} dialect={dialect} (emulated, synthetic only)", None
     # config commands -> staged diffs
-    if "deny" in low and ("access-list" in low or "access_list" in low or low.startswith("acl ")):
-        diff = {"ops": [{"op": "add_acl_deny", "value": {"command": cmd}}]}
-        return "% ACL deny staged as pending ConfigDiff (commit from Device Manager > Pending Changes)", diff
+    if low.startswith(("access-list", "acl ")) or ("deny" in low and "access" in low):
+        diff = parse_acl_command(cmd)
+        if diff:
+            e = diff["ops"][0]["value"]["entry"]
+            return (f"% ACL {diff['ops'][0]['value']['name']} seq {e['seq']} {e['action']} staged as typed ConfigDiff "
+                    f"(bind it with: ip access-group {diff['ops'][0]['value']['name']} in|out)"), diff
+    if low.startswith("ip access-group"):
+        parts = low.split()
+        if len(parts) >= 4:
+            diff = {"ops": [{"op": "bind_acl", "value": {"name": parts[2].upper(), "direction": parts[3],
+                                                         "interface": "current"}}]}
+            return f"% ACL {parts[2].upper()} bind ({parts[3]}) staged as pending ConfigDiff", diff
     if low.startswith(("no telnet", "harden", "no transport input telnet")):
         diff = {"ops": [{"op": "action", "value": {"action_type": "harden_mgmt", "params": {}}}]}
         return "% harden_mgmt staged as pending ConfigDiff", diff
@@ -131,7 +173,11 @@ def execute(twin, asset_id: str, command: str, user: str = "admin") -> dict:
     output, diff = parse_command(dialect, cfg, command)
     session["history"].append(command)
     if diff:
-        twin.pending_diffs[asset_id] = diff
+        # bind ops target the interface selected in this session (default eth0 until Phase F5 modes)
+        for op in diff.get("ops", []):
+            if op.get("op") == "bind_acl" and op["value"].get("interface") == "current":
+                op["value"]["interface"] = session.get("interface", "eth0")
+        twin.stage_diff(asset_id, diff)
     return {"output": output, "dialect": dialect, "diff": diff, "history": session["history"][-20:]}
 
 

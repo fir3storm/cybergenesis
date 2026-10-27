@@ -59,6 +59,47 @@ def test_verified_commit_rejects_reopening():
     client.post("/api/twin/reset")
 
 
+def test_f3_typed_acl_parse_and_bind():
+    from app.cli.engine import parse_acl_command
+
+    diff = parse_acl_command("access-list EDGE seq 20 deny tcp any any eq 445")
+    entry = diff["ops"][0]["value"]["entry"]
+    assert entry == {"seq": 20, "action": "deny", "proto": "tcp", "src": "any", "dst": "any", "dst_port": 445, "log": True}
+    twin = orchestrator.TWIN
+    out = execute(twin, "employee-workstation", "access-list EDGE seq 20 deny tcp any any eq 445")
+    assert out["diff"]["ops"][0]["op"] == "add_acl_entry"
+    out = execute(twin, "employee-workstation", "ip access-group EDGE in")
+    assert out["diff"]["ops"][0]["op"] == "bind_acl"
+    twin.pending_diffs.pop("employee-workstation", None)
+
+
+def test_f3_pending_appends_and_rollback_exact():
+    client.post("/api/twin/reset")
+    d1 = {"ops": [{"op": "set", "path": "hostname", "value": "WS-TEST-01"}]}
+    d2 = {"ops": [{"op": "set", "path": "mgmt.ssh", "value": True}]}
+    client.post("/api/twin/devices/employee-workstation/config/diff", json={"diff": d1})
+    client.post("/api/twin/devices/employee-workstation/config/diff", json={"diff": d2})
+    pending = client.get("/api/twin/devices/employee-workstation/config/pending").json()
+    assert pending["pending_count"] == 2
+    r = client.post("/api/twin/devices/employee-workstation/config/commit")
+    assert r.status_code == 200, r.text
+    assert client.get("/api/twin/devices/employee-workstation/config").json()["config"]["hostname"] == "WS-TEST-01"
+    rb = client.post("/api/twin/devices/employee-workstation/config/rollback/0")
+    assert rb.status_code == 200
+    assert client.get("/api/twin/devices/employee-workstation/config").json()["config"]["hostname"] != "WS-TEST-01"
+    client.post("/api/twin/reset")
+
+
+def test_f3_set_isolated_on_domain_controller_rejected_403():
+    client.post("/api/twin/reset")
+    client.post("/api/twin/devices/identity-provider/config/diff",
+                json={"diff": {"ops": [{"op": "set", "path": "isolated", "value": True}]}})
+    r = client.post("/api/twin/devices/identity-provider/config/commit")
+    assert r.status_code == 403, r.text
+    assert "rejected" in r.text
+    client.post("/api/twin/reset")
+
+
 def test_audit_and_explain_endpoints():
     assert client.post("/api/audit/run").status_code == 200
     r = client.post("/api/config/explain", json={"text": "line vty 0 4 transport input telnet"})

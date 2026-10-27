@@ -500,15 +500,19 @@ def stage_device_diff(asset_id: str, body: StageDiffRequest, db: Session = Depen
     twin = orchestrator.TWIN
     if asset_id not in twin.device_configs:
         raise HTTPException(404, "device not in twin")
-    twin.pending_diffs[asset_id] = body.diff
+    twin.stage_diff(asset_id, body.diff)  # append-only
     row = models.ConfigCommit(device_id=asset_id, status="pending", diff=body.diff)
     db.add(row); db.commit(); db.refresh(row)
-    return {"staged": True, "commit_id": row.id, "pending": body.diff}
+    return {"staged": True, "commit_id": row.id, "pending_count": len(twin.pending_diffs[asset_id]),
+            "pending": twin.pending_diffs[asset_id]}
 
 
 @app.get("/api/twin/devices/{asset_id}/config/pending")
 def get_pending_diff(asset_id: str):
-    return {"asset_id": asset_id, "pending": orchestrator.TWIN.pending_diffs.get(asset_id)}
+    pending = orchestrator.TWIN.pending_diffs.get(asset_id, [])
+    if isinstance(pending, dict):  # legacy shape
+        pending = [pending]
+    return {"asset_id": asset_id, "pending": pending, "pending_count": len(pending)}
 
 
 @app.post("/api/twin/devices/{asset_id}/config/preview")
@@ -529,11 +533,60 @@ def preview_device_diff(asset_id: str, body: StageDiffRequest):
     return {"changes": changes, "config_hash_after": clone.config_hash()}
 
 
+KNOWN_SET_PATHS = {"isolated", "weaknesses", "quarantine_vlan", "hostname"}
+KNOWN_SET_PREFIXES = ("interfaces.", "mgmt.", "patches.", "services.", "users.")
+
+
+def _op_semantics(op: dict) -> tuple[str, str] | None:
+    """Map every diff op to a semantic action BEFORE policy evaluation. None = unknown."""
+    kind = op.get("op")
+    if kind == "action":
+        return (op["value"]["action_type"], "direct allowlisted action")
+    if kind in ("add_acl_entry", "bind_acl", "add_acl_deny"):
+        return ("block_connection", "ACL change evaluated as a flow-blocking action")
+    if kind == "set":
+        path = op.get("path", "")
+        if path == "isolated":
+            return ("isolate_asset", "set isolated maps to isolate_asset") if op.get("value") else ("restore_connectivity", "clearing isolated maps to restore")
+        if path == "weaknesses" or path.startswith("patches."):
+            return ("apply_patch", "weakness/patch change maps to apply_patch")
+        if path.startswith("interfaces.") and path.endswith(".enabled"):
+            return ("disable_service", "interface shutdown maps to disable_service") if not op.get("value") else ("restore_connectivity", "interface enable")
+        if path.startswith("mgmt."):
+            return ("harden_mgmt", "management-plane change maps to harden_mgmt")
+        if path in KNOWN_SET_PATHS or path.startswith(KNOWN_SET_PREFIXES):
+            return ("apply_patch", "benign config field")
+        return None
+    return None
+
+
+def _validate_diff_ops(twin, asset_id: str, diff: dict) -> list[str]:
+    reasons: list[str] = []
+    for op in diff.get("ops", []):
+        sem = _op_semantics(op)
+        if sem is None:
+            reasons.append(f"unknown config path/op: {op.get('op')} {op.get('path', '')}".strip())
+            continue
+        action_type, _why = sem
+        peer = next(iter(twin.graph.successors(asset_id)), asset_id) if asset_id in twin.graph else asset_id
+        params = {"source": asset_id, "target": peer} if action_type == "block_connection" else {}
+        d = policy_engine.evaluate(action_type, asset_id, params, twin)
+        if not d.approved:
+            reasons.append(f"{op.get('op')} ({action_type}): {'; '.join(d.reasons)}")
+    return reasons
+
+
 def _apply_config_diff(twin, asset_id: str, diff: dict) -> None:
+    import copy as _copy
+
+    versions = twin.config_versions.setdefault(asset_id, [])
+    if not versions:  # version 0 = untouched baseline, saved on first touch
+        versions.append({"version": 0, "config": _copy.deepcopy(twin.device_configs[asset_id])})
     cfg = twin.device_configs[asset_id]
     for op in diff.get("ops", []):
         if op.get("op") == "action":
             twin.apply_action(op["value"]["action_type"], op["value"].get("asset_id", asset_id), op["value"].get("params", {}))
+            cfg = twin.device_configs[asset_id]
         elif op.get("op") == "set":
             parts = op["path"].split(".")
             node = cfg
@@ -541,34 +594,61 @@ def _apply_config_diff(twin, asset_id: str, diff: dict) -> None:
                 node = node.setdefault(p, {}) if isinstance(node, dict) else node[int(p)]
             if isinstance(node, dict):
                 node[parts[-1]] = op.get("value")
-            # keep twin graph state in sync for the fields the engine reads
+            elif isinstance(node, list):
+                node[int(parts[-1])] = op.get("value")
+            # resync the twin flags the compiler reads
             if op["path"] == "isolated":
                 twin.isolated[asset_id] = bool(op.get("value"))
             if op["path"] == "weaknesses":
                 twin.vulns[asset_id] = list(op.get("value") or [])
-        elif op.get("op") == "add_acl_deny":
+            if op["path"] == "quarantine_vlan":
+                (twin.quarantined.add if op.get("value") else twin.quarantined.discard)(asset_id)
+        elif op.get("op") == "add_acl_entry":
+            v = op["value"]
+            acl = next((a for a in cfg.setdefault("acls", []) if a["name"] == v["name"]), None)
+            if acl is None:
+                acl = {"name": v["name"], "entries": []}
+                cfg["acls"].append(acl)
+            acl["entries"].append(v["entry"])
+        elif op.get("op") == "bind_acl":
+            v = op["value"]
+            iface = next((i for i in cfg.get("interfaces", []) if i["name"] == v.get("interface")), None) \
+                or (cfg["interfaces"][0] if cfg.get("interfaces") else None)
+            if iface is not None:
+                iface["acl_in" if v.get("direction") == "in" else "acl_out"] = v["name"]
+        elif op.get("op") == "add_acl_deny":  # legacy fixed rule, kept for compatibility
             cfg.setdefault("acls", []).append({"name": "CYBERGENESIS", "entries": [
                 {"seq": 10, "action": "deny", "proto": "ip", "src": "any", "dst": "any", "dst_port": None, "log": True}]})
-    twin.config_versions.setdefault(asset_id, []).append(
-        {"version": len(twin.config_versions.get(asset_id, [])) + 1, "config": cfg})
+    versions.append({"version": len(versions), "config": _copy.deepcopy(cfg)})
 
 
 @app.post("/api/twin/devices/{asset_id}/config/commit")
 async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
     twin = orchestrator.TWIN
-    diff = twin.pending_diffs.pop(asset_id, None)
-    if diff is None:
+    staged = twin.pending_diffs.pop(asset_id, None)
+    if not staged:
         raise HTTPException(409, "no pending diff for this device")
-    # policy gate: any action ops must be allowlisted
-    for op in diff.get("ops", []):
-        if op.get("op") == "action":
-            a = op["value"]
-            d = policy_engine.evaluate(a["action_type"], a.get("asset_id", asset_id), a.get("params", {}), twin)
-            if not d.approved:
-                row = models.ConfigCommit(device_id=asset_id, status="rejected", diff=diff,
-                                          verification={"approved": False, "reasons": d.reasons})
-                db.add(row); db.commit()
-                raise HTTPException(403, detail={"status": "rejected", "reasons": d.reasons})
+    diffs = staged if isinstance(staged, list) else [staged]
+    diff = {"ops": [op for d in diffs for op in d.get("ops", [])]}
+    pending_row = (db.query(models.ConfigCommit).filter_by(device_id=asset_id, status="pending")
+                   .order_by(models.ConfigCommit.created_at.desc()).first())
+
+    def _finish(status: str, verification: dict):
+        if pending_row is not None:
+            pending_row.status = status
+            pending_row.verification = verification
+            pending_row.diff = diff
+            db.commit()
+            return pending_row
+        row = models.ConfigCommit(device_id=asset_id, status=status, diff=diff, verification=verification)
+        db.add(row); db.commit()
+        return row
+
+    # policy gate: EVERY op is mapped to a semantic action and evaluated first
+    gate_reasons = _validate_diff_ops(twin, asset_id, diff)
+    if gate_reasons:
+        _finish("rejected", {"approved": False, "reasons": gate_reasons})
+        raise HTTPException(403, detail={"status": "rejected", "reasons": gate_reasons})
     # Verified Commit: replay every known campaign objective on a clone with the diff applied.
     # Reject if the change reopens a blocked path or opens a new crown-jewel path.
     clone = twin.clone()
@@ -584,15 +664,11 @@ async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
             rejected_reasons.append(
                 f"campaign {sid}: change opens {src}->{dst} via {hop.get('from')}->{hop.get('to')} ({hop.get('rule')})")
     if rejected_reasons:
-        row = models.ConfigCommit(device_id=asset_id, status="rejected", diff=diff,
-                                  verification={"approved": False, "reasons": rejected_reasons, "campaigns_checked": len(campaigns)})
-        db.add(row); db.commit()
+        _finish("rejected", {"approved": False, "reasons": rejected_reasons, "campaigns_checked": len(campaigns)})
         raise HTTPException(403, detail={"status": "rejected", "reasons": rejected_reasons})
-    _apply_config_diff(twin, asset_id, diff)  # records the version once, inside _apply_config_diff
-    row = models.ConfigCommit(device_id=asset_id, status="committed", diff=diff,
-                              verification={"config_hash": twin.config_hash(), "campaigns_checked": len(campaigns),
-                                            "all_campaigns_still_blocked_or_unchanged": True})
-    db.add(row); db.commit()
+    _apply_config_diff(twin, asset_id, diff)  # appends exactly one new version (deep-copied)
+    _finish("committed", {"config_hash": twin.config_hash(), "campaigns_checked": len(campaigns),
+                          "all_campaigns_still_blocked_or_unchanged": True})
     await _broadcast_twin_updated()
     return {"committed": True, "asset_id": asset_id, "config_hash": twin.config_hash(), "twin": twin.to_dict()}
 
@@ -609,6 +685,10 @@ async def rollback_device_config(asset_id: str, version: int):
     twin.device_configs[asset_id] = _copy.deepcopy(match["config"])
     twin.vulns[asset_id] = list(match["config"].get("weaknesses", []))
     twin.isolated[asset_id] = bool(match["config"].get("isolated", False))
+    if match["config"].get("quarantine_vlan"):
+        twin.quarantined.add(asset_id)
+    else:
+        twin.quarantined.discard(asset_id)
     await _broadcast_twin_updated()
     return {"rolled_back": True, "asset_id": asset_id, "version": version}
 

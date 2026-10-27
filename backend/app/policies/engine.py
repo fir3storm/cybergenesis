@@ -45,7 +45,7 @@ def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
 
 
 # assets that may never be isolated (would break the twin's core)
-NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor"}
+NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor", "identity-provider"}
 PATCHABLE = {"web-server", "app-server", "employee-workstation", "admin-workstation", "file-server"}
 SERVICE_DISABLEABLE = {"web-server", "app-server"}
 QUARANTINABLE = PATCHABLE | {"database", "identity-provider"}
