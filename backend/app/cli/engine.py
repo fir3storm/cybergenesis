@@ -42,6 +42,44 @@ GRAMMAR: dict[str, list[tuple[str, tuple[str, ...], str]]] = {
                    ("Disable-LocalUser", ("exec",), "disable a user (stages a diff)"), ("Get-ADUser", ("exec",), "AD users"),
                    ("ipconfig", ("exec",), "IP configuration"), ("netstat", ("exec",), "connections"), ("Get-HotFix", ("exec",), "installed patches")],
 }
+def _extend_grammar() -> None:
+    """Deepen each flagship dialect toward flagship breadth (show/config families)."""
+    ios_extra = [(f"show {x}", ("exec",), f"show {x}") for x in (
+        "ip interface brief", "vlan brief", "spanning-tree", "mac address-table", "arp", "cdp neighbors",
+        "lldp neighbors", "ip dhcp binding", "logging", "ntp status", "users", "sessions", "inventory",
+        "power inline", "environment", "bootvar", "flash", "controllers", "policy-map", "class-map",
+        "ip ospf neighbor", "ip bgp summary", "ip eigrp neighbors", "access-lists", "ip nat translations",
+        "crypto isakmp sa", "license", "version")]
+    ios_extra += [(f"ip access-group {x}", ("interface",), "bind ACL") for x in ("IN1", "EDGE", "CYBERGENESIS")]
+    ios_extra += [("switchport mode access", ("interface",), "access mode"), ("switchport access vlan", ("interface",), "set access VLAN"),
+                  ("switchport trunk allowed vlan", ("interface",), "set trunk VLANs"), ("ip address", ("interface",), "set IP"),
+                  ("no ip address", ("interface",), "remove IP"), ("speed", ("interface",), "set speed"), ("duplex", ("interface",), "set duplex")]
+    GRAMMAR["ios"] = GRAMMAR["ios"] + ios_extra
+    GRAMMAR["asa"] = GRAMMAR["asa"] + [(f"show {x}", ("exec",), f"show {x}") for x in (
+        "vpn-sessiondb", "asp drop", "conn count", "xlate", "logging", "failover", "cpu usage", "memory", "disk0:")]
+    GRAMMAR["panos"] = GRAMMAR["panos"] + [(f"show {x}", ("exec",), f"show {x}") for x in (
+        "arp all", "mac", "counter global", "dos-block-table", "url cloud status")]
+    GRAMMAR["fortios"] = GRAMMAR["fortios"] + [(f"get {x}", ("exec",), f"get {x}") for x in (
+        "system performance status", "router info routing-table all", "firewall policy", "firewall address",
+        "firewall service custom", "user local", "vpn ipsec tunnel summary", "log threatweight", "hardware nic list")]
+    GRAMMAR["fortios"] += [("config firewall policy", ("exec",), "enter policy table"), ("config user local", ("exec",), "enter users"),
+                           ("config system interface", ("exec",), "enter interfaces"), ("set action accept", ("config",), "allow"),
+                           ("set action deny", ("config",), "deny"), ("set schedule always", ("config",), "schedule")]
+    GRAMMAR["junos"] = GRAMMAR["junos"] + [(f"show {x}", ("exec",), f"show {x}") for x in (
+        "interfaces terse", "route summary", "ospf neighbor", "bgp summary", "security policies", "security nat source summary",
+        "chassis alarms", "system users", "configuration | display set", "firewall", "arp", "lldp neighbors")]
+    GRAMMAR["panos"] = GRAMMAR["panos"] + [(f"show {x}", ("exec",), f"show {x}") for x in (
+        "system info", "routing route", "session all", "nat-policy rules", "user user-ids", "jobs all", "wildfire status")]
+    GRAMMAR["routeros"] = GRAMMAR["routeros"] + [(f"/{x} print", ("exec",), f"{x}") for x in (
+        "interface bridge", "ip dhcp-server lease", "ip dns", "system resource", "log", "user", "radius")]
+    GRAMMAR["bash"] = GRAMMAR["bash"] + [(c, ("exec",), c) for c in (
+        "df -h", "free -m", "uptime", "whoami", "id", "env", "history", "tail", "grep", "find", "chmod", "chown", "useradd", "passwd")]
+    GRAMMAR["powershell"] = GRAMMAR["powershell"] + [(c, ("exec",), c) for c in (
+        "Get-ComputerInfo", "Get-NetIPAddress", "Get-NetRoute", "Get-DnsClient", "Get-LocalGroup", "Get-SmbShare",
+        "Get-BitLockerVolume", "Get-MpComputerStatus", "Test-Connection", "Resolve-DnsName", "Get-EventLog")]
+
+
+_extend_grammar()
 GRAMMAR["eos"] = GRAMMAR["ios"]
 GRAMMAR["aoscx"] = GRAMMAR["ios"]
 GRAMMAR["zsh"] = GRAMMAR["bash"]
@@ -191,6 +229,8 @@ def parse_command(dialect: str, cfg: dict, command: str) -> tuple[str, dict | No
         return "\n".join(rows) or "no ACLs configured", None
     if low.startswith(("show version", "get system status", "show system info")):
         return f"{asset} dialect={dialect} (emulated, synthetic only)", None
+    if low.startswith(("show ", "get ", "display ")):
+        return f"% {cmd}: synthetic {dialect} output rendered from device config ({asset}, posture state only)", None
     # config commands -> staged diffs
     if low.startswith(("access-list", "acl ")) or ("deny" in low and "access" in low):
         diff = parse_acl_command(cmd)

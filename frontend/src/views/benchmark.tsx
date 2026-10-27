@@ -2,6 +2,29 @@ import { useEffect, useState } from 'react'
 import { api } from '../services/api'
 import { useStore } from '../stores/store'
 import type { Asset, RunResult, Twin, View } from '../types'
+function BenchmarkRunner() {
+  const [status, setStatus] = useState('')
+  const run = () => {
+    setStatus('starting…')
+    api.benchmarkRun(20, 7).then(async (r) => {
+      for (let i = 0; i < 160; i++) {
+        const st = await api.benchmarkStatus(r.run_id)
+        setStatus(`${st.state} ${st.done}/${st.total} pairs`)
+        if (st.state === 'COMPLETED') { setStatus('Benchmark complete — table above refreshes on next /api/benchmark read.'); break }
+        if (st.state === 'FAILED') break
+        await new Promise((res) => setTimeout(res, 900))
+      }
+    }).catch((e) => setStatus(`failed: ${(e as Error).message}`))
+  }
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <button onClick={run} className="rounded bg-cyan-600 px-3 py-2 text-xs font-bold">Run fresh benchmark (n=20)</button>
+      <span className="text-xs text-slate-400">{status}</span>
+      <a href="http://localhost:8000/api/benchmark" target="_blank" rel="noreferrer" className="text-xs text-cyan-300 underline">raw JSON</a>
+    </div>
+  )
+}
+
 export function BenchmarkView() {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.benchmark>> | null>(null)
   const [curve, setCurve] = useState<Awaited<ReturnType<typeof api.learningCurve>> | null>(null)
@@ -12,6 +35,7 @@ export function BenchmarkView() {
     <main className="p-6 max-w-4xl">
       <h1 className="text-2xl font-black text-cyan-200">Benchmark</h1>
       <p className="mt-1 text-sm text-slate-400">50 seeded random twin+scenario pairs, three defenders on identical attacked twins. Reproduce with <span className="font-mono">python scripts/benchmark.py</span>.</p>
+      <BenchmarkRunner />
       {!data && <p className="mt-3 text-slate-400">Loading…</p>}
       {data && !data.available && <p className="mt-3 text-amber-300">{data.detail}</p>}
       {data?.summary && (

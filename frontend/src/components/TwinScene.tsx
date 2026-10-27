@@ -259,6 +259,35 @@ function AttackFlow({ chain, positions, stopPoint }: FlowProps) {
   )
 }
 
+/** Ghost burst: repeated shockwave where the replayed attack hits the cut and stops. */
+function BurstAtCut({ point }: { point: THREE.Vector3 }) {
+  const ring = useRef<THREE.Mesh>(null)
+  const core = useRef<THREE.Mesh>(null)
+  useFrame(({ clock }) => {
+    if (REDUCED_MOTION) return
+    const t = clock.elapsedTime % 1.6
+    if (ring.current) {
+      ring.current.scale.setScalar(0.4 + t * 1.5)
+      const m = ring.current.material as THREE.MeshBasicMaterial
+      m.opacity = Math.max(0, 0.85 - t / 1.6)
+    }
+    if (core.current) core.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 7) * 0.25)
+  })
+  return (
+    <group position={point}>
+      <mesh ref={core}>
+        <sphereGeometry args={[0.14, 14, 14]} />
+        <meshBasicMaterial color="#fbbf24" toneMapped={false} />
+      </mesh>
+      <mesh ref={ring} rotation={[Math.PI / 2.2, 0.4, 0]}>
+        <torusGeometry args={[0.42, 0.03, 8, 40]} />
+        <meshBasicMaterial color="#f59e0b" transparent opacity={0.8} toneMapped={false} />
+      </mesh>
+      <pointLight color="#f59e0b" intensity={9} distance={4.5} decay={1.8} />
+    </group>
+  )
+}
+
 /* ---------------- camera ---------------- */
 
 function CameraRig({ positions, resetNonce, zoomCmd, chain }: {
@@ -452,6 +481,7 @@ export default function TwinScene({ twin }: { twin: Twin }) {
               return <EdgeTube key={key} s={s} t={t} attack={attack} dimmed={mapFocus && !attack} />
             })}
             {displayChain.length >= 2 && <AttackFlow chain={displayChain} positions={positions} stopPoint={stopPoint} />}
+            {stopPoint && <BurstAtCut point={stopPoint} />}
             {twin.assets.map((a) => (
               <Node key={a.id} a={a} dimmed={mapFocus && !pathNodes.has(a.id)}
                 protectedTarget={targetProtected && a.id === chain[chain.length - 1]} links={linksOf(a)} />

@@ -36,6 +36,18 @@ def test_context_help_completion_and_errors():
     assert out["output"]  # vendor-style error marker, dialect-specific
 
 
+def test_grammar_depth_and_golden_commands():
+    from app.cli.engine import grammar_for
+
+    for dialect in ("ios", "eos", "aoscx", "asa", "junos", "fortios", "panos", "routeros", "bash", "powershell"):
+        entries = grammar_for(dialect)
+        assert len(entries) >= 14, (dialect, len(entries))
+    twin = orchestrator.TWIN
+    for cmd in ("show vlan brief", "show ip ospf neighbor", "show mac address-table", "show logging"):
+        out = execute(twin, "employee-workstation", cmd)
+        assert out["output"], cmd
+
+
 def test_os_endpoint_and_kill_removes_process():
     client.post("/api/twin/reset")
     twin = orchestrator.TWIN
