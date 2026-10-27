@@ -23,6 +23,7 @@ class MetaModelClient:
         self.key = settings.model_api_key
         self._usage: dict[str, list[dict]] = {}
         self._lock = asyncio.Lock()
+        self._semaphore = asyncio.Semaphore(4)  # max 4 concurrent Meta calls across all agents/runs
 
     async def _record(self, rec: dict) -> None:
         async with self._lock:
@@ -79,7 +80,7 @@ class MetaModelClient:
         for attempt in range(settings.model_max_retries + 1):
             started = time.time()
             try:
-                async with httpx.AsyncClient(timeout=settings.model_timeout_seconds) as c:
+                async with self._semaphore, httpx.AsyncClient(timeout=settings.model_timeout_seconds) as c:
                     r = await c.post(f"{self.base}/chat/completions", headers=headers, json=body)
                 latency = int((time.time() - started) * 1000)
                 if r.status_code >= 400:

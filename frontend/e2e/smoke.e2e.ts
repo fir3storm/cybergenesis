@@ -19,6 +19,14 @@ test('welcome loads and demo completes with verification', async ({ page }) => {
   await expect(page.getByText(/^(PASS|FAIL)$/).first()).toBeVisible({ timeout: 60_000 })
 })
 
+test('agents page shows conversation map and commander plan', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: /INSPECT/ }).hover()
+  await page.getByRole('menuitem', { name: /Agents/ }).click()
+  await expect(page.getByText('Agent Conversation Map')).toBeVisible()
+  await expect(page.getByText(/registered agents/)).toBeVisible()
+})
+
 test('playbook text-to-scenario input and battle view exist', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: /BUILD/ }).hover()
