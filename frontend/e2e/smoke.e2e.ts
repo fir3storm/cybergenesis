@@ -15,6 +15,6 @@ test('welcome loads and demo completes with verification', async ({ page }) => {
     if (await approve.isVisible().catch(() => false)) await approve.click()
     await page.waitForTimeout(1000)
   }
-  await page.getByRole('button', { name: 'Verification Lab' }).click()
+  await page.getByRole('button', { name: 'Verification Lab' }).first().click()
   await expect(page.getByText(/^(PASS|FAIL)$/).first()).toBeVisible({ timeout: 60_000 })
 })
