@@ -1,6 +1,12 @@
 import os
 import sys
+import tempfile
+from pathlib import Path
 
+# Test isolation: a throwaway sqlite DB in a temp dir, set BEFORE any app
+# import reads settings — tests must never touch the demo DB (cybergenesis.db).
+_TEST_DB_PATH = Path(tempfile.mkdtemp(prefix="cybergenesis-tests-")) / "cybergenesis-test.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH.as_posix()}"
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["OFFLINE_MODE"] = "true"  # hermetic tests: never call the live provider by default
 os.environ["HUMAN_APPROVAL_ENABLED"] = "false"  # approval gate is exercised in its own test with a resolver

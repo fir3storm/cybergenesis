@@ -80,7 +80,8 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
                      + ". Live asset states: " + ", ".join(f"{a['id']}={a['status'].upper()}" for a in d["assets"])
                      + f". Attack path source->target: {twin.find_path(scenario['source_asset'], scenario['target_asset'])}.")
     try:
-        data, _ = await meta_client.chat_json(INVESTIGATOR_SYSTEM, evidence, run_id)
+        with meta_client.use_budget_tier("backbone"):
+            data, _ = await meta_client.chat_json(INVESTIGATOR_SYSTEM, evidence, run_id)
         raw_confirmed = data.get("confirmed", [])
         items: list[dict] = []
         strings: list[str] = []
@@ -156,7 +157,8 @@ async def final_choice(candidates: list[dict], scenario: dict, run_id: str) -> d
         f"path_blocked={c.get('path_blocked')} disrupted={c['disrupted']} detail={c['detail']}"
         for c in feasible)
     try:
-        data, _ = await meta_client.chat_json(FINAL_CHOICE_SYSTEM, f"Invariant: {scenario['invariant']}\nSimulated candidates:\n{listing}", run_id)
+        with meta_client.use_budget_tier("backbone"):
+            data, _ = await meta_client.chat_json(FINAL_CHOICE_SYSTEM, f"Invariant: {scenario['invariant']}\nSimulated candidates:\n{listing}", run_id)
         chosen = next((c for c in feasible if c["label"] == data.get("chosen_label")), None)
         if chosen is not None:
             return {"chosen_label": chosen["label"], "justification": str(data.get("justification", ""))[:300],
@@ -183,7 +185,8 @@ async def criticize_defense(scenario: dict, defense_label: str, alternate_paths:
                 "assessment": "no validated bypass path remains after this defense"}
     try:
         listing = "\n".join(" -> ".join(p) for p in alternate_paths)
-        data, _ = await meta_client.chat_json(CRITIC_SYSTEM, f"Defense: {defense_label}. Invariant: {scenario['invariant']}\nRemaining validated paths:\n{listing}", run_id)
+        with meta_client.use_budget_tier("backbone"):
+            data, _ = await meta_client.chat_json(CRITIC_SYSTEM, f"Defense: {defense_label}. Invariant: {scenario['invariant']}\nRemaining validated paths:\n{listing}", run_id)
         bypass_str = data.get("bypass")
         path = next((p for p in alternate_paths if " -> ".join(p) == bypass_str), alternate_paths[0])
         return {"bypass": path, "suggested_campaign": _campaign_from_path(path), "mode": "live",
@@ -214,7 +217,8 @@ async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, 
 
         feedback = ""
         for _attempt in range(2):
-            data, _ = await meta_client.chat_json(STRATEGIST_SYSTEM, context + feedback, run_id)
+            with meta_client.use_budget_tier("backbone"):
+                data, _ = await meta_client.chat_json(STRATEGIST_SYSTEM, context + feedback, run_id)
             p = DefenseProposal(**{**data, "model": meta_client.model, "mode": "live", "evidence_refs": hyp.evidence_refs})
             if not p.actions:
                 raise ValueError("empty actions")

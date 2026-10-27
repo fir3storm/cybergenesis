@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     approval_timeout_seconds: int = 120
     auto_approve: bool = False
     max_tokens_per_run: int = 20000
+    run_timeout_s: float = 180
 
 
 settings = Settings()

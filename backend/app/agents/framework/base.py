@@ -64,15 +64,19 @@ class Agent(Generic[Out]):
             before_in = sum(u["prompt_tokens"] for u in snap)
             before_out = sum(u["completion_tokens"] for u in snap)
         mode, reason, output = "offline", None, None
+        tier = meta_client.tier_for_agent(spec.id)
         try:
             if spec.engine == "deterministic":
                 output = await asyncio.wait_for(self.offline(ctx, inp_obj), timeout=spec.timeout_s)
             elif not meta_client.configured:
                 raise RuntimeError("Meta provider not configured (offline mode)")
-            elif meta_client.tokens_used(ctx.run_id) >= settings.max_tokens_per_run:
-                raise RuntimeError(f"per-run token budget exhausted ({settings.max_tokens_per_run})")
+            elif meta_client.budget_exhausted(ctx.run_id, tier):
+                raise RuntimeError(
+                    f"token budget exceeded for run (tier={tier}, limit {meta_client.budget_limit(tier)} "
+                    f"of max_tokens_per_run={settings.max_tokens_per_run}); falling back offline")
             else:
-                output = await asyncio.wait_for(self.live(ctx, inp_obj), timeout=spec.timeout_s)
+                with meta_client.use_budget_tier(tier):
+                    output = await asyncio.wait_for(self.live(ctx, inp_obj), timeout=spec.timeout_s)
                 mode = "live"
         except Exception as e:  # noqa: BLE001 - every failure becomes a labelled offline fallback
             reason = f"{type(e).__name__}: {e}"[:220]

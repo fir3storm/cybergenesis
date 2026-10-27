@@ -57,8 +57,9 @@ class IncidentCommanderAgent(Agent):
         super().__init__(_spec("incident_commander"))
 
     async def live(self, ctx: AgentContext, inp: io.TextIn):
-        data, _ = await meta_client.chat_json(COMMANDER_SYSTEM,
-                                              f"Registry agents: {sorted(REGISTRY)}. Scenario context: {inp.text}", ctx.run_id)
+        with meta_client.use_budget_tier("advisory"):
+            data, _ = await meta_client.chat_json(COMMANDER_SYSTEM,
+                                                  f"Registry agents: {sorted(REGISTRY)}. Scenario context: {inp.text}", ctx.run_id)
         plan = CommanderPlan(**data)
         reasons = validate_plan(plan, set(REGISTRY))
         if reasons:

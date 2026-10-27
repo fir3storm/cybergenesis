@@ -4,12 +4,23 @@ import asyncio
 import hashlib
 import json
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 import httpx
 
 from app.core.config import settings
 
 PROMPT_VERSION = "cybergenesis-v4"
+
+# Per-call output cap (API body) and the per-run budget split: backbone agents
+# may spend the full per-run budget; advisory agents may spend only the
+# non-reserved 40%, so the 60% backbone reserve can never be drained by them.
+MAX_TOKENS_PER_CALL = 900
+ADVISORY_BUDGET_FRACTION = 0.4
+BACKBONE_AGENT_IDS = frozenset({"incident_investigator", "defense_strategist", "red_team_critic"})
+
+_budget_tier: ContextVar[str] = ContextVar("cybergenesis_budget_tier", default="advisory")
 
 
 class ProviderUnavailable(Exception):
@@ -40,11 +51,40 @@ class MetaModelClient:
     def tokens_used(self, run_id: str | None) -> int:
         return sum(u["prompt_tokens"] + u["completion_tokens"] for u in self._usage.get(run_id or "_global", []))
 
-    def _check_budget(self, run_id: str | None) -> None:
+    def budget_limit(self, tier: str | None = None) -> int:
+        tier = tier or _budget_tier.get()
+        if tier == "backbone":
+            return int(settings.max_tokens_per_run)
+        return int(settings.max_tokens_per_run * ADVISORY_BUDGET_FRACTION)
+
+    def current_budget_tier(self) -> str:
+        return _budget_tier.get()
+
+    @contextmanager
+    def use_budget_tier(self, tier: str):
+        if tier not in ("backbone", "advisory"):
+            raise ValueError(f"unknown budget tier '{tier}'")
+        token = _budget_tier.set(tier)
+        try:
+            yield self
+        finally:
+            _budget_tier.reset(token)
+
+    @staticmethod
+    def tier_for_agent(agent_id: str) -> str:
+        return "backbone" if agent_id in BACKBONE_AGENT_IDS else "advisory"
+
+    def budget_exhausted(self, run_id: str | None, tier: str | None = None) -> bool:
+        return self.tokens_used(run_id) >= self.budget_limit(tier)
+
+    def _check_budget(self, run_id: str | None, tier: str | None = None) -> None:
+        tier = tier or _budget_tier.get()
         used = self.tokens_used(run_id)
-        if used >= settings.max_tokens_per_run:
+        limit = self.budget_limit(tier)
+        if used >= limit:
             raise ProviderUnavailable(
-                f"token budget exceeded for run ({used} >= {settings.max_tokens_per_run}); falling back offline")
+                f"token budget exceeded for run (tier={tier}, used {used} >= limit {limit} "
+                f"of max_tokens_per_run={settings.max_tokens_per_run}); falling back offline")
 
     @property
     def configured(self) -> bool:
@@ -68,13 +108,20 @@ class MetaModelClient:
             return {"configured": True, "reachable": False, "model": self.model,
                     "mode": "offline", "detail": f"provider unreachable: {type(e).__name__}"}
 
-    async def chat_json(self, system: str, user: str, run_id: str | None = None) -> tuple[dict, dict]:
-        """Returns (parsed_json, usage_dict). Raises ProviderUnavailable on any failure."""
+    async def chat_json(self, system: str, user: str, run_id: str | None = None,
+                        tier: str | None = None) -> tuple[dict, dict]:
+        """Returns (parsed_json, usage_dict). Raises ProviderUnavailable on any failure.
+
+        ``tier`` is "backbone" (full per-run budget) or "advisory" (only the
+        non-reserved 40%); when omitted, the ambient ``use_budget_tier``
+        context applies, defaulting to advisory.
+        """
         if not self.configured:
             raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
-        self._check_budget(run_id)
+        self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.2, "response_format": {"type": "json_object"},
+                "max_tokens": MAX_TOKENS_PER_CALL,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         last_err = ""
         for attempt in range(settings.model_max_retries + 1):
@@ -106,13 +153,15 @@ class MetaModelClient:
         raise ProviderUnavailable(last_err)
 
 
-    async def chat_vision_json(self, prompt: str, image_data_url: str, run_id: str | None = None) -> tuple[dict, dict]:
+    async def chat_vision_json(self, prompt: str, image_data_url: str, run_id: str | None = None,
+                               tier: str | None = None) -> tuple[dict, dict]:
         """Multimodal: send an image + prompt, expect a JSON object back."""
         if not self.configured:
             raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
-        self._check_budget(run_id)
+        self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
+                "max_tokens": MAX_TOKENS_PER_CALL,
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": image_data_url}},

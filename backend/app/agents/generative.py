@@ -23,7 +23,8 @@ async def author_scenario(prompt_text: str, name: str, asset_ids: list[str]) -> 
         "source/target and every step asset must be from the asset list. Synthetic simulation only."
     )
     try:
-        data, _u = await meta_client.chat_json("You write validated synthetic security scenarios. JSON only.", prompt)
+        with meta_client.use_budget_tier("advisory"):
+            data, _u = await meta_client.chat_json("You write validated synthetic security scenarios. JSON only.", prompt)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(503, f"Meta unavailable: {type(e).__name__}: {e}") from e
     try:
@@ -55,7 +56,8 @@ async def architect_twin(image_data_url: str, name: str) -> CreateCustomTwin:
         "Only include assets/connections actually visible in the diagram."
     )
     try:
-        data, _usage = await meta_client.chat_vision_json(prompt, image_data_url)
+        with meta_client.use_budget_tier("advisory"):
+            data, _usage = await meta_client.chat_vision_json(prompt, image_data_url)
     except ProviderUnavailable as e:
         raise HTTPException(503, f"Meta vision unavailable: {e}") from e
     # map recognised devices to catalog ids (exact device_id, else category+vendor token match)

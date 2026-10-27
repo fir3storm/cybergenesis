@@ -112,7 +112,8 @@ async def plan_campaign(twin: DigitalTwin, src: str, tgt: str, run_id: str) -> C
     feedback = ""
     for _attempt in range(2):
         try:
-            data, _ = await meta_client.chat_json(RED_TEAM_SYSTEM, context + feedback, run_id)
+            with meta_client.use_budget_tier("advisory"):
+                data, _ = await meta_client.chat_json(RED_TEAM_SYSTEM, context + feedback, run_id)
             plan = CampaignPlan(**{**data, "mode": "live"})
             plan.path = [s.asset for s in plan.steps]
             verdict = evaluate_campaign(plan.model_dump(), twin)
