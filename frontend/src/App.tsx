@@ -14,6 +14,12 @@ export const ASSET_TYPE_ICON: Record<string, ReactNode> = {
 }
 import { ATTACK_PATHS, STATUS_COLOR } from './components/status'
 import { useOpenDevice } from './components/DeviceWindow'
+import { TwinView, Twin2D, AttackChain, MapFocusToggle, AssetPanel, SkeletonTwin } from './views/twin'
+import { CandidatesPanel, ResilienceCurve, BattlePanel } from './views/panels'
+import { ConversationMap, CommanderPlanView, STAGES } from './views/agents'
+import { BattleView } from './views/battle'
+import { BenchmarkView, ScorecardsView } from './views/benchmark'
+import { EvidenceView } from './views/evidence'
 
 const TwinScene = lazy(() => import('./components/TwinScene'))
 const TwinDesigner = lazy(() => import('./components/TwinDesigner'))
@@ -28,99 +34,13 @@ const SCENARIO_ICONS: Record<string, ReactNode> = {
 }
 import { api, WS } from './services/api'
 import { useStore } from './stores/store'
-import type { Asset, RunResult, Twin, View } from './types'
+import type { AgentMsg, Asset, RunResult, Twin, View } from './types'
 
 interface AgentSpecUI {
   id: string; name: string; desc: string; engine: string; input: string; output: string; duties: string[]
   team?: string; promptHash?: string; runs?: number; lastConfidence?: number | null
 }
 
-export interface AgentMsg { id: string; from_agent: string; to_agent: string | null; kind: string; payload: Record<string, unknown>; evidence_refs: string[]; seq: number }
-
-const KIND_COLOR: Record<string, string> = {
-  observation: '#22d3ee', hypothesis: '#a78bfa', proposal: '#38bdf8', critique: '#ef4444',
-  finding: '#f59e0b', request: '#fb923c', decision: '#34d399', report: '#2dd4bf',
-}
-
-export function ConversationMap({ messages }: { messages: AgentMsg[] }) {
-  const [scrub, setScrub] = useState<number | null>(null)
-  const [selected, setSelected] = useState<AgentMsg | null>(null)
-  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  const shown = messages.slice(0, scrub ?? messages.length)
-  const agents = [...new Set(messages.flatMap((m) => [m.from_agent, m.to_agent]).filter((x): x is string => Boolean(x)))]
-  const teams = ['command', 'blue', 'red', 'assurance']
-  const pos = new Map(agents.map((a, i) => [a, { x: 90 + (i % 5) * 150, y: 60 + Math.floor(i / 5) * 110 }]))
-  return (
-    <section className="mt-4 rounded-2xl border border-slate-800 glass-panel p-4" aria-label="Agent conversation map">
-      <div className="flex items-center justify-between">
-        <h2 className="font-bold text-cyan-200">Agent Conversation Map</h2>
-        <span className="font-mono text-[10px] text-slate-500">{shown.length}/{messages.length} messages · teams: {teams.join(' · ')}</span>
-      </div>
-      {messages.length === 0 && <p className="mt-2 text-xs text-slate-500">No blackboard messages yet — run an experiment.</p>}
-      <svg viewBox="0 0 820 260" className="mt-2 w-full" role="img" aria-label="Agent message graph">
-        {shown.map((m, i) => {
-          const from = pos.get(m.from_agent)
-          const to = m.to_agent ? pos.get(m.to_agent) : undefined
-          if (!from) return null
-          const targets = to ? [to] : agents.filter((a) => a !== m.from_agent).map((a) => pos.get(a)!).filter(Boolean).slice(0, 3)
-          return targets.map((t, j) => (
-            <g key={`${m.id}-${j}`} onClick={() => setSelected(m)} style={{ cursor: 'pointer' }}>
-              <line x1={from.x} y1={from.y} x2={t.x} y2={t.y} stroke={KIND_COLOR[m.kind] ?? '#64748b'} strokeWidth={1.4} opacity={0.65}
-                strokeDasharray={reduced ? 'none' : '5 4'}>
-                {!reduced && <animate attributeName="stroke-dashoffset" from="18" to="0" dur="1.2s" repeatCount="indefinite" />}
-              </line>
-              <circle cx={(from.x + t.x) / 2} cy={(from.y + t.y) / 2} r={3.5} fill={KIND_COLOR[m.kind] ?? '#64748b'} />
-            </g>
-          ))
-        })}
-        {agents.map((a) => {
-          const p = pos.get(a)!
-          return <g key={a}><circle cx={p.x} cy={p.y} r={17} fill="#0b2237" stroke="#22d3ee" />
-            <text x={p.x} y={p.y + 30} textAnchor="middle" fill="#e2e8f0" fontSize={8.5} fontFamily="monospace">{a.replaceAll('_', ' ').slice(0, 18)}</text></g>
-        })}
-      </svg>
-      <div className="flex items-center gap-2">
-        <input type="range" min={0} max={messages.length} value={scrub ?? messages.length}
-          onChange={(e) => setScrub(Number(e.target.value))} className="flex-1" aria-label="Scrub message timeline" />
-        <span className="font-mono text-[10px] text-slate-400">{scrub ?? messages.length}/{messages.length}</span>
-      </div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {Object.entries(KIND_COLOR).map(([k, c]) => <span key={k} className="font-mono text-[9px]" style={{ color: c }}>● {k}</span>)}
-      </div>
-      {selected && (
-        <div className="mt-2 rounded bg-slate-950/80 p-2 text-xs">
-          <b className="font-mono" style={{ color: KIND_COLOR[selected.kind] }}>{selected.kind}</b> {selected.from_agent} → {selected.to_agent ?? 'broadcast'}
-          <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap text-[10px] text-slate-400">{JSON.stringify(selected.payload, null, 1)}</pre>
-          {selected.evidence_refs.length > 0 && <p className="font-mono text-[10px] text-cyan-300">evidence: {selected.evidence_refs.join(', ')}</p>}
-        </div>
-      )}
-    </section>
-  )
-}
-
-export function CommanderPlanView() {
-  const s = useStore()
-  const ev = [...s.events].reverse().find((e) => e.event_type === 'commander_plan')
-  const plan = (ev?.payload?.plan ?? []) as { step: number; agents: string[]; why: string }[]
-  const finishedSteps = new Set(s.events.filter((e) => e.event_type === 'plan_step_finished').map((e) => (e.payload?.step as number)))
-  const startedSteps = new Set(s.events.filter((e) => e.event_type === 'plan_step_started').map((e) => (e.payload?.step as number)))
-  const stageIdx = Math.max(STAGES.indexOf(s.runState), 0)
-  if (!ev) return null
-  return (
-    <section className="mt-4 rounded-2xl border border-violet-800/60 bg-violet-950/25 p-4" aria-label="Commander plan">
-      <h2 className="font-bold text-violet-200">Commander Plan (validated DAG)</h2>
-      <p className="text-[11px] text-slate-400">{ev.message}</p>
-      <ol className="mt-2 space-y-1">
-        {plan.map((p, i) => (
-          <li key={p.step} className={`flex items-center gap-2 rounded px-2 py-1.5 text-xs ${startedSteps.has(p.step) && !finishedSteps.has(p.step) ? 'bg-violet-500/25 border border-violet-400 animate-pulse' : finishedSteps.has(p.step) || i < stageIdx ? 'text-emerald-300' : 'text-slate-300'}`}>
-            <span className="font-mono">{finishedSteps.has(p.step) || i < stageIdx || s.runState === 'COMPLETED' ? '✓' : startedSteps.has(p.step) ? '▶ running' : '·'} step {p.step}</span>
-            <b>{p.agents.join(' + ')}</b><span className="text-slate-500">{p.why}</span>
-          </li>
-        ))}
-      </ol>
-    </section>
-  )
-}
 const AGENT_FALLBACK: AgentSpecUI[] = [
   { id: 'observer', name: 'Observer', desc: 'Deterministic telemetry anomaly detection', engine: 'Deterministic', input: 'SimulationEvents (telemetry)', output: 'AgentObservation', duties: ['Consume synthetic telemetry', 'Detect anomaly patterns (file bursts, auth failures, network paths)', 'Emit structured observation with confidence'] },
   { id: 'adversary_simulator', name: 'Adversary Simulator', desc: 'Typed, bounded synthetic scenario actions', engine: 'Deterministic', input: 'Scenario definition (JSON)', output: 'AttackScenarioPlan + telemetry', duties: ['Execute predefined typed attack steps only', 'Mutate twin to attacked state', 'Never generates payloads or commands'] },
@@ -137,36 +57,13 @@ const TOUR_STEPS: { view: View; title: string; text: string }[] = [
   { view: 'designer', title: '5 · Build your own', text: 'Design a twin, photograph a whiteboard to generate one, or type a what-if and let Muse Spark write the scenario. Then run the same loop on it.' },
   { view: 'benchmark', title: '6 · The numbers', text: '50 seeded networks, three defenders, one table. That is the research claim — reproducible with scripts/benchmark.py.' },
 ]
-const STAGES = ['SCENARIO_SELECTED', 'ATTACK_SIMULATING', 'TELEMETRY_COLLECTED', 'INVESTIGATING', 'DEFENSE_PROPOSED', 'POLICY_VALIDATING', 'DEFENSE_APPLYING', 'VERIFYING', 'COMPLETED']
 const DEMO_CLOCK: Record<string, string> = {
   IDLE: '0:00', SCENARIO_SELECTED: '0:20', ATTACK_SIMULATING: '0:40', TELEMETRY_COLLECTED: '0:55',
   INVESTIGATING: '1:00', DEFENSE_PROPOSED: '1:30', POLICY_VALIDATING: '1:45', DEFENSE_APPLYING: '1:55',
   VERIFYING: '2:05', COMPLETED: '2:30', FAILED: '—',
 }
 
-class SceneBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
-  static getDerivedStateFromError() { return { failed: true } }
-  render() { return this.state.failed ? this.props.fallback : this.props.children }
-}
 
-function Twin2D({ twin }: { twin: Twin }) {
-  const { selectedAsset, set } = useStore()
-  const openDevice = useOpenDevice()
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-3" role="list" aria-label="Infrastructure assets (2D view)">
-      {twin.assets.map((a) => (
-        <button key={a.id} role="listitem" onClick={() => set({ selectedAsset: a.id })}
-          onDoubleClick={() => openDevice(a.id, twin, a.name)} title="Double-click to open device window"
-          className={`text-left rounded-lg border p-3 bg-slate-900/70 ${selectedAsset === a.id ? 'border-cyan-300' : 'border-slate-700'}`}>
-          <div className="text-xs font-mono" style={{ color: STATUS_COLOR[a.status] }}>{a.status.toUpperCase()}</div>
-          <div className="text-sm font-semibold">{a.name}</div>
-          <div className="text-[11px] text-slate-400">{a.zone} · posture {(a.posture * 100).toFixed(0)}%</div>
-        </button>
-      ))}
-    </div>
-  )
-}
 
 export function NavDropdown({ group, items, active, onSelect }: {
   group: string
@@ -218,355 +115,21 @@ export function NavDropdown({ group, items, active, onSelect }: {
   )
 }
 
-export function SkeletonTwin() {
-  return (
-    <div className="grid h-full grid-cols-3 gap-3 p-4" aria-label="Loading 3D twin" role="status">
-      {Array.from({ length: 9 }, (_, i) => <div key={i} className="skeleton min-h-16" />)}
-    </div>
-  )
-}
 
-function TwinView({ twin }: { twin: Twin }) {
-  return (
-    <SceneBoundary fallback={<div><p className="p-3 text-amber-300 text-sm">3D unavailable (WebGL) — 2D fallback shown. All functions remain available.</p><Twin2D twin={twin} /></div>}>
-      <Suspense fallback={<SkeletonTwin />}>
-        <TwinScene twin={twin} />
-      </Suspense>
-    </SceneBoundary>
-  )
-}
 
 interface Candidate { label: string; origin: string; blocked: boolean; disrupted: number | null; feasible: boolean; detail: string }
 interface Round { round: number; path: string[] | null; effectiveness_pct: number; resilience_score?: number; outcome: string; red_team_mode: string | null }
 
-export function CandidatesPanel() {
-  const s = useStore()
-  const cands = (s.results?.verification?.metrics.candidates as Candidate[] | undefined) ?? []
-  const m = s.results?.verification?.metrics
-  if (!cands.length) return null
-  return (
-    <section className="rounded-xl border border-slate-800 glass-panel p-3">
-      <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">SIMULATE-BEFORE-ACTING · CANDIDATES</h2>
-      {cands.map((c, i) => (
-        <div key={i} className={`mb-1 rounded px-2 py-1.5 text-xs ${i === 0 ? 'bg-emerald-950/50 border border-emerald-800' : 'bg-slate-950/60'}`}>
-          <span className={c.blocked ? 'text-emerald-300' : 'text-red-300'}>{c.blocked ? '✓ blocks' : '✗ fails'}</span>{' '}
-          <b>{c.label}</b> <span className="text-slate-500">[{c.origin}]</span>
-          <span className="text-slate-400"> · disruption: {c.disrupted ?? '—'}</span>
-          {i === 0 && <span className="ml-1 rounded bg-emerald-600 px-1 text-[9px] font-bold text-slate-950">SELECTED</span>}
-        </div>
-      ))}
-      {m && <p className="mt-1 font-mono text-[10px] text-slate-400">
-        Optimality: NetworkX min edge cut = {String(m.optimal_edge_cut ?? '—')} · defense removed {String(m.defense_edges_removed ?? '—')} edges · gap = {String(m.optimality_gap ?? '—')}
-      </p>}
-      {m?.ai_final_choice != null && (
-        <p className="mt-1 text-[11px] text-violet-300">
-          AI final choice: {String((m.ai_final_choice as { chosen_label?: string }).chosen_label ?? '—')}
-          {' '}· matched simulation optimum: {m.ai_matched_optimum === true ? 'yes' : m.ai_matched_optimum === false ? 'no (AI chose differently — its justification is in the timeline)' : '—'}
-          {' '}· candidates considered: {String(m.candidates_considered ?? '—')}
-        </p>
-      )}
-    </section>
-  )
-}
 
-export function BattlePanel() {
-  const s = useStore()
-  const red = s.events.filter((e) => e.agent === 'adversary_simulator')
-  const blue = s.results?.decisions.filter((d) => d.agent !== 'observer' && d.agent !== 'adversary_simulator') ?? []
-  if (!red.length && !blue.length) return null
-  return (
-    <section className="rounded-xl border border-slate-800 glass-panel p-3">
-      <h2 className="mb-2 text-xs font-bold tracking-wider text-cyan-300">RED vs BLUE</h2>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded bg-red-950/30 border border-red-900/50 p-2">
-          <h3 className="text-[11px] font-bold text-red-300">🔴 RED — ADAPTIVE ADVERSARY</h3>
-          {red.slice(-5).map((e, i) => <p key={i} className="mt-1 text-[10px] text-slate-300">{e.message.slice(0, 130)}</p>)}
-          {!red.length && <p className="text-[10px] text-slate-500">No red activity yet.</p>}
-        </div>
-        <div className="rounded bg-cyan-950/30 border border-cyan-900/50 p-2">
-          <h3 className="text-[11px] font-bold text-cyan-300">🔵 BLUE — DEFENSE</h3>
-          {blue.slice(-5).map((d, i) => <p key={i} className="mt-1 text-[10px] text-slate-300"><span className="text-violet-300">{d.agent}:</span> {d.decision.slice(0, 110)}</p>)}
-          {!blue.length && <p className="text-[10px] text-slate-500">No blue decisions yet.</p>}
-        </div>
-      </div>
-    </section>
-  )
-}
 
-export function ScorecardsView() {
-  const [latest, setLatest] = useState<Awaited<ReturnType<typeof api.evalLatest>> | null>(null)
-  const [status, setStatus] = useState('')
-  const load = () => api.evalLatest().then(setLatest).catch(() => undefined)
-  useEffect(() => { load() }, [])
-  const run = (mode: string) => {
-    setStatus(`running ${mode} eval…`)
-    api.evalRun(10, 7, mode).then(async (r) => {
-      for (let i = 0; i < 120; i++) {
-        const st = await api.evalStatus(r.run_id)
-        setStatus(`${st.state} ${st.done}/${st.total}`)
-        if (st.state === 'COMPLETED') { load(); break }
-        if (st.state === 'FAILED') break
-        await new Promise((res) => setTimeout(res, 800))
-      }
-    }).catch((e) => setStatus(`failed: ${(e as Error).message}`))
-  }
-  const agents = latest?.result?.agents ?? {}
-  return (
-    <main className="p-6 max-w-5xl">
-      <h1 className="text-2xl font-black text-cyan-200">Agent Scorecards</h1>
-      <p className="mt-1 text-sm text-slate-400">Ground-truth evaluation over generated twins (investigator precision/recall, strategist pass rate + optimality, red validity, auditor precision/recall, identity recall, decoy trips, dialect parsing, citation validity, calibration).</p>
-      <div className="mt-3 flex gap-2">
-        <button onClick={() => run('offline')} className="rounded bg-cyan-600 px-3 py-2 text-xs font-bold">Run offline eval (n=10)</button>
-        <button onClick={() => run('live')} className="rounded bg-violet-600 px-3 py-2 text-xs font-bold">Run live eval</button>
-        <span className="py-2 text-xs text-slate-400">{status}</span>
-      </div>
-      {!latest?.available && <p className="mt-3 text-slate-500 text-sm">No eval yet — run one.</p>}
-      {Object.entries(agents).map(([id, metrics]) => (
-        <div key={id} className="mt-3 rounded-xl border border-slate-800 glass-panel p-3">
-          <b className="font-mono text-cyan-200">{id}</b> <span className="text-xs text-slate-500">mode: {latest?.result?.mode}</span>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {Object.entries(metrics).map(([k, v]) => (
-              <span key={k} className="rounded bg-slate-950/70 px-2 py-1 font-mono text-[10px] text-slate-300">{k}: {String(v)}</span>
-            ))}
-          </div>
-        </div>
-      ))}
-      {latest?.result?.calibration && Object.entries(latest.result.calibration).map(([agent, buckets]) => (
-        <div key={agent} className="mt-3 rounded-xl border border-slate-800 glass-panel p-3">
-          <b className="text-sm text-cyan-200">Calibration — {agent}</b>
-          {buckets.map((b) => (
-            <div key={b.bucket} className="mt-1 flex items-center gap-2 text-xs"><span className="w-16 font-mono">{b.bucket}</span>
-              <div className="h-3 flex-1 rounded bg-slate-800"><div className="h-3 rounded bg-cyan-400" style={{ width: `${(b.accuracy ?? 0) * 100}%` }} /></div>
-              <span>{b.accuracy === null ? `n=${b.n}` : `${Math.round((b.accuracy ?? 0) * 100)}% (n=${b.n})`}</span></div>
-          ))}
-        </div>
-      ))}
-    </main>
-  )
-}
 
-export function BattleView({ onRunBattle }: { onRunBattle: () => void }) {
-  const s = useStore()
-  const rounds = (s.results?.verification?.metrics.rounds as { round: number }[] | undefined) ?? []
-  const red = s.events.filter((e) => ['adversary_simulator'].includes(e.agent ?? '') || ['red_critic', 'debate', 'decoy_tripped', 'red_team', 'red_team_pivot'].includes(e.event_type))
-  const blue = s.events.filter((e) => ['incident_investigator', 'defense_strategist', 'defense_executor'].includes(e.agent ?? ''))
-  const debates = s.events.filter((e) => e.event_type === 'debate' || e.event_type === 'red_critic')
-  return (
-    <main className="p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <div>
-          <h1 className="text-2xl font-black text-cyan-200">Battle — Red vs Blue</h1>
-          <p className="text-xs text-slate-400">Adaptive adversary on the left, defense on the right, the twin in the middle. Round {Math.max(rounds.length, s.runState === 'IDLE' ? 0 : 1)} · state {s.runState}</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => { s.set({ scenarioId: 'red_vs_blue_battle' }); onRunBattle() }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white">⚔ Run Battle</button>
-          <button onClick={() => s.set({ view: 'verification' })} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Resilience Curve →</button>
-        </div>
-      </div>
-      <div className="mt-3 grid grid-cols-12 gap-3">
-        <section className="col-span-12 lg:col-span-3 space-y-2" aria-label="Red team reasoning">
-          <h2 className="text-xs font-bold tracking-wider text-red-300">🔴 RED — CAMPAIGNS & CRITIC</h2>
-          {red.length === 0 && <p className="text-xs text-slate-500">No red activity yet. Run the battle.</p>}
-          {[...red].reverse().slice(0, 10).map((e, i) => (
-            <div key={i} className="rounded-xl border border-red-900/50 bg-red-950/25 p-2 text-[11px] text-slate-200">
-              <span className="font-mono text-red-300">{e.event_type}</span> — {e.message.slice(0, 220)}
-            </div>
-          ))}
-          {debates.map((e, i) => (
-            <div key={i} className="rounded-2xl rounded-tl-sm border border-violet-700/60 bg-violet-950/40 p-2 text-[11px] text-violet-100">💬 {e.message.slice(0, 220)}</div>
-          ))}
-        </section>
-        <section className="col-span-12 lg:col-span-6">
-          <div className="h-[560px] rounded-2xl border border-cyan-900 overflow-hidden bg-slate-950">
-            {s.twin ? <TwinView twin={s.twin} /> : <SkeletonTwin />}
-          </div>
-          <AttackChain />
-        </section>
-        <section className="col-span-12 lg:col-span-3 space-y-2" aria-label="Blue team reasoning">
-          <h2 className="text-xs font-bold tracking-wider text-cyan-300">🔵 BLUE — INVESTIGATE · SIMULATE · DEFEND</h2>
-          {blue.length === 0 && <p className="text-xs text-slate-500">No blue activity yet.</p>}
-          {[...blue].reverse().slice(0, 10).map((e, i) => (
-            <div key={i} className="rounded-xl border border-cyan-900/50 bg-cyan-950/25 p-2 text-[11px] text-slate-200">
-              <span className="font-mono text-cyan-300">{e.event_type}</span>{e.agent && <span className="text-violet-300"> · {e.agent}</span>} — {e.message.slice(0, 220)}
-            </div>
-          ))}
-        </section>
-      </div>
-    </main>
-  )
-}
 
-export function BenchmarkView() {
-  const [data, setData] = useState<Awaited<ReturnType<typeof api.benchmark>> | null>(null)
-  const [curve, setCurve] = useState<Awaited<ReturnType<typeof api.learningCurve>> | null>(null)
-  const [cal, setCal] = useState<Awaited<ReturnType<typeof api.calibration>> | null>(null)
-  useEffect(() => { api.benchmark().then(setData).catch(() => setData({ available: false, detail: 'benchmark endpoint unreachable' })) }, [])
-  useEffect(() => { api.learningCurve().then(setCurve).catch(() => undefined); api.calibration().then(setCal).catch(() => undefined) }, [])
-  return (
-    <main className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-black text-cyan-200">Benchmark</h1>
-      <p className="mt-1 text-sm text-slate-400">50 seeded random twin+scenario pairs, three defenders on identical attacked twins. Reproduce with <span className="font-mono">python scripts/benchmark.py</span>.</p>
-      {!data && <p className="mt-3 text-slate-400">Loading…</p>}
-      {data && !data.available && <p className="mt-3 text-amber-300">{data.detail}</p>}
-      {data?.summary && (
-        <>
-          <p className="mt-2 text-xs text-slate-500">{data.scope} · {data.pairs} pairs</p>
-          <table className="mt-3 w-full text-left text-sm">
-            <thead><tr className="border-b border-slate-700 text-slate-400"><th className="py-2">Defender</th><th>PASS rate</th><th>Mean effectiveness</th><th>Mean optimality gap</th><th>Mean disrupted</th></tr></thead>
-            <tbody>{Object.entries(data.summary).map(([k, v]) => (
-              <tr key={k} className="border-b border-slate-800"><td className="py-2 font-mono">{k}</td><td>{v.pass_rate_pct}%</td><td>{v.mean_effectiveness_pct}%</td><td>{v.mean_optimality_gap}</td><td>{v.mean_disrupted}</td></tr>))}
-            </tbody>
-          </table>
-          <div className="mt-4 space-y-1" role="img" aria-label="Pass rate chart">
-            {Object.entries(data.summary).map(([k, v]) => (
-              <div key={k} className="flex items-center gap-2 text-xs"><span className="w-20 font-mono">{k}</span>
-                <div className="h-4 flex-1 rounded bg-slate-800"><div className={`h-4 rounded ${k === 'none' ? 'bg-red-500' : 'bg-emerald-400'}`} style={{ width: `${v.pass_rate_pct}%` }} /></div><span>{v.pass_rate_pct}%</span></div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-slate-500">Live Muse Spark is spot-checked on the builtin scenarios (all PASS, gap 0 — see Verification Lab on any live run). The 50-pair table is a real offline run, not a projection.</p>
-          {data.calibration && (
-            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3 text-sm">
-              <b className="text-cyan-200">Confidence calibration</b> <span className="text-slate-400">({data.calibration.runs_scored} scored runs from the evidence store)</span>
-              <p className="mt-1 text-xs text-slate-300">Mean Investigator confidence on PASS runs: {data.calibration.mean_confidence_pass ?? '—'} · on FAIL runs: {data.calibration.mean_confidence_fail ?? '—'}</p>
-              <p className="text-[11px] text-slate-500">{data.calibration.note}</p>
-            </div>
-          )}
-          <CompareRuns />
-          {curve && curve.points.length > 0 && (
-            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
-              <b className="text-cyan-200 text-sm">Learning curve — optimality gap over runs</b>
-              <div className="mt-2 flex items-end gap-1" role="img" aria-label="Optimality gap per run">
-                {curve.points.slice(-24).map((p, i) => (
-                  <div key={i} title={`${p.scenario_id} (${p.mode}): gap ${p.optimality_gap ?? '—'}`}
-                    className={`w-3 rounded-t ${p.outcome === 'PASS' ? 'bg-emerald-400' : 'bg-red-400'}`}
-                    style={{ height: `${8 + Math.min((p.optimality_gap ?? 0) * 14, 56)}px` }} />
-                ))}
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">{curve.runs} completed runs · bar height = optimality gap · green = PASS. Past verified defenses are fed back to the Strategist as examples.</p>
-            </div>
-          )}
-          {cal && (
-            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
-              <b className="text-cyan-200 text-sm">Confidence calibration (5 buckets)</b>
-              <div className="mt-2 space-y-1">
-                {cal.buckets.map((b) => (
-                  <div key={b.bucket} className="flex items-center gap-2 text-xs"><span className="w-16 font-mono">{b.bucket}</span>
-                    <div className="h-3 flex-1 rounded bg-slate-800"><div className="h-3 rounded bg-cyan-400" style={{ width: `${b.pass_rate_pct ?? 0}%` }} /></div>
-                    <span>{b.pass_rate_pct === null ? `n=${b.n} (no data)` : `${b.pass_rate_pct}% PASS (n=${b.n})`}</span></div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </main>
-  )
-}
 
-function CompareRuns() {
-  const [runs, setRuns] = useState<{ id: string; scenario_id: string; state: string; mode: string }[]>([])
-  const [a, setA] = useState(''); const [b, setB] = useState('')
-  const [res, setRes] = useState<Record<string, RunResult>>({})
-  useEffect(() => { api.experiments().then(setRuns).catch(() => undefined) }, [])
-  const load = (id: string) => { if (id) api.results(id).then((r) => setRes((prev) => ({ ...prev, [id]: r }))).catch(() => undefined) }
-  const cell = (id: string) => {
-    const r = res[id]; if (!r) return '—'
-    return `${r.run.mode} · ${r.verification?.outcome ?? r.run.state} · eff ${String(r.verification?.metrics.defense_effectiveness_pct ?? '—')}% · gap ${String(r.verification?.metrics.optimality_gap ?? '—')} · breach risk ${String(r.verification?.metrics.baseline_breach_probability_pct ?? '—')}% → ${String(r.verification?.metrics.after_breach_probability_pct ?? '—')}%`
-  }
-  const sel = 'rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs'
-  return (
-    <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
-      <b className="text-cyan-200 text-sm">Compare runs side by side</b>
-      <div className="mt-2 flex flex-wrap gap-2">
-        <select value={a} onChange={(e) => { setA(e.target.value); load(e.target.value) }} className={sel}><option value="">Run A…</option>{runs.map((r) => <option key={r.id} value={r.id}>{r.scenario_id} · {r.mode} · {r.state}</option>)}</select>
-        <select value={b} onChange={(e) => { setB(e.target.value); load(e.target.value) }} className={sel}><option value="">Run B…</option>{runs.map((r) => <option key={r.id} value={r.id}>{r.scenario_id} · {r.mode} · {r.state}</option>)}</select>
-      </div>
-      <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-        <div className="rounded bg-slate-950/60 p-2"><b>A</b><p className="mt-1 text-slate-300">{cell(a)}</p></div>
-        <div className="rounded bg-slate-950/60 p-2"><b>B</b><p className="mt-1 text-slate-300">{cell(b)}</p></div>
-      </div>
-    </div>
-  )
-}
 
-export function ResilienceCurve() {
-  const s = useStore()
-  const rounds = (s.results?.verification?.metrics.rounds as Round[] | undefined) ?? []
-  if (!rounds.length) return null
-  const score = (r: Round) => r.resilience_score ?? r.effectiveness_pct
-  const pts = rounds.map((r, i) => `${30 + i * 90},${90 - (score(r) / 100) * 70}`).join(' ')
-  const offline = s.results?.run.mode !== 'live'
-  return (
-    <section className="mt-4 rounded-xl border border-slate-800 glass-panel p-4">
-      <h2 className="font-bold text-cyan-200">Resilience Curve — Red Team Rounds</h2>
-      {offline && <p className="mt-1 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200">Adaptive adversary path-choice by Muse Spark requires LIVE Meta AI — this run used the deterministic (shortest-path) red team. Paths themselves are always policy-validated.</p>}
-      <svg viewBox={`0 0 ${60 + rounds.length * 90} 110`} className="mt-2 w-full max-w-md" role="img" aria-label="Resilience curve over red-team rounds">
-        <line x1={25} y1={15} x2={25} y2={92} stroke="#334155" /><line x1={25} y1={92} x2={55 + rounds.length * 90} y2={92} stroke="#334155" />
-        <polyline points={pts} fill="none" stroke="#34d399" strokeWidth={2.5} />
-        {rounds.map((r, i) => <g key={r.round}><circle cx={30 + i * 90} cy={90 - (score(r) / 100) * 70} r={5} fill={r.outcome === 'PASS' ? '#34d399' : '#ef4444'} />
-          <text x={30 + i * 90} y={106} textAnchor="middle" fill="#94a3b8" fontSize={9}>R{r.round} · {score(r)}%</text></g>)}
-      </svg>
-      {rounds.map((r) => <p key={r.round} className="text-xs text-slate-300">Round {r.round}: {r.path ? r.path.join(' → ') : 'initial attack'} → {r.outcome} <span className="text-slate-500">(resilience {score(r)}%{r.red_team_mode ? `, red team ${r.red_team_mode}` : ''})</span></p>)}
-    </section>
-  )
-}
 
 /** Plain-language attack chain: reads left-to-right without needing the 3D view. */
-function AttackChain() {
-  const s = useStore()
-  const path = ATTACK_PATHS[s.scenarioId] ?? []
-  const byId = Object.fromEntries((s.twin?.assets ?? []).map((a) => [a.id, a]))
-  const blocked = s.results?.verification?.metrics.after_reachable_or_granted === false
-  if (!path.length) return null
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-red-900/50 glass-panel px-3 py-2" aria-label="Attack path in plain language">
-      <span className="font-mono text-[10px] tracking-wider text-red-300">ATTACK PATH</span>
-      {path.map((id, i) => {
-        const a = byId[id]
-        const role = i === 0 ? 'SOURCE' : i === path.length - 1 ? 'TARGET' : `PIVOT ${i}`
-        return (
-          <span key={id} className="flex items-center gap-1.5">
-            {i > 0 && <span className={blocked && i === path.length - 1 ? 'text-emerald-300 font-bold' : 'text-red-400'}>{blocked && i === path.length - 1 ? '✕ blocked →' : '→'}</span>}
-            <button onClick={() => s.set({ selectedAsset: id })} className="rounded-full border px-2 py-1 text-[11px]"
-              style={{ borderColor: STATUS_COLOR[a?.status ?? 'healthy'], color: STATUS_COLOR[a?.status ?? 'healthy'] }}>
-              <b>{i + 1}</b> {a?.name ?? id} <span className="opacity-70">· {role} · {(a?.status ?? '—').toUpperCase()}</span>
-            </button>
-          </span>
-        )
-      })}
-      <span className={`ml-auto text-[11px] ${blocked ? 'text-emerald-300 font-bold' : 'text-slate-400'}`}>
-        {s.results?.verification ? (blocked ? '✓ Defense cut this path (verified)' : '✗ Path still open (verification failed)') : 'Run an experiment to test this path'}
-      </span>
-    </div>
-  )
-}
 
-function MapFocusToggle() {
-  const s = useStore()
-  return (
-    <div className="flex items-center gap-1 text-[11px]">
-      <span className="text-slate-500">Map:</span>
-      <button onClick={() => s.set({ mapFocus: true })} className={`rounded-full border px-2 py-0.5 ${s.mapFocus ? 'border-red-400 bg-red-500/20 text-red-200' : 'border-slate-700 text-slate-400'}`}>Attack path only</button>
-      <button onClick={() => s.set({ mapFocus: false })} className={`rounded-full border px-2 py-0.5 ${!s.mapFocus ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200' : 'border-slate-700 text-slate-400'}`}>Full topology</button>
-    </div>
-  )
-}
 
-function AssetPanel({ asset }: { asset: Asset }) {
-  const twin = useStore((s) => s.twin)
-  return (
-    <div className="space-y-2 text-sm">
-      <div className="flex items-center gap-2"><Shield size={16} className="text-cyan-300" /><b>{asset.name}</b></div>
-      <div>Status: <span style={{ color: STATUS_COLOR[asset.status] }}>{asset.status}</span></div>
-      <div>Zone: {asset.zone} · Type: {asset.asset_type}</div>
-      <div>Security posture: {(asset.posture * 100).toFixed(0)}%</div>
-      <div>Isolated: {asset.isolated ? 'yes (contained)' : 'no'} · Service disabled: {asset.service_disabled ? 'yes' : 'no'}</div>
-      <div>Simulated vulnerabilities: {asset.vulnerabilities.length ? asset.vulnerabilities.join(', ') : 'none'}</div>
-      <div>Connected: {asset.connected.join(', ') || 'none'}</div>
-      {twin && <div>Containment: {twin.containment.join(', ') || 'none active'}</div>}
-    </div>
-  )
-}
 
 export default function App() {
   const s = useStore()
@@ -1248,43 +811,3 @@ export default function App() {
   )
 }
 
-function EvidenceView() {
-  const s = useStore()
-  const [rows, setRows] = useState<{ id: string; kind: string; ref: string; summary: string }[] | null>(null)
-  const load = () => { if (s.runId) api.evidence(s.runId).then(setRows).catch(() => undefined) }
-  useEffect(() => { if (s.highlightRef) load() }, [s.highlightRef]) // eslint-disable-line
-  return (
-    <main className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-black text-cyan-200">Experiment Evidence</h1>
-      <p className="text-sm text-slate-400">Append-only audit trail stored in the backend database. Clicking a ⌖ citation in the Agents view lands here with that record highlighted.</p>
-      <div className="mt-3 flex gap-2">
-        <button onClick={load} className="rounded bg-cyan-600 px-3 py-1.5 text-xs font-bold">Load evidence for current run</button>
-        <button onClick={() => s.runId && api.report(s.runId).then((r) => {
-          const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })
-          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `cybergenesis-run-bundle-${s.runId}.json`; a.click()
-        })} disabled={!s.runId} className="rounded border border-slate-600 px-3 py-1.5 text-xs disabled:opacity-40">Export run bundle (replayable JSON)</button>
-        <label className="cursor-pointer rounded border border-slate-600 px-3 py-1.5 text-xs hover:bg-slate-800">
-          Import run bundle
-          <input type="file" accept="application/json" className="hidden" onChange={(e) => {
-            const f = e.target.files?.[0]; if (!f) return
-            f.text().then((txt) => {
-              const bundle = JSON.parse(txt) as RunResult & { run?: RunResult['run'] }
-              if (bundle.run?.id && bundle.verification !== undefined) {
-                s.set({ results: bundle, runId: bundle.run.id, runState: bundle.run.state, error: null })
-                setRows(null)
-              }
-            }).catch(() => s.set({ error: 'Invalid run bundle file' }))
-          }} />
-        </label>
-      </div>
-      {s.highlightRef && <p className="mt-2 text-xs text-cyan-300">Highlighting citation: <span className="font-mono">{s.highlightRef}</span></p>}
-      <div className="mt-4 space-y-1">
-        {(rows ?? s.events.map((e) => ({ id: '', kind: e.event_type, ref: '', summary: e.message }))).map((e, i) => (
-          <div key={i} className={`rounded border px-3 py-2 text-xs ${s.highlightRef && e.ref === s.highlightRef ? 'border-amber-400 bg-amber-500/15' : 'border-slate-800 glass-panel'}`}>
-            <span className="font-mono text-cyan-300">{e.kind}</span> {e.ref && <span className="font-mono text-slate-500">{e.ref}</span>} <span className="text-slate-300">{e.summary}</span>
-          </div>
-        ))}
-      </div>
-    </main>
-  )
-}
