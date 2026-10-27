@@ -589,6 +589,11 @@ def _apply_config_diff(twin, asset_id: str, diff: dict) -> None:
             cfg = twin.device_configs[asset_id]
         elif op.get("op") == "set":
             parts = op["path"].split(".")
+            if parts[0] == "interfaces" and len(parts) >= 3 and not parts[1].isdigit():
+                iface = next((i for i in cfg.get("interfaces", []) if i["name"] == parts[1]), None)
+                if iface is not None:
+                    iface[parts[2]] = op.get("value")
+                continue
             node = cfg
             for p in parts[:-1]:
                 node = node.setdefault(p, {}) if isinstance(node, dict) else node[int(p)]
@@ -846,6 +851,29 @@ async def ws_cli(ws: WebSocket, asset_id: str):
             await ws.send_text(json.dumps({"event_type": "cli_output", **out}))
     except WebSocketDisconnect:
         pass
+
+
+@app.get("/api/twin/devices/{asset_id}/os")
+def device_os_state(asset_id: str, db: Session = Depends(get_db)):
+    """Live OS state for shells: processes, telemetry events, services, users, files."""
+    twin = orchestrator.TWIN
+    if asset_id not in twin.device_configs:
+        raise HTTPException(404, "device not in twin")
+    cfg = twin.device_configs[asset_id]
+    status = twin.status.get(asset_id, "healthy")
+    events = (db.query(models.SimulationEvent).filter(models.SimulationEvent.asset_id == asset_id)
+              .order_by(models.SimulationEvent.seq.desc()).limit(12).all())
+    files = ["report.docx", "budget.xlsx", "notes.txt", "photo.jpg"]
+    if status in ("compromised", "suspicious"):
+        files = [f"{f}.locked" for f in files]
+    return {
+        "asset_id": asset_id, "status": status,
+        "processes": twin.processes.get(asset_id, [{"name": "explorer.exe", "pid": 1002, "suspicious": False}]),
+        "events": [{"type": e.event_type, "message": e.message, "agent": e.agent} for e in events],
+        "services": cfg.get("services", []), "users": cfg.get("users", []),
+        "host_firewall": cfg.get("host_firewall", {}), "files": files,
+        "patches": cfg.get("patches", {}),
+    }
 
 
 @app.post("/api/audit/run")

@@ -39,6 +39,7 @@ export const api = {
   previewDiff: (assetId: string, diff: unknown) => j<{ changes: { src: string; dst: string; before_reachable: boolean; after_reachable: boolean }[] }>(`/api/twin/devices/${assetId}/config/preview`, { method: 'POST', body: JSON.stringify({ diff }) }),
   commitDiff: (assetId: string) => j<{ committed: boolean; twin: Twin }>(`/api/twin/devices/${assetId}/config/commit`, { method: 'POST' }),
   cliExec: (assetId: string, input: string) => j<{ output: string; dialect: string }>(`/api/cli/${assetId}/exec`, { method: 'POST', body: JSON.stringify({ input }) }),
+  osState: (assetId: string) => j<{ status: string; processes: { name: string; pid: number; suspicious: boolean }[]; events: { type: string; message: string }[]; services: { name: string; enabled: boolean }[]; users: { name: string; role: string; mfa: boolean }[]; files: string[] }>(`/api/twin/devices/${assetId}/os`),
   auditRun: () => j<{ findings: { device: string; weakness: string; severity: string; evidence: string; fix_diff: Record<string, unknown> }[] }>('/api/audit/run', { method: 'POST' }),
   explainConfig: (text: string) => j<{ explanation: string; mode: string }>('/api/config/explain', { method: 'POST', body: JSON.stringify({ text }) }),
   drift: () => j<{ drift: { asset_id: string; field: string; committed: unknown; current: unknown; risky: boolean }[] }>('/api/twin/drift'),

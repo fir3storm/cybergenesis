@@ -5,6 +5,75 @@ from app.devices.registry import BUILTIN_DEVICE_MAP, BY_ID
 
 SESSIONS: dict[str, dict] = {}
 
+# Per-dialect grammar: (phrase, modes, help). Overlays (eos, aoscx) inherit ios.
+GRAMMAR: dict[str, list[tuple[str, tuple[str, ...], str]]] = {
+    "ios": [("show running-config", ("exec",), "running configuration"), ("show interfaces", ("exec",), "interface status"),
+            ("show ip route", ("exec",), "routing table"), ("show access-list", ("exec",), "ACL entries"),
+            ("show version", ("exec",), "system version"), ("configure terminal", ("exec",), "enter config mode"),
+            ("interface", ("config",), "select an interface"), ("shutdown", ("interface",), "disable selected interface"),
+            ("no shutdown", ("interface",), "enable selected interface"), ("description", ("interface",), "set description"),
+            ("access-list", ("config",), "add a typed ACL entry"), ("ip access-group", ("interface",), "bind an ACL"),
+            ("end", ("config", "interface"), "leave config mode"), ("write memory", ("exec", "config"), "commit (Verified Commit)")],
+    "asa": [("show running-config", ("exec",), "running configuration"), ("show interface", ("exec",), "interface status"),
+            ("show route", ("exec",), "routing table"), ("show access-list", ("exec",), "ACL entries"),
+            ("configure terminal", ("exec",), "enter config mode"), ("interface", ("config",), "select an interface"),
+            ("shutdown", ("interface",), "disable selected interface"), ("access-list", ("config",), "add a typed ACL entry"),
+            ("write memory", ("exec", "config"), "commit (Verified Commit)")],
+    "junos": [("show configuration", ("exec",), "configuration"), ("show interfaces terse", ("exec",), "interfaces"),
+              ("show route", ("exec",), "routing table"), ("configure", ("exec",), "enter configuration mode"),
+              ("set interfaces", ("config",), "set an interface statement"), ("set firewall family inet filter", ("config",), "set a filter term"),
+              ("commit check", ("config",), "validate candidate config"), ("commit", ("config",), "commit (Verified Commit)"),
+              ("rollback", ("config",), "rollback candidate")],
+    "fortios": [("show full-configuration", ("exec",), "full configuration"), ("show", ("exec",), "show configuration/status"), ("get system status", ("exec",), "system status"),
+                ("config", ("exec",), "enter a config table"), ("edit", ("config",), "edit an entry"),
+                ("set", ("config",), "set a field"), ("next", ("config",), "finish entry"), ("end", ("config",), "exit table")],
+    "panos": [("show running-config", ("exec",), "running configuration"), ("show interface all", ("exec",), "interfaces"),
+              ("configure", ("exec",), "enter configuration mode"), ("set rulebase security rules", ("config",), "set a security rule"),
+              ("commit", ("config",), "commit (Verified Commit)")],
+    "routeros": [("/interface print", ("exec",), "interfaces"), ("/ip address print", ("exec",), "addresses"),
+                 ("/ip route print", ("exec",), "routes"), ("/ip firewall filter print", ("exec",), "filter rules"),
+                 ("/ip firewall filter add", ("exec",), "add a filter rule (stages a diff)")],
+    "bash": [("ls", ("exec",), "list files"), ("cat", ("exec",), "read a file"), ("ps", ("exec",), "processes"),
+             ("ss", ("exec",), "sockets"), ("ip addr", ("exec",), "addresses"), ("systemctl status", ("exec",), "service status"),
+             ("journalctl", ("exec",), "logs"), ("sudo", ("exec",), "run as root (emulated)")],
+    "powershell": [("Get-Process", ("exec",), "processes"), ("Get-Service", ("exec",), "services"),
+                   ("Get-NetFirewallRule", ("exec",), "firewall rules"), ("New-NetFirewallRule", ("exec",), "new firewall rule (stages a diff)"),
+                   ("Get-WinEvent", ("exec",), "event log"), ("Get-LocalUser", ("exec",), "local users"),
+                   ("Disable-LocalUser", ("exec",), "disable a user (stages a diff)"), ("Get-ADUser", ("exec",), "AD users"),
+                   ("ipconfig", ("exec",), "IP configuration"), ("netstat", ("exec",), "connections"), ("Get-HotFix", ("exec",), "installed patches")],
+}
+GRAMMAR["eos"] = GRAMMAR["ios"]
+GRAMMAR["aoscx"] = GRAMMAR["ios"]
+GRAMMAR["zsh"] = GRAMMAR["bash"]
+GRAMMAR["esxcli"] = GRAMMAR["bash"]
+GRAMMAR["tmsh"] = GRAMMAR["bash"]
+GRAMMAR["generic"] = GRAMMAR["bash"]
+GRAMMAR["none"] = []
+
+ERROR_MARKERS = {
+    "ios": "% Invalid input detected at '^' marker.", "eos": "% Invalid input detected at '^' marker.",
+    "aoscx": "% Invalid input detected at '^' marker.", "asa": "% Invalid input detected at '^' marker.",
+    "junos": "syntax error, expecting <command>.", "fortios": "command parse error. return code -61",
+    "panos": "Invalid syntax.", "routeros": "bad command name", "bash": "bash: {cmd}: command not found",
+    "zsh": "zsh: command not found: {cmd}", "powershell": "The term '{cmd}' is not recognized as a cmdlet.",
+    "esxcli": "Invalid command: {cmd}", "tmsh": "syntax error: unknown command",
+}
+
+ABBREVIATIONS = {"sh": "show", "int": "interface", "br": "brief", "conf": "configure", "term": "terminal",
+                 "wr": "write", "mem": "memory", "run": "running-config", "rou": "route", "acc": "access-list"}
+
+
+def grammar_for(dialect: str) -> list[tuple[str, tuple[str, ...], str]]:
+    return GRAMMAR.get(dialect, GRAMMAR["bash"])
+
+
+def expand_abbreviations(command: str) -> str:
+    tokens = command.split()
+    if len(tokens) < 2:
+        return command
+    expanded = [ABBREVIATIONS.get(t.lower(), t) for t in tokens]
+    return " ".join(expanded)
+
 
 def dialect_for(asset_id: str, twin) -> str:
     dev_id = BUILTIN_DEVICE_MAP.get(asset_id)
@@ -164,24 +233,61 @@ def get_session(device_id: str, user: str = "admin") -> dict:
     return SESSIONS[key]
 
 
+PROMPTS = {"exec": "{host}>", "config": "{host}(config)#", "interface": "{host}(config-if)#"}
+
+
 def execute(twin, asset_id: str, command: str, user: str = "admin") -> dict:
     dialect = dialect_for(asset_id, twin)
     cfg = twin.device_configs.get(asset_id)
     if cfg is None:
         return {"output": f"% unknown device {asset_id}", "dialect": dialect, "diff": None}
     session = get_session(asset_id, user)
-    output, diff = parse_command(dialect, cfg, command)
+    session.setdefault("mode", "exec")
+    session.setdefault("interface", None)
+    cmd = expand_abbreviations(command.strip())
+    low = cmd.lower()
+
+    # --- mode transitions + context-sensitive commands ---
+    if low in ("configure terminal", "configure", "conf t", "edit system") and dialect != "none":
+        session["mode"] = "config"
+        out, diff = f"Entering configuration mode ({dialect}). Type '?' for context help.", None
+    elif low.startswith("interface ") and session["mode"] in ("config", "interface"):
+        session["interface"] = cmd.split(None, 1)[1]
+        session["mode"] = "interface"
+        out, diff = f"Entering interface configuration: {session['interface']}", None
+    elif low in ("end", "exit") and session["mode"] != "exec":
+        session["mode"] = "exec" if session["mode"] == "config" else "config"
+        if low == "end":
+            session["mode"] = "exec"
+        out, diff = f"Mode: {session['mode']}", None
+    elif low in ("shutdown", "no shutdown") and session["mode"] == "interface" and session.get("interface"):
+        enabled = low.startswith("no")
+        diff = {"ops": [{"op": "set", "path": f"interfaces.{session['interface']}.enabled", "value": enabled}]}
+        out = f"% interface {session['interface']} {'enabled' if enabled else 'shutdown'} staged as pending ConfigDiff"
+    elif low == "?":
+        entries = [f"{phrase} — {help_}" for phrase, modes, help_ in grammar_for(dialect) if session["mode"] in modes]
+        out, diff = "\n".join(entries) or "no commands in this mode", None
+    else:
+        output, diff = parse_command(dialect, cfg, cmd)
+        if output.startswith("% Invalid input") or "command not found" in output or output.startswith("syntax error"):
+            marker = ERROR_MARKERS.get(dialect, "% Invalid input detected at '^' marker.")
+            output = marker.format(cmd=cmd.split()[0] if cmd.split() else cmd)
+        out = output
     session["history"].append(command)
     if diff:
-        # bind ops target the interface selected in this session (default eth0 until Phase F5 modes)
         for op in diff.get("ops", []):
             if op.get("op") == "bind_acl" and op["value"].get("interface") == "current":
                 op["value"]["interface"] = session.get("interface", "eth0")
         twin.stage_diff(asset_id, diff)
-    return {"output": output, "dialect": dialect, "diff": diff, "history": session["history"][-20:]}
+    host = str(cfg.get("hostname", asset_id))
+    return {"output": out, "dialect": dialect, "diff": diff, "history": session["history"][-20:],
+            "mode": session["mode"], "interface": session.get("interface"),
+            "prompt": PROMPTS[session["mode"]].format(host=host)}
 
 
 def complete(twin, asset_id: str, prefix: str) -> list[str]:
-    cmds = ["show running-config", "show interfaces", "show ip route", "show access-list", "show version",
-            "configure terminal", "access-list CYBER deny ip any any", "harden", "shutdown", "write memory"]
-    return [c for c in cmds if c.startswith(prefix)][:8]
+    dialect = dialect_for(asset_id, twin)
+    session = get_session(asset_id)
+    mode = session.get("mode", "exec")
+    return [phrase for phrase, modes, _h in grammar_for(dialect)
+            if mode in modes and (phrase.lower().startswith(prefix.lower()) or prefix.lower().startswith(phrase.lower()))][:8]

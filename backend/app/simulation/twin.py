@@ -120,6 +120,7 @@ class DigitalTwin:
         self.identities = {k: v for k, v in self.identities.items() if v["asset"] in self.graph} or {
             "user-01": {"asset": self.asset_defs[0]["id"], "session_active": True, "compromised": False, "credential_version": 1}}
         self.containment: list[str] = []
+        self.processes: dict[str, list[dict]] = {}
         self.decoys: set[str] = set()
         self.quarantined: set[str] = set()
         self.config_diffs: list[dict] = []
@@ -306,12 +307,14 @@ class DigitalTwin:
                 "dir_active": {"||".join(k): v for k, v in self.dir_active.items()},
                 "quarantined": sorted(self.quarantined),
                 "decoys": sorted(self.decoys),
+                "processes": copy.deepcopy(self.processes),
                 "device_configs": copy.deepcopy(self.device_configs),
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
     def restore(self, snap: dict) -> None:
         self.quarantined = set(snap.get("quarantined", []))
         self.decoys = set(snap.get("decoys", []))
+        self.processes = copy.deepcopy(snap.get("processes", {}))
         if not hasattr(self, "config_diffs"):
             self.config_diffs = []; self.pending_diffs = {}; self.config_versions = {}
         if "device_configs" in snap:
@@ -474,6 +477,7 @@ class DigitalTwin:
             self.containment.append(f"deploy_decoy:{decoy_id}")
         elif action_type == "kill_process":
             self.status[asset_id] = "contained" if self.status[asset_id] == "compromised" else self.status[asset_id]
+            self.processes[asset_id] = [p for p in self.processes.get(asset_id, []) if not p.get("suspicious")]
             self.containment.append(f"kill_process:{params.get('process', 'suspicious')}")
         elif action_type == "restore_snapshot":
             self.status[asset_id] = "healthy"
@@ -544,6 +548,8 @@ class DigitalTwin:
             self.status["identity-provider"] = "suspicious"; self.status[src] = "compromised"
         if scenario["id"] == "lateral_movement" and self.reachable(src, tgt):
             self.status[tgt] = "suspicious"
+        self.processes.setdefault(src, []).append(
+            {"name": "suspicious-synthetic.exe", "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
         return events
 
     def attempt_attack_objective(self, scenario: dict) -> dict:
