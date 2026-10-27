@@ -216,14 +216,14 @@ def parse_command(dialect: str, cfg: dict, command: str) -> tuple[str, dict | No
         return "% commit requested — use Device Manager > Pending Changes > Commit (Verified Commit) so the same gate applies.", None
     if dialect in ("powershell",) and low.startswith("get-"):
         if "process" in low:
-            return "Id ProcessName\n-- -----------\n1001 System\n1002 explorer\n6666 suspicious-synthetic"
+            return "Id ProcessName\n-- -----------\n1001 System\n1002 explorer\n6666 suspicious-synthetic", None
         if "service" in low:
-            return "Status Name\n------ ----\nRunning WinDefend\nRunning Dnscache"
-        return f"% {cmd}: emulated PowerShell (synthetic output)"
+            return "Status Name\n------ ----\nRunning WinDefend\nRunning Dnscache", None
+        return f"% {cmd}: emulated PowerShell (synthetic output)", None
     if low.startswith(("ls", "ps", "ss", "ip a", "systemctl", "journalctl", "cat ")):
         return {"ls": "bin etc home var", "ps": "root 1 systemd\nroot 666 suspicious-synthetic",
-                "ss": "LISTEN 0.0.0.0:443 (synthetic)"}.get(low.split()[0], f"% emulated bash output for '{cmd}' (synthetic)")
-    return f"% Invalid input detected at '^' marker. Type '?' for help. (dialect: {dialect})"
+                "ss": "LISTEN 0.0.0.0:443 (synthetic)"}.get(low.split()[0], f"% emulated bash output for '{cmd}' (synthetic)"), None
+    return f"% Invalid input detected at '^' marker. Type '?' for help. (dialect: {dialect})", None
 
 
 def get_session(device_id: str, user: str = "admin") -> dict:
