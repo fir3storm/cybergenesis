@@ -91,6 +91,7 @@ class DigitalTwin:
         return cls(defs, edges)
 
     def reset(self) -> None:
+        _decoys = set(self.decoys) if hasattr(self, "decoys") else set()
         self.graph = nx.DiGraph()
         self.status: dict[str, str] = {}
         self.isolated: dict[str, bool] = {}
@@ -121,7 +122,7 @@ class DigitalTwin:
             "user-01": {"asset": self.asset_defs[0]["id"], "session_active": True, "compromised": False, "credential_version": 1}}
         self.containment: list[str] = []
         self.processes: dict[str, list[dict]] = {}
-        self.decoys: set[str] = set()
+        self.decoys: set[str] = _decoys  # deployed decoys are intentional config: they survive resets
         self.quarantined: set[str] = set()
         self.config_diffs: list[dict] = []
         self.pending_diffs: dict[str, dict] = {}
@@ -608,8 +609,17 @@ class DigitalTwin:
             self.status["identity-provider"] = "suspicious"; self.set_state(src, "status", "compromised")
         if scenario["id"] == "lateral_movement" and self.reachable(src, tgt):
             self.set_state(tgt, "status", "suspicious")
-        self.processes.setdefault(src, []).append(
-            {"name": "suspicious-synthetic.exe", "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
+        proc_name = {"ransomware_activity": "synthetic-locker.exe",
+                     "compromised_identity": "synthetic-token-thief.exe",
+                     "lateral_movement": "synthetic-pivot.exe",
+                     "data_exfiltration": "synthetic-exfil.exe",
+                     "red_vs_blue_battle": "synthetic-locker.exe"}.get(scenario["id"], "suspicious-synthetic.exe")
+        windows_assets = {"employee-workstation", "admin-workstation", "file-server", "identity-provider"}
+        for aid, st in self.status.items():
+            if st == "compromised" and aid in windows_assets:
+                if not any(p.get("suspicious") for p in self.processes.get(aid, [])):
+                    self.processes.setdefault(aid, []).append(
+                        {"name": proc_name, "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
         return events
 
     def attempt_attack_objective(self, scenario: dict) -> dict:

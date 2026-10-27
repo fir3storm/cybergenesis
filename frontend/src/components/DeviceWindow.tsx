@@ -25,7 +25,9 @@ export function ShellRouter({ assetId, twin }: { assetId: string; twin: Twin }) 
       <Suspense fallback={<div className="skeleton h-40" />}>
         {NET_GUIS.has(gui)
           ? <DeviceManager assetId={assetId} twin={twin} dialect={dialect} />
-          : <OsShell assetId={assetId} twin={twin} gui={gui || 'generic'} dialect={dialect} />}
+          : gui.endsWith('server') || gui === 'hypervisor'
+            ? <><DeviceManager assetId={assetId} twin={twin} dialect={dialect} /><OsShell assetId={assetId} twin={twin} gui={gui} dialect={dialect} /></>
+            : <OsShell assetId={assetId} twin={twin} gui={gui || 'generic'} dialect={dialect} />}
       </Suspense>
       <p className="text-center font-mono text-[9px] text-slate-600">Emulated for simulation. Not affiliated with any vendor.</p>
     </div>

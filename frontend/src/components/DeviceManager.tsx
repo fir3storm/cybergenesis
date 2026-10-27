@@ -31,7 +31,9 @@ export default function DeviceManager({ assetId, twin, dialect }: { assetId: str
   }
   const doCommit = () => {
     api.commitDiff(assetId).then((r) => { setMsg('Committed — twin updated (twin_updated broadcast).'); setPending(null); load(); if (r.twin) useTwinRefresh(r.twin) })
-      .catch((e) => setMsg(`Commit result: ${(e as Error).message}`))
+      .catch(async (e) => {
+        setMsg(`Commit rejected: ${(e as Error).message} — check Pending Changes for the policy reason (403 detail is in the API response).`)
+      })
   }
   const useTwinRefresh = (t: Twin) => { void t }
 
@@ -83,6 +85,11 @@ export default function DeviceManager({ assetId, twin, dialect }: { assetId: str
           <div>
             <pre className="rounded bg-slate-950 p-2 font-mono text-[10px]">{JSON.stringify(config?.mgmt ?? {}, null, 1)}</pre>
             <button onClick={() => stageAction('harden_mgmt')} className="mt-2 rounded bg-cyan-600 px-3 py-1.5 font-bold">Stage harden_mgmt (telnet off, SSH on)</button>
+            <button onClick={() => {
+              api.stageDiff(assetId, { ops: [{ op: 'set', path: 'isolated', value: true }] })
+                .then(() => { setPending({ diff: { ops: [{ op: 'set', path: 'isolated', value: true }] } }); setTab('Pending Changes'); setMsg('Staged set isolated=true — commit will run the policy gate.') })
+                .catch((e) => setMsg(String((e as Error).message)))
+            }} className="ml-2 mt-2 rounded border border-red-700 px-3 py-1.5 text-red-300">Stage set isolated=true (policy-gated)</button>
           </div>
         )}
         {tab === 'Logs' && <pre className="rounded bg-slate-950 p-2 font-mono text-[10px] text-emerald-200/80">{`${new Date().toISOString()} ${assetId} %LINK-5-CHANGED: status ${asset?.status}\n${new Date().toISOString()} ${assetId} %SEC-6-IPACCESSLOGP: synthetic telemetry only`}</pre>}

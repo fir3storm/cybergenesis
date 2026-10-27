@@ -56,6 +56,16 @@ def resolve_approval(run_id: str, approved: bool) -> bool:
     return True
 
 
+def clear_pending_approvals() -> int:
+    """Clear all pending approvals, denying (and unblocking) any waiters."""
+    entries = list(_approvals.values())
+    _approvals.clear()
+    for entry in entries:
+        entry["approved"] = False
+        entry["event"].set()
+    return len(entries)
+
+
 def activate_twin(twin: DigitalTwin) -> DigitalTwin:
     global TWIN
     TWIN = twin
@@ -77,6 +87,49 @@ def _emit(db, run_id, event_type, message, agent=None, asset_id=None, payload=No
 
 
 async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
+    """Run watchdog: the body runs as a task bounded by settings.run_timeout_s.
+
+    On expiry the body is cancelled and the run is finished honestly as
+    FAILED with error="run_timeout" plus a "run_timeout" event (not a
+    verification FAIL: a timeout may occur before verification ever ran,
+    so there is no verification verdict to report).
+    """
+    timeout = settings.run_timeout_s
+    if not timeout or float(timeout) <= 0:
+        await _run_experiment_impl(run_id, step_delay_ms=step_delay_ms)
+        return
+    task = asyncio.create_task(_run_experiment_impl(run_id, step_delay_ms=step_delay_ms))
+    done, pending = await asyncio.wait({task}, timeout=float(timeout))
+    if not pending:
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:  # impl handles its own errors; this is defensive
+                raise exc
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:  # noqa: BLE001 - timeout bookkeeping below is the honest outcome
+        pass
+    db = SessionLocal()
+    try:
+        run = db.get(models.SimulationRun, run_id)
+        if run is not None:
+            run.state = "FAILED"
+            run.error = "run_timeout"
+            run.ended_at = datetime.now(timezone.utc)
+            db.commit()
+            _emit(db, run_id, "run_timeout",
+                  f"Run exceeded run_timeout_s={float(timeout)}s and was stopped (error=run_timeout)")
+    finally:
+        _cancelled.discard(run_id)
+        _approvals.pop(run_id, None)
+        db.close()
+
+
+async def _run_experiment_impl(run_id: str, step_delay_ms: int | None = None) -> None:
     db = SessionLocal()
     twin: DigitalTwin | None = None
     delay_s = (settings.sim_step_delay_ms if step_delay_ms is None else step_delay_ms) / 1000
@@ -303,8 +356,9 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
 
         sim_contained: float | None = None
         final_choice_meta: dict = {}
+        defense_rejection: dict = {"reason": None}
 
-        async def defend(hyp_obj, round_num: int, extra_context: str = "") -> tuple[list, object]:
+        async def defend(hyp_obj, round_num: int, extra_context: str = "") -> tuple[list, float | None]:
             """Propose -> simulate -> AI final choice -> critic -> policy -> [approval] -> apply. Fully recorded."""
             await set_state("DEFENSE_PROPOSED", f"[round {round_num}] Defense strategist proposing countermeasure", "defense_strategist")
             proposal = await _fw_propose_with_context(scenario, hyp_obj, extra_context)
@@ -406,16 +460,26 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                     _approvals[run_id] = entry
                     emit("approval_required", f"Human approval required: '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths. Approve in the UI.",
                          agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est})
+                    approval_timed_out = False
                     try:
                         await asyncio.wait_for(entry["event"].wait(), timeout=settings.approval_timeout_seconds)
                         approved_by_human = bool(entry["approved"])
                     except asyncio.TimeoutError:
                         approved_by_human = False
+                        approval_timed_out = True
                         emit("approval_timeout", f"Human approval auto-denied after {settings.approval_timeout_seconds}s — defense NOT applied", agent="defense_executor")
                     _approvals.pop(run_id, None)
                     if not approved_by_human:
-                        emit("defense_rejected", "Defense rejected by human operator (or approval timeout)", agent="defense_executor")
-                        return candidates, proposal
+                        # Operator rejection is not a run failure: apply nothing,
+                        # contain nothing (t_contained=None), and let verification
+                        # replay the attack and honestly FAIL. The run still
+                        # finishes COMPLETED below; red-team rounds are skipped.
+                        defense_rejection["reason"] = (
+                            "defense rejected: approval timed out (auto-denied) — defense not applied"
+                            if approval_timed_out else
+                            "defense rejected by operator — defense not applied")
+                        emit("defense_rejected", defense_rejection["reason"], agent="defense_executor")
+                        return candidates, None
             await _delay()
 
             await set_state("DEFENSE_APPLYING", "Applying approved simulated defenses", "defense_executor")
@@ -469,7 +533,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                    "resilience_score": resilience_now(), "outcome": result.outcome,
                    "disrupted": result.metrics["operational_impact_disrupted_legit_paths"], "red_team_mode": None}]
 
-        if scenario["verification_kind"] == "reachability":
+        if scenario["verification_kind"] == "reachability" and not defense_rejection["reason"]:
             for round_num in range(2, 5):  # up to 4 rounds total
                 plan = await red_team.plan_campaign(twin, scenario["source_asset"], scenario["target_asset"], run_id)
                 if plan is None:
@@ -532,7 +596,23 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                             mode=hyp2.mode, evidence_refs=hyp2.evidence_refs, asset_ids=hyp2.affected_assets,
                                             data={"claim_evidence": hyp2.claim_evidence, "round": round_num})); db.commit()
                 board.publish("incident_investigator", "hypothesis", hyp2.model_dump(), evidence_refs=hyp2.evidence_refs)
-                _c, sim_contained = await defend(hyp2, round_num)
+                _c, round_contained = await defend(hyp2, round_num)
+                if defense_rejection["reason"]:
+                    # A rejection in a later adaptive round stops the campaign
+                    # rounds; the run's final verdict stays the last verified
+                    # (primary) result, re-verified at the end below. Only a
+                    # round-1 rejection makes the run's verification FAIL.
+                    rounds.append({"round": round_num, "foothold": plan.foothold, "objective": plan.objective,
+                                   "path": chosen_path, "red_mode": plan.mode, "blue_mode": hyp2.mode,
+                                   "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
+                                   "resilience_score": resilience_now(), "outcome": "DEFENSE_REJECTED",
+                                   "defense_rejection_reason": defense_rejection["reason"],
+                                   "disrupted": result.metrics["operational_impact_disrupted_legit_paths"],
+                                   "red_team_mode": plan.mode})
+                    defense_rejection["reason"] = None
+                    scenario = original_scenario
+                    break
+                sim_contained = round_contained
                 result = await do_verify()
                 rounds.append({"round": round_num, "foothold": plan.foothold, "objective": plan.objective,
                                "path": chosen_path, "red_mode": plan.mode, "blue_mode": hyp2.mode,
@@ -595,15 +675,27 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                              "confidence": final_choice_meta.get("confidence")}
         result.metrics["ai_matched_optimum"] = final_choice_meta.get("ai_matched_optimum")
         result.metrics["candidates_considered"] = final_choice_meta.get("candidates_considered")
+        if defense_rejection["reason"]:
+            result.metrics["defense_rejected"] = True
+            result.metrics["defense_rejection_reason"] = defense_rejection["reason"]
+            result.metrics["failure_reason"] = defense_rejection["reason"]
         latest_ver = db.query(models.VerificationResultRow).filter_by(run_id=run_id).order_by(
             models.VerificationResultRow.created_at.desc()).first()
         if latest_ver:
             latest_ver.metrics = dict(result.metrics); db.commit()
-        modes = {hyp.mode}
-        run.mode = "live" if modes == {"live"} else "offline" if modes == {"offline"} else "mixed"
         db.add(models.AgentDecision(run_id=run_id, agent="verification_scientist", decision=f"VERIFICATION {result.outcome}",
                                     justification=result.invariant, confidence=1.0, model="deterministic-replay",
                                     mode="offline", evidence_refs=result.evidence_refs, asset_ids=[scenario["target_asset"]])); db.commit()
+        # run.mode reflects every persisted decision for the run, not only the
+        # investigator: any live decision alongside any offline one is "mixed".
+        decision_modes = {m for (m,) in db.query(models.AgentDecision.mode).filter_by(run_id=run_id).all() if m}
+        if decision_modes == {"live"}:
+            run.mode = "live"
+        elif decision_modes == {"offline"}:
+            run.mode = "offline"
+        elif decision_modes:
+            run.mode = "mixed"
+        db.commit()
 
         if result.outcome == "PASS":
             for aid, st in list(twin.status.items()):

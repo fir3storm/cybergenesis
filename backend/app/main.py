@@ -1,6 +1,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,27 @@ from app.simulation.component_library import ASSET_TYPES, library
 from app.simulation.scenarios import SCENARIOS
 from app.simulation.twin import ALLOWED_ACTIONS, ATTACK_STEP_TYPES, DigitalTwin
 
+TERMINAL_RUN_STATES = ("COMPLETED", "FAILED")
+
+
+def sweep_stale_runs(db: Session) -> int:
+    """Mark runs left in non-terminal states by a previous backend process.
+
+    The frontend only treats COMPLETED/FAILED as terminal (its polling stops
+    on those two), so a distinct ABORTED state would strand the UI; the
+    aborted reason is therefore carried in ``error`` on a FAILED row.
+    """
+    stale = (db.query(models.SimulationRun)
+             .filter(~models.SimulationRun.state.in_(TERMINAL_RUN_STATES)).all())
+    for row in stale:
+        row.state = "FAILED"
+        row.error = "ABORTED: backend restarted"
+        row.ended_at = datetime.now(timezone.utc)
+    if stale:
+        db.commit()
+    return len(stale)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -31,6 +53,7 @@ async def lifespan(_app: FastAPI):
         if not db.query(models.User).first():
             db.add(models.User())
         db.commit()
+        sweep_stale_runs(db)
     finally:
         db.close()
     yield
@@ -80,6 +103,17 @@ def get_connections():
 def reset_twin():
     orchestrator.TWIN.reset()
     return {"reset": True, "twin": orchestrator.TWIN.to_dict()}
+
+
+@app.post("/api/demo/reset")
+def demo_reset():
+    """Seeded clean demo state: builtin twin activated, pending approvals
+    cleared. Historical runs are kept (audit trail); only the display
+    twin and approval queue are reset."""
+    twin = DigitalTwin()
+    orchestrator.activate_twin(twin)
+    cleared = orchestrator.clear_pending_approvals()
+    return {"reset": True, "cleared_approvals": cleared, "twin": twin.to_dict()}
 
 
 @app.post("/api/twin/action")
@@ -239,7 +273,9 @@ def exp_report_markdown(run_id: str, db: Session = Depends(get_db)):
     data = exp_results(run_id, db)
     ver = data["verification"] or {}
     metrics = ver.get("metrics", {})
-    mode_label = "LIVE META AI (muse-spark-1.3)" if r.mode == "live" else "OFFLINE SIMULATION (deterministic, no Meta inference)"
+    mode_label = {"live": "LIVE META AI (muse-spark-1.3)",
+                  "mixed": "MIXED (live Meta AI + deterministic offline agents)"}.get(
+                      r.mode, "OFFLINE SIMULATION (deterministic, no Meta inference)")
     lines = [
         "# CYBERGENESIS Experiment Report", "",
         f"**Run ID:** {r.id} · **Scenario:** {sc.get('name', r.scenario_id)} · **Seed:** {r.seed}",
@@ -500,6 +536,12 @@ def stage_device_diff(asset_id: str, body: StageDiffRequest, db: Session = Depen
     twin = orchestrator.TWIN
     if asset_id not in twin.device_configs:
         raise HTTPException(404, "device not in twin")
+    known_ifaces = {i["name"] for i in twin.device_configs[asset_id].get("interfaces", [])}
+    for op in body.diff.get("ops", []):
+        if op.get("op") == "bind_acl":
+            iface = (op.get("value") or {}).get("interface")
+            if iface and iface != "current" and iface not in known_ifaces:
+                raise HTTPException(422, f"bind_acl: unknown interface '{iface}' on {asset_id} (known: {sorted(known_ifaces)})")
     twin.stage_diff(asset_id, body.diff)  # append-only
     row = models.ConfigCommit(device_id=asset_id, status="pending", diff=body.diff)
     db.add(row); db.commit(); db.refresh(row)
@@ -683,16 +725,16 @@ async def commit_device_diff(asset_id: str, db: Session = Depends(get_db)):
         raise HTTPException(409, "no pending diff for this device")
     diffs = staged if isinstance(staged, list) else [staged]
     diff = {"ops": [op for d in diffs for op in d.get("ops", [])]}
-    pending_row = (db.query(models.ConfigCommit).filter_by(device_id=asset_id, status="pending")
-                   .order_by(models.ConfigCommit.created_at.desc()).first())
-
     def _finish(status: str, verification: dict):
-        if pending_row is not None:
-            pending_row.status = status
-            pending_row.verification = verification
-            pending_row.diff = diff
+        # finalize ALL pending rows for this device, not just the latest
+        rows = db.query(models.ConfigCommit).filter_by(device_id=asset_id, status="pending").all()
+        for r in rows:
+            r.status = status
+            r.verification = verification
+            r.diff = diff
+        if rows:
             db.commit()
-            return pending_row
+            return rows[-1]
         row = models.ConfigCommit(device_id=asset_id, status=status, diff=diff, verification=verification)
         db.add(row); db.commit()
         return row
@@ -948,9 +990,10 @@ async def explain_config(body: ExplainRequest):
     if not text:
         raise HTTPException(422, "empty config text")
     try:
-        data, _u = await meta_client.chat_json(
-            "Explain the security impact of config lines in plain language. JSON only: {\"explanation\": str}.",
-            wrap_data("config", text))
+        with meta_client.use_budget_tier("advisory"):
+            data, _u = await meta_client.chat_json(
+                "Explain the security impact of config lines in plain language. JSON only: {\"explanation\": str}.",
+                wrap_data("config", text))
         return {"explanation": str(data.get("explanation", "")), "mode": "live"}
     except Exception:  # noqa: BLE001 - deterministic offline explanation
         low = text.lower()
