@@ -102,11 +102,14 @@ class DigitalTwin:
             self.service_disabled[a["id"]] = False
             self.vulns[a["id"]] = list(a["vulnerabilities"])
         self.edge_active: dict[frozenset, bool] = {}
+        self.dir_active: dict[tuple[str, str], bool] = {}
         for s, t, trust, trav, types in self.edge_defs:
             # directed arcs both ways for data connections; auth/monitoring arcs keep listed direction
             self.graph.add_edge(s, t, trust=trust, traversable=trav, types=types)
+            self.dir_active[(s, t)] = True
             if trav:
                 self.graph.add_edge(t, s, trust=trust, traversable=trav, types=types)
+                self.dir_active[(t, s)] = True
             self.edge_active[frozenset((s, t))] = True
         self.identities = {
             "admin-01": {"asset": "admin-workstation", "session_active": False, "compromised": False, "credential_version": 1},
@@ -133,8 +136,11 @@ class DigitalTwin:
                            "connected": sorted(set(self.graph.successors(aid)) | set(self.graph.predecessors(aid)))})
         conns = []
         for s, t, trust, trav, types in self.edge_defs:
+            fwd = self.dir_active.get((s, t), False) and not self.isolated[s] and not self.isolated[t]
+            rev = self.dir_active.get((t, s), False) and not self.isolated[s] and not self.isolated[t]
             conns.append({"source": s, "target": t, "trust": trust, "traversable": trav, "types": types,
-                          "active": self.edge_active[frozenset((s, t))] and not self.isolated[s] and not self.isolated[t]})
+                          "active": fwd or rev, "dir_forward_active": fwd, "dir_reverse_active": rev,
+                          "one_way_blocked": fwd != rev})
         return {"assets": assets, "connections": conns,
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
@@ -143,12 +149,22 @@ class DigitalTwin:
                 "service_disabled": dict(self.service_disabled),
                 "vulns": copy.deepcopy(self.vulns),
                 "edge_active": {"||".join(sorted(k)): v for k, v in self.edge_active.items()},
+                "dir_active": {"||".join(k): v for k, v in self.dir_active.items()},
                 "identities": copy.deepcopy(self.identities), "containment": list(self.containment)}
 
     def restore(self, snap: dict) -> None:
         self.status = dict(snap["status"]); self.isolated = dict(snap["isolated"])
         self.service_disabled = dict(snap["service_disabled"]); self.vulns = copy.deepcopy(snap["vulns"])
         self.edge_active = {frozenset(k.split("||") if isinstance(k, str) else k): v for k, v in snap["edge_active"].items()}
+        if "dir_active" in snap:
+            self.dir_active = {tuple(k.split("||")): v for k, v in snap["dir_active"].items()}  # type: ignore[assignment]
+        else:  # legacy snapshot: derive both directions from the undirected flag
+            self.dir_active = {}
+            for s, t, _trust, trav, _types in self.edge_defs:
+                v = self.edge_active.get(frozenset((s, t)), True)
+                self.dir_active[(s, t)] = v
+                if trav:
+                    self.dir_active[(t, s)] = v
         self.identities = copy.deepcopy(snap["identities"]); self.containment = list(snap["containment"])
 
     def clone(self) -> "DigitalTwin":
@@ -180,8 +196,7 @@ class DigitalTwin:
             if node == dst:
                 return path
             for nb in self.graph.successors(node):
-                key = frozenset((node, nb))
-                if not self.edge_active.get(key, False):
+                if not self.dir_active.get((node, nb), False):
                     continue
                 if not self.graph[node][nb].get("traversable", False):
                     continue
@@ -207,13 +222,22 @@ class DigitalTwin:
         before = self.status[asset_id]
         if action_type == "isolate_asset":
             self.isolated[asset_id] = True; self.status[asset_id] = "contained"
+            for k in list(self.dir_active):
+                if asset_id in k:
+                    self.dir_active[k] = False
             self.containment.append(f"isolate:{asset_id}")
         elif action_type == "block_connection":
             s, t = params.get("source", asset_id), params.get("target")
-            if not t or not self.graph.has_edge(s, t):
+            if not t or not (self.graph.has_edge(s, t) or self.graph.has_edge(t, s)):
                 raise ValueError("missing connection")
-            self.edge_active[frozenset((s, t))] = False
-            self.containment.append(f"block:{s}->{t}")
+            direction = params.get("direction", "both")
+            if direction == "outbound":  # one-way egress control: block s->t only, t->s keeps flowing
+                self.dir_active[(s, t)] = False
+                self.containment.append(f"block_outbound:{s}->{t}")
+            else:
+                self.dir_active[(s, t)] = False; self.dir_active[(t, s)] = False
+                self.containment.append(f"block:{s}->{t}")
+            self.edge_active[frozenset((s, t))] = self.dir_active.get((s, t), False) or self.dir_active.get((t, s), False)
             self.status[asset_id] = "remediated" if self.status[asset_id] != "compromised" else "contained"
         elif action_type == "revoke_session":
             ident = self._identity_for(params, asset_id)
@@ -235,8 +259,20 @@ class DigitalTwin:
             self.service_disabled[asset_id] = True; self.status[asset_id] = "contained"
             self.containment.append(f"disable_service:{asset_id}")
         elif action_type == "restore_connectivity":
-            self.isolated[asset_id] = False; self.status[asset_id] = "healthy"
-            self.containment = [c for c in self.containment if c != f"isolate:{asset_id}"]
+            if params.get("source") and params.get("target"):  # un-block one connection (self-healing)
+                s, t = params["source"], params["target"]
+                self.dir_active[(s, t)] = True; self.dir_active[(t, s)] = True
+                self.edge_active[frozenset((s, t))] = True
+                self.containment = [c for c in self.containment
+                                    if c not in (f"block:{s}->{t}", f"block_outbound:{s}->{t}", f"block:{t}->{s}", f"block_outbound:{t}->{s}")]
+            else:
+                self.isolated[asset_id] = False; self.status[asset_id] = "healthy"
+                for s, t, _trust, trav, _types in self.edge_defs:
+                    if asset_id in (s, t):
+                        self.dir_active[(s, t)] = True
+                        if trav:
+                            self.dir_active[(t, s)] = True
+                self.containment = [c for c in self.containment if c != f"isolate:{asset_id}"]
         return {"action_type": action_type, "asset_id": asset_id, "before_status": before,
                 "after_status": self.status[asset_id], "params": params}
 

@@ -15,14 +15,14 @@ ASSET_TYPES = [
 ]
 
 ATTACK_STEPS = [
-    {"id": "process_start", "label": "Process Start", "description": "Synthetic suspicious process starts on the asset"},
-    {"id": "file_modification_burst", "label": "File Modification Burst", "description": "High-volume synthetic file modifications"},
-    {"id": "network_connection", "label": "Network Connection", "description": "Synthetic connection attempt along the topology"},
-    {"id": "auth_anomaly", "label": "Auth Anomaly", "description": "Synthetic authentication from an unusual context"},
-    {"id": "session_created", "label": "Session Created", "description": "Synthetic suspicious session established"},
-    {"id": "authorization_failure", "label": "Authorization Failure", "description": "Synthetic unauthorized access attempt"},
-    {"id": "config_modification", "label": "Config Modification", "description": "Synthetic configuration change"},
-    {"id": "security_detection", "label": "Security Detection", "description": "Sensor raises a synthetic detection"},
+    {"id": "process_start", "mitre": "TA0002 / T1059", "d3fend": "D3-PSA", "label": "Process Start", "description": "Synthetic suspicious process starts on the asset"},
+    {"id": "file_modification_burst", "mitre": "TA0040 / T1486", "d3fend": "D3-FEV", "label": "File Modification Burst", "description": "High-volume synthetic file modifications"},
+    {"id": "network_connection", "mitre": "TA0011 / T1071", "d3fend": "D3-NTF", "label": "Network Connection", "description": "Synthetic connection attempt along the topology"},
+    {"id": "auth_anomaly", "mitre": "TA0006 / T1078", "d3fend": "D3-AA", "label": "Auth Anomaly", "description": "Synthetic authentication from an unusual context"},
+    {"id": "session_created", "mitre": "TA0006 / T1133", "d3fend": "D3-AA", "label": "Session Created", "description": "Synthetic suspicious session established"},
+    {"id": "authorization_failure", "mitre": "TA0006 / T1110", "d3fend": "D3-ACH", "label": "Authorization Failure", "description": "Synthetic unauthorized access attempt"},
+    {"id": "config_modification", "mitre": "TA0005 / T1562", "d3fend": "D3-CM", "label": "Config Modification", "description": "Synthetic configuration change"},
+    {"id": "security_detection", "mitre": "TA0005 / T1562.001", "d3fend": "D3-FAI", "label": "Security Detection", "description": "Sensor raises a synthetic detection"},
 ]
 
 DEFENSE_ACTIONS = [

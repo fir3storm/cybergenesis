@@ -106,6 +106,63 @@ async def test_red_vs_blue_battle_multiple_rounds():
     assert fs["status"] in ("protected", "remediated", "healthy", "contained")
 
 
+def test_one_way_outbound_block():
+    t = DigitalTwin()
+    assert t.reachable("database", "internet")  # exfil direction
+    t.apply_action("block_connection", "web-server", {"source": "web-server", "target": "firewall", "direction": "outbound"})
+    assert not t.reachable("database", "internet")  # egress cut
+    assert t.reachable("internet", "web-server")  # inbound legit flow still works
+
+
+@pytest.mark.asyncio
+async def test_vision_and_text_to_scenario_mocked(monkeypatch):
+    from app.integrations import meta_client as mc_mod
+    from app import main as main_mod
+
+    async def fake_vision(prompt, image, run_id=None):
+        return ({"assets": [{"id": "ws-1", "name": "WS", "asset_type": "workstation", "zone": "endpoints", "pos": [0, 1, 0]},
+                            {"id": "db-1", "name": "DB", "asset_type": "database", "zone": "data", "pos": [3, 1, 0]}],
+                 "connections": [{"source": "ws-1", "target": "db-1", "traversable": True}]}, {})
+
+    monkeypatch.setattr(mc_mod.meta_client, "chat_vision_json", fake_vision)
+    r = client.post("/api/twins/from-image", json={"image_data_url": "data:image/png;base64,AAAA", "name": "Mock Diagram"})
+    assert r.status_code == 201, r.text
+    assert client.post("/api/twins/from-image", json={"image_data_url": "data:image/png;base64," + "A" * 8_100_000}).status_code == 413
+    client.delete(f"/api/twins/custom/{r.json()['id']}")
+
+    async def fake_chat(system, user, run_id=None):
+        return ({"source_asset": "employee-workstation", "target_asset": "file-server", "severity": "high",
+                 "invariant": "employee-workstation cannot reach file-server",
+                 "attack_steps": [{"type": "file_modification_burst", "asset": "employee-workstation", "description": "synthetic burst"}],
+                 "expected_defense": [{"action_type": "isolate_asset", "asset_id": "employee-workstation", "params": {}}]}, {})
+
+    monkeypatch.setattr(main_mod.meta_client, "chat_json", fake_chat)
+    r2 = client.post("/api/scenarios/from-text", json={"prompt_text": "what if the employee laptop is phished?", "name": "Phish What-If"})
+    assert r2.status_code == 201, r2.text
+    client.delete(f"/api/scenarios/custom/{r2.json()['id']}")
+
+
+@pytest.mark.asyncio
+async def test_human_approval_gate(monkeypatch):
+    import asyncio as _asyncio
+
+    from app.core.config import settings
+    from app.orchestration import orchestrator
+
+    monkeypatch.setattr(settings, "human_approval_enabled", True)
+    monkeypatch.setattr(settings, "approval_timeout_seconds", 20)
+    rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42}).json()["id"]
+    task = _asyncio.create_task(run_experiment(rid))
+    for _ in range(100):
+        await _asyncio.sleep(0.1)
+        if rid in orchestrator._approvals:
+            break
+    assert rid in orchestrator._approvals  # isolate disrupts >=2 legit paths -> gate must fire
+    assert client.post(f"/api/experiments/{rid}/approve", json={"approved": True}).status_code == 200
+    await _asyncio.wait_for(task, timeout=30)
+    assert client.get(f"/api/experiments/{rid}/results").json()["verification"]["outcome"] == "PASS"
+
+
 def test_benchmark_endpoint():
     b = client.get("/api/benchmark").json()
     assert "available" in b and "scope" in b

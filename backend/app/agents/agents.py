@@ -95,8 +95,61 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
             fallback_reason=reason)
 
 
-async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None) -> DefenseProposal:
+FINAL_CHOICE_SYSTEM = (
+    "You are the Defense Strategist in CYBERGENESIS making the FINAL choice among simulated candidate defenses. "
+    "Each candidate was replayed on a cloned twin: blocked=true means the attack objective is stopped, disrupted counts "
+    "legitimate paths broken. Candidates whose path_blocked=true cut the currently attacked path but may leave alternates. "
+    "Return ONLY JSON {\"candidate_label\": str, \"rationale\": str}. Pick the best security/disruption trade-off; "
+    "the simulation-optimal candidate is listed first but the choice is yours."
+)
+CRITIC_SYSTEM = (
+    "You are the Red Team critic in CYBERGENESIS, a defensive simulation on synthetic data only. "
+    "Given a proposed defense and the validated alternate paths that remain after it, state how you would get around it. "
+    "Return ONLY JSON {\"bypass_path_index\": int, \"assessment\": str}. Use -1 if no bypass exists. No commands."
+)
+
+
+async def final_choice(candidates: list[dict], scenario: dict, run_id: str) -> dict:
+    """The AI makes the final call among simulated candidates (simulation informs, never overrides)."""
+    feasible = [c for c in candidates if c["feasible"]]
+    if not feasible:
+        return {"candidate": None, "mode": "offline", "rationale": "no feasible candidate", "agrees_with_optimum": False}
+    listing = "\n".join(f"- {c['label']} [{c['origin']}]: blocked={c['blocked']} path_blocked={c.get('path_blocked')} disrupted={c['disrupted']}"
+                        for c in feasible)
+    try:
+        data, _ = await meta_client.chat_json(FINAL_CHOICE_SYSTEM, f"Invariant: {scenario['invariant']}\nCandidates:\n{listing}", run_id)
+        chosen = next((c for c in feasible if c["label"] == data.get("candidate_label")), None)
+        if chosen is not None:
+            return {"candidate": chosen, "mode": "live", "rationale": str(data.get("rationale", ""))[:220],
+                    "agrees_with_optimum": chosen["label"] == feasible[0]["label"] if feasible else False}
+    except Exception:  # noqa: BLE001 - labelled deterministic fallback
+        pass
+    return {"candidate": feasible[0], "mode": "offline", "rationale": "simulation-optimal candidate (deterministic final choice)",
+            "agrees_with_optimum": True}
+
+
+async def criticize_defense(scenario: dict, defense_label: str, alternate_paths: list[list[str]], run_id: str) -> dict:
+    """Red-team critic: how would red get around this defense?"""
+    if not alternate_paths:
+        return {"bypass": None, "mode": "offline", "assessment": "no validated bypass path remains after this defense"}
+    try:
+        listing = "\n".join(f"{i}: {' -> '.join(p)}" for i, p in enumerate(alternate_paths))
+        data, _ = await meta_client.chat_json(CRITIC_SYSTEM, f"Defense: {defense_label}. Invariant: {scenario['invariant']}\nRemaining validated paths:\n{listing}", run_id)
+        idx = int(data.get("bypass_path_index", 0))
+        if 0 <= idx < len(alternate_paths):
+            return {"bypass": alternate_paths[idx], "mode": "live", "assessment": str(data.get("assessment", ""))[:220]}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"bypass": alternate_paths[0], "mode": "offline", "assessment": "shortest remaining validated path bypasses this defense"}
+
+
+async def propose_defense(scenario: dict, hyp: IncidentHypothesis, run_id: str, twin=None,
+                          past_examples: list[str] | None = None, extra_context: str = "") -> DefenseProposal:
     context = f"Incident: {hyp.hypothesis}. Affected: {hyp.affected_assets}. Invariant to achieve: {scenario['invariant']}."
+    if past_examples:
+        context += " Past verified defenses for similar incidents (from the evidence store): " + " | ".join(past_examples)
+    if extra_context:
+        context += " " + extra_context
     if twin is not None:
         d = twin.to_dict()
         edges = [f"{c['source']}->{c['target']}({','.join(c['types'])})" for c in d["connections"] if c["traversable"]]

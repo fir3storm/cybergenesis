@@ -20,10 +20,59 @@ def _min_edge_cut(baseline: DigitalTwin, scenario: dict) -> int | None:
 
 
 def _edges_removed(baseline: DigitalTwin, after: DigitalTwin) -> int:
-    # traversable edges only — comparable to the minimum edge cut below
-    b = {(c["source"], c["target"]) for c in baseline.to_dict()["connections"] if c["active"] and c["traversable"]}
-    a = {(c["source"], c["target"]) for c in after.to_dict()["connections"] if c["active"] and c["traversable"]}
-    return len(b - a)
+    # connections (undirected pairs) fully or partially cut — comparable to the minimum edge cut.
+    # A one-way outbound block counts as one connection cut, same as the undirected optimum counts it.
+    b = {(c["source"], c["target"]): int(c.get("dir_forward_active", c["active"])) + int(c.get("dir_reverse_active", c["active"]))
+         for c in baseline.to_dict()["connections"] if c["traversable"]}
+    a = {(c["source"], c["target"]): int(c.get("dir_forward_active", c["active"])) + int(c.get("dir_reverse_active", c["active"]))
+         for c in after.to_dict()["connections"] if c["traversable"]}
+    return sum(1 for k in b if a.get(k, 0) < b[k])
+
+
+LEGIT_USERS = {("internet", "web-server"): 1200, ("web-server", "app-server"): 900, ("app-server", "database"): 650,
+               ("employee-workstation", "file-server"): 240, ("employee-workstation", "app-server"): 410,
+               ("admin-workstation", "database"): 25, ("admin-workstation", "app-server"): 40}
+
+
+def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, seed: int = 42) -> float | None:
+    """Monte Carlo: each hop succeeds with probability from target posture + vulnerabilities."""
+    import random
+
+    if scenario["verification_kind"] != "reachability":
+        return None
+    src, tgt = scenario["source_asset"], scenario["target_asset"]
+    postures = {a["id"]: a for a in twin.to_dict()["assets"]}
+    rng = random.Random(seed)
+    hits = 0
+    isolated = set(twin.assets_status_isolated())
+    for _ in range(trials):
+        seen = {src}; stack = [src]
+        while stack:
+            node = stack.pop()
+            if node == tgt:
+                break
+            for nxt in twin.graph.successors(node):
+                if nxt in seen or nxt in isolated or not twin.dir_active.get((node, nxt), False):
+                    continue
+                if not twin.graph[node][nxt].get("traversable", False):
+                    continue
+                dest = postures[nxt]
+                p = max(0.05, min(0.97, 1.12 - dest["posture"] + 0.12 * len(dest["vulnerabilities"])))
+                if rng.random() < p:
+                    seen.add(nxt); stack.append(nxt)
+        if tgt in seen:
+            hits += 1
+    return round(100.0 * hits / trials, 1)
+
+
+def disrupted_users(after: DigitalTwin, baseline: DigitalTwin) -> int:
+    total = 0
+    from app.simulation.twin import LEGITIMATE_PAIRS
+
+    for (s, t), users in LEGIT_USERS.items():
+        if (s, t) in LEGITIMATE_PAIRS and s in after.graph and baseline.reachable(s, t) and not after.reachable(s, t):
+            total += users
+    return total
 
 
 def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
@@ -63,6 +112,9 @@ def verify(scenario: dict, baseline: DigitalTwin, after: DigitalTwin,
         "time_to_detect_s": round(t_detected - t_attack_start, 3),
         "time_to_contain_s": round(t_contained - t_detected, 3) if t_contained else None,
         "time_basis": "simulated telemetry timeline (event offsets), not wall-clock demo delays",
+        "baseline_breach_probability_pct": _breach_probability(baseline, scenario),
+        "after_breach_probability_pct": _breach_probability(after, scenario),
+        "disrupted_users_estimate": disrupted_users(after, baseline),
     }
     passed = all(c["passed"] for c in checks)
     return VerificationResult(outcome="PASS" if passed else "FAIL", invariant=scenario["invariant"],

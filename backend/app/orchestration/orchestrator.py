@@ -1,8 +1,8 @@
-"""Closed-loop orchestrator: Observe -> Reason -> Propose -> Simulate -> Validate -> Act -> Retest -> Red-team -> Prove.
+"""Closed-loop orchestrator v3.
 
-Each run owns its twin instance (cloned from the active/display twin or built from a
-custom definition). Concurrent runs cannot overwrite each other; the display twin is
-only synced to a run's final state when that run finishes.
+Observe -> Reason -> Propose -> Simulate -> AI final choice -> Red critic -> (revise)
+-> Policy -> [Human approval] -> Act -> Verify -> Red-team campaign rounds -> Self-heal -> Prove.
+Each run owns its twin; the display twin syncs only when a run finishes.
 """
 
 import asyncio
@@ -24,6 +24,7 @@ TWIN = DigitalTwin()
 _ws_queues: dict[str, list[asyncio.Queue]] = {}
 _cancelled: set[str] = set()
 _seq: dict[str, int] = {}
+_approvals: dict[str, dict] = {}
 
 
 def subscribe(run_id: str) -> asyncio.Queue:
@@ -41,15 +42,26 @@ def cancel(run_id: str) -> None:
     _cancelled.add(run_id)
 
 
+def _check_cancel(run_id: str) -> bool:
+    return run_id in _cancelled
+
+
+def resolve_approval(run_id: str, approved: bool) -> bool:
+    entry = _approvals.get(run_id)
+    if not entry:
+        return False
+    entry["approved"] = approved
+    entry["event"].set()
+    return True
+
+
 def activate_twin(twin: DigitalTwin) -> DigitalTwin:
-    """Replace the display twin (builtin or user-designed) and return it."""
     global TWIN
     TWIN = twin
     return TWIN
 
 
-def _emit(db, run_id: str, event_type: str, message: str, agent: str | None = None,
-          asset_id: str | None = None, payload: dict | None = None, twin: DigitalTwin | None = None) -> dict:
+def _emit(db, run_id, event_type, message, agent=None, asset_id=None, payload=None, twin=None):
     _seq[run_id] = _seq.get(run_id, 0) + 1
     ev = models.SimulationEvent(run_id=run_id, event_type=event_type, agent=agent, asset_id=asset_id,
                                 message=message, payload=payload or {}, seq=_seq[run_id])
@@ -63,16 +75,12 @@ def _emit(db, run_id: str, event_type: str, message: str, agent: str | None = No
     return data
 
 
-def _check_cancel(run_id: str) -> bool:
-    return run_id in _cancelled
-
-
 async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
     db = SessionLocal()
     twin: DigitalTwin | None = None
     delay_s = (settings.sim_step_delay_ms if step_delay_ms is None else step_delay_ms) / 1000
 
-    async def _delay() -> None:
+    async def _delay():
         if delay_s:
             await asyncio.sleep(delay_s)
 
@@ -96,25 +104,21 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                 raise ValueError(f"custom twin not found: {run.custom_twin_id}")
             twin = DigitalTwin.from_dict(trow.assets, trow.connections)
         else:
-            twin = TWIN.clone()  # per-run twin: concurrent runs are isolated
+            twin = TWIN.clone()
             twin.reset()
         for aid in (scenario["source_asset"], scenario["target_asset"]):
             if aid not in twin.asset_ids():
-                raise ValueError(f"scenario asset '{aid}' not in twin '{twin.asset_ids()}'")
-        for step in scenario["attack_steps"]:
-            if step["asset"] not in twin.asset_ids():
-                raise ValueError(f"attack step asset '{step['asset']}' not in twin")
-
+                raise ValueError(f"scenario asset '{aid}' not in twin")
         run.started_at = datetime.now(timezone.utc)
         mode = "live" if meta_client.configured else "offline"
         run.mode = mode; db.commit()
 
-        async def set_state(state: str, msg: str, agent: str | None = None):
+        async def set_state(state, msg, agent=None):
             run.state = state; db.commit()
             emit("state", msg, agent=agent, payload={"state": state, "mode": mode})
             await _delay()
 
-        if _check_cancel(run_id):
+        if run_id in _cancelled:
             raise asyncio.CancelledError()
         await set_state("SCENARIO_SELECTED", f"Scenario selected: {scenario['name']}", "adversary_simulator")
         baseline_twin = twin.clone()
@@ -125,10 +129,10 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         telemetry = twin.apply_attack(scenario, seed=run.seed)
         attacked_clone = baseline_twin.clone(); attacked_clone.apply_attack(scenario, seed=run.seed)
         baseline_result = attacked_clone.attempt_attack_objective(scenario)
+        baseline_path = baseline_result.get("path") or [scenario["source_asset"], scenario["target_asset"]]
         db.add(models.AssetStateSnapshot(run_id=run_id, label="attacked", snapshot=twin.snapshot())); db.commit()
         for e in telemetry:
-            db.add(models.EvidenceRecord(run_id=run_id, kind="telemetry", ref=e["id"],
-                                         summary=e["message"], data=e))
+            db.add(models.EvidenceRecord(run_id=run_id, kind="telemetry", ref=e["id"], summary=e["message"], data=e))
             emit("telemetry", e["message"], agent="adversary_simulator", asset_id=e["asset_id"], payload=e)
             await _delay()
         db.commit()
@@ -141,170 +145,280 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
                                     mode="offline", evidence_refs=obs.event_ids, asset_ids=obs.asset_ids)); db.commit()
         emit("agent_decision", obs.summary, agent="observer", payload=obs.model_dump())
 
-        await set_state("INVESTIGATING", "Meta Muse Spark investigating evidence" if mode == "live" else "Investigating evidence (OFFLINE deterministic mode — no Meta inference)", "incident_investigator")
+        # learning across runs: past verified defenses for this scenario, from the evidence store
+        past_examples: list[str] = []
+        try:
+            past = (db.query(models.DefenseProposal)
+                    .filter(models.DefenseProposal.run_id.in_(
+                        db.query(models.SimulationRun.id).filter(models.SimulationRun.scenario_id == run.scenario_id)))
+                    .order_by(models.DefenseProposal.created_at.desc()).limit(3).all())
+            past_examples = [f"{p.actions} (confidence {p.confidence})" for p in past if p.actions]
+        except Exception:  # noqa: BLE001 - learning is best-effort context, never a blocker
+            past_examples = []
+
+        await set_state("INVESTIGATING", "Meta Muse Spark investigating evidence" if mode == "live" else "Investigating evidence (OFFLINE)", "incident_investigator")
         hyp = await agents.investigate(scenario, obs, run_id, telemetry=telemetry, twin=twin)
         if hyp.fallback_reason:
             emit("provider_fallback", f"Investigator fell back to offline: {hyp.fallback_reason}", agent="incident_investigator")
         db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp.hypothesis,
-                                    justification="; ".join(hyp.confirmed), confidence=hyp.confidence,
-                                    model=hyp.model, mode=hyp.mode, evidence_refs=hyp.evidence_refs,
-                                    asset_ids=hyp.affected_assets)); db.commit()
+                                    justification="; ".join(hyp.confirmed), confidence=hyp.confidence, model=hyp.model,
+                                    mode=hyp.mode, evidence_refs=hyp.evidence_refs, asset_ids=hyp.affected_assets,
+                                    data={"claim_evidence": hyp.claim_evidence})); db.commit()
         emit("agent_decision", hyp.hypothesis, agent="incident_investigator", payload=hyp.model_dump())
+
+        # race against time: slow live reasoning lets the attack spread one hop (simulated)
+        live_latency = sum(u["latency_ms"] for u in meta_client.usage if u.get("run_id") == run_id)
+        if live_latency > 6000 and baseline_path and len(baseline_path) > 2:
+            spread_to = next((n for n in baseline_path[1:-1] if twin.status.get(n) == "healthy"), None)
+            if spread_to:
+                twin.status[spread_to] = "suspicious"
+                emit("telemetry", f"Attack spread to {spread_to} while the AI was reasoning ({live_latency} ms of model latency)",
+                     agent="adversary_simulator", asset_id=spread_to,
+                     payload={"id": f"tele-spread-{run_id[:6]}", "event_type": "network_connection", "asset_id": spread_to})
         await _delay()
 
-        await set_state("DEFENSE_PROPOSED", "Defense strategist proposing countermeasure", "defense_strategist")
-        proposal = await agents.propose_defense(scenario, hyp, run_id, twin=twin)
-        if proposal.fallback_reason:
-            emit("provider_fallback", f"Strategist fell back to offline: {proposal.fallback_reason}", agent="defense_strategist")
-        modes = {hyp.mode, proposal.mode}
-        run.mode = "live" if modes == {"live"} else "offline" if modes == {"offline"} else "mixed"
-        db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
-                                      justification=proposal.justification, confidence=proposal.confidence, mode=proposal.mode))
-        db.add(models.AgentDecision(run_id=run_id, agent="defense_strategist",
-                                    decision=", ".join(f"{a.action_type}:{a.asset_id}" for a in proposal.actions),
-                                    justification=proposal.justification, confidence=proposal.confidence,
-                                    model=proposal.model, mode=proposal.mode, evidence_refs=proposal.evidence_refs,
-                                    asset_ids=[a.asset_id for a in proposal.actions])); db.commit()
-        emit("agent_decision", proposal.justification, agent="defense_strategist", payload=proposal.model_dump())
+        sim_contained: float | None = None
+        final_choice_meta: dict = {}
 
-        # Simulate-before-acting: replay the proposal + alternatives on clones, pick best trade-off
-        emit("state", "Simulating candidate defenses on cloned twins", agent="defense_strategist", payload={"state": "SIMULATING_CANDIDATES"})
-        candidates = evaluate_candidates(attacked_clone, baseline_twin, scenario, [a.model_dump() for a in proposal.actions])
-        for c in candidates:
-            emit("candidate_evaluation", f"{c['label']} [{c['origin']}]: blocked={c['blocked']} disrupted={c['disrupted']} — {c['detail']}",
-                 agent="defense_strategist", payload=c)
-        best = candidates[0] if candidates else None
-        ai_cand = next((c for c in candidates if c["origin"] == "ai"), None)
-        if ai_cand and ai_cand["feasible"] and (ai_cand["blocked"] or ai_cand.get("path_blocked")):
-            chosen = list(proposal.actions)  # agent's defense cuts the attacked path; red team may still find another
-        elif best and best["feasible"] and best["blocked"]:
-            chosen = [DefenseAction(**a) for a in best["actions"]]
-            emit("candidate_selected", f"Simulation selected '{best['label']}' over the agent proposal (blocked with disruption={best['disrupted']})",
-                 agent="defense_executor", payload=best)
-        else:
-            chosen = list(proposal.actions)
-        run.metrics = {"candidates": candidates}; db.commit()
-        await _delay()
+        async def defend(hyp_obj, round_num: int, extra_context: str = "") -> tuple[list, object]:
+            """Propose -> simulate -> AI final choice -> critic -> policy -> [approval] -> apply. Fully recorded."""
+            await set_state("DEFENSE_PROPOSED", f"[round {round_num}] Defense strategist proposing countermeasure", "defense_strategist")
+            proposal = await agents.propose_defense(scenario, hyp_obj, run_id, twin=twin,
+                                                    past_examples=past_examples, extra_context=extra_context)
+            if proposal.fallback_reason:
+                emit("provider_fallback", f"Strategist fell back to offline: {proposal.fallback_reason}", agent="defense_strategist")
+            db.add(models.DefenseProposal(run_id=run_id, actions=[a.model_dump() for a in proposal.actions],
+                                          justification=proposal.justification, confidence=proposal.confidence, mode=proposal.mode))
+            db.add(models.AgentDecision(run_id=run_id, agent="defense_strategist",
+                                        decision=", ".join(f"{a.action_type}:{a.asset_id}" for a in proposal.actions),
+                                        justification=proposal.justification, confidence=proposal.confidence,
+                                        model=proposal.model, mode=proposal.mode, evidence_refs=proposal.evidence_refs,
+                                        asset_ids=[a.asset_id for a in proposal.actions])); db.commit()
+            emit("agent_decision", proposal.justification, agent="defense_strategist", payload=proposal.model_dump())
 
-        await set_state("POLICY_VALIDATING", "Deterministic policy engine validating chosen defense", "defense_executor")
-        decisions = []
-        for a in chosen:
-            d = policy_engine.evaluate(a.action_type, a.asset_id, a.params, twin)
-            decisions.append(d)
-            db.add(models.PolicyEvaluation(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id,
-                                           approved=d.approved, reasons=d.reasons))
-            emit("policy_decision", f"{a.action_type} on {a.asset_id}: {'APPROVED' if d.approved else 'REJECTED'} — {'; '.join(d.reasons)}",
-                 agent="defense_executor", asset_id=a.asset_id, payload=d.model_dump())
-        db.commit()
-        await _delay()
+            emit("state", "Simulating candidate defenses on cloned twins", agent="defense_strategist", payload={"state": "SIMULATING_CANDIDATES"})
+            candidates = evaluate_candidates(twin.clone(), baseline_twin, scenario, [a.model_dump() for a in proposal.actions])
+            for c in candidates:
+                emit("candidate_evaluation", f"{c['label']} [{c['origin']}]: blocked={c['blocked']} disrupted={c['disrupted']} — {c['detail']}",
+                     agent="defense_strategist", payload=c)
+            choice = await agents.final_choice(candidates, scenario, run_id)
+            final_choice_meta.update(choice)
+            chosen_cand = choice["candidate"]
+            emit("final_choice", f"Final choice by {'Meta AI' if choice['mode'] == 'live' else 'deterministic fallback'}: {chosen_cand['label'] if chosen_cand else 'none'} — {choice['rationale']} (agrees with simulation optimum: {choice['agrees_with_optimum']})",
+                 agent="defense_strategist", payload={"label": chosen_cand["label"] if chosen_cand else None, "mode": choice["mode"],
+                                                      "agrees_with_optimum": choice["agrees_with_optimum"]})
+            chosen = [DefenseAction(**a) for a in chosen_cand["actions"]] if chosen_cand else list(proposal.actions)
 
-        await set_state("DEFENSE_APPLYING", "Applying approved simulated defenses", "defense_executor")
-        applied = 0
-        for a, d in zip(chosen, decisions):
-            if not d.approved:
-                emit("defense_rejected", f"Skipped rejected action {a.action_type}", agent="defense_executor", asset_id=a.asset_id)
-                continue
-            try:
-                transition = twin.apply_action(a.action_type, a.asset_id, a.params)
-                applied += 1
-                db.add(models.DefenseExecution(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, success=True, transition=transition))
-                db.add(models.EvidenceRecord(run_id=run_id, kind="defense", ref=f"defense:{a.action_type}:{a.asset_id}", summary=str(transition), data=transition))
-                emit("defense_applied", f"Applied {a.action_type} to {a.asset_id}", agent="defense_executor", asset_id=a.asset_id, payload=transition)
-            except ValueError as e:
-                db.add(models.DefenseExecution(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, success=False, transition={"error": str(e)}))
-                emit("defense_failed", str(e), agent="defense_executor", asset_id=a.asset_id)
+            # red-team critic: how would red get around this, before it is applied?
+            clone = twin.clone()
+            for a in chosen:
+                if policy_engine.evaluate(a.action_type, a.asset_id, a.params, clone).approved:
+                    try:
+                        clone.apply_action(a.action_type, a.asset_id, a.params)
+                    except ValueError:
+                        pass
+            alt = red_team.enumerate_paths(clone, scenario["source_asset"], scenario["target_asset"]) \
+                if scenario["verification_kind"] == "reachability" else []
+            critic = await agents.criticize_defense(scenario, chosen_cand["label"] if chosen_cand else "proposal", alt, run_id)
+            emit("red_critic", f"Red critic ({critic['mode']}): {critic['assessment']}" + (f" — bypass: {' -> '.join(critic['bypass'])}" if critic["bypass"] else ""),
+                 agent="adversary_simulator", payload=critic)
+
+            await set_state("POLICY_VALIDATING", "Deterministic policy engine validating chosen defense", "defense_executor")
+            decisions = []
+            for a in chosen:
+                d = policy_engine.evaluate(a.action_type, a.asset_id, a.params, twin)
+                decisions.append(d)
+                db.add(models.PolicyEvaluation(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, approved=d.approved, reasons=d.reasons))
+                emit("policy_decision", f"{a.action_type} on {a.asset_id}: {'APPROVED' if d.approved else 'REJECTED'} — {'; '.join(d.reasons)}",
+                     agent="defense_executor", asset_id=a.asset_id, payload=d.model_dump())
             db.commit()
+
+            # human approval gate for high-disruption defenses
+            disrupted_est = chosen_cand["disrupted"] if chosen_cand else None
+            if settings.human_approval_enabled and disrupted_est is not None and disrupted_est >= 2:
+                entry = {"event": asyncio.Event(), "approved": None}
+                _approvals[run_id] = entry
+                emit("approval_required", f"Human approval required: '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths. Approve in the UI.",
+                     agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est})
+                try:
+                    await asyncio.wait_for(entry["event"].wait(), timeout=settings.approval_timeout_seconds)
+                    approved_by_human = bool(entry["approved"])
+                except asyncio.TimeoutError:
+                    approved_by_human = False
+                    emit("approval_timeout", "Human approval timed out — defense NOT applied", agent="defense_executor")
+                _approvals.pop(run_id, None)
+                if not approved_by_human:
+                    emit("defense_rejected", "Defense rejected by human operator (or approval timeout)", agent="defense_executor")
+                    return candidates, proposal
             await _delay()
-        sim_contained = sim_detected + 0.4 * applied if applied else None
+
+            await set_state("DEFENSE_APPLYING", "Applying approved simulated defenses", "defense_executor")
+            applied = 0
+            for a, d in zip(chosen, decisions):
+                if not d.approved:
+                    emit("defense_rejected", f"Skipped rejected action {a.action_type} on {a.asset_id}: {'; '.join(d.reasons)}",
+                         agent="defense_executor", asset_id=a.asset_id)
+                    continue
+                try:
+                    transition = twin.apply_action(a.action_type, a.asset_id, a.params)
+                    applied += 1
+                    db.add(models.DefenseExecution(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, success=True, transition=transition))
+                    db.add(models.EvidenceRecord(run_id=run_id, kind="defense", ref=f"defense:{a.action_type}:{a.asset_id}", summary=str(transition), data=transition))
+                    emit("defense_applied", f"Applied {a.action_type} to {a.asset_id}", agent="defense_executor", asset_id=a.asset_id, payload=transition)
+                except ValueError as e:
+                    db.add(models.DefenseExecution(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, success=False, transition={"error": str(e)}))
+                    emit("defense_failed", str(e), agent="defense_executor", asset_id=a.asset_id)
+                db.commit()
+                await _delay()
+            nonlocal_sim = sim_detected + 0.4 * applied if applied else None
+            return candidates, nonlocal_sim
+
+        candidates, sim_contained = await defend(hyp, 1)
 
         async def do_verify():
             await set_state("VERIFYING", "Verification Scientist replaying attack against modified twin", "verification_scientist")
             res = verify(scenario, baseline_twin, twin, baseline_result, 0.0, sim_detected, sim_contained)
             db.add(models.VerificationResultRow(run_id=run_id, outcome=res.outcome, invariant=res.invariant,
                                                 checks=[c.model_dump() for c in res.checks], metrics=res.metrics))
-            db.add(models.EvidenceRecord(run_id=run_id, kind="verification", ref=f"verification:{res.outcome}",
-                                         summary=res.invariant, data=res.model_dump()))
+            db.add(models.EvidenceRecord(run_id=run_id, kind="verification", ref=f"verification:{res.outcome}", summary=res.invariant, data=res.model_dump()))
             emit("verification", f"Verification {res.outcome}: {res.invariant}", agent="verification_scientist", payload=res.model_dump())
             return res
 
         result = await do_verify()
+        primary_result = result
+        original_scenario = scenario
         initial_paths = red_team.enumerate_paths(baseline_twin, scenario["source_asset"], scenario["target_asset"]) \
             if scenario["verification_kind"] == "reachability" else []
-        remaining0 = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"]) \
-            if scenario["verification_kind"] == "reachability" else []
-        resilience0 = round(100.0 * (1 - len(remaining0) / max(len(initial_paths), 1)), 1) if initial_paths else result.metrics["defense_effectiveness_pct"]
-        rounds = [{"round": 1, "path": baseline_result.get("path"), "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                   "resilience_score": resilience0, "outcome": result.outcome, "red_team_mode": None}]
 
-        # AI red team: look for an alternate path; loop defense while one exists (max 5 rounds total)
+        def resilience_now() -> float:
+            if not initial_paths:
+                return result.metrics["defense_effectiveness_pct"]
+            remaining = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
+            return round(100.0 * (1 - len(remaining) / max(len(initial_paths), 1)), 1)
+
+        rounds = [{"round": 1, "path": baseline_path, "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
+                   "resilience_score": resilience_now(), "outcome": result.outcome, "red_team_mode": None}]
+
         if scenario["verification_kind"] == "reachability":
             for round_num in range(2, 6):
                 paths = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
+                campaign_src, campaign_tgt = scenario["source_asset"], scenario["target_asset"]
+                pivot_kind = None
                 if not paths:
-                    emit("red_team", f"Red team (round {round_num}): no alternate path from {scenario['source_asset']} to {scenario['target_asset']} — attack surface closed",
-                         agent="adversary_simulator", payload={"paths": []})
-                    break
-                chosen_path, rt_mode, rationale = await red_team.choose_path(paths, run_id)
-                # red moves are policy-validated too: every hop must be an active, traversable, allowlisted step
+                    pivot = red_team.find_new_objective(twin, campaign_src, campaign_tgt)
+                    if not pivot:
+                        emit("red_team", f"Red team (round {round_num}): no path and no new foothold/target — attack surface closed",
+                             agent="adversary_simulator", payload={"paths": []})
+                        break
+                    campaign_src, campaign_tgt, _p, pivot_kind = pivot
+                    scenario = {**scenario, "source_asset": campaign_src, "target_asset": campaign_tgt,
+                                "invariant": f"No path from {campaign_src} to {campaign_tgt}"}
+                    baseline_result = twin.attempt_attack_objective(scenario)
+                    # baseline_result must reflect pre-defense reachability for the new objective
+                    baseline_result = {"objective_blocked": False, "path": _p}
+                    paths = [_p]
+                    emit("red_team_pivot", f"Red team changes approach ({pivot_kind}): new foothold {campaign_src} -> new objective {campaign_tgt} via {' -> '.join(_p)}",
+                         agent="adversary_simulator", payload={"source": campaign_src, "target": campaign_tgt, "path": _p, "kind": pivot_kind})
+                plan = await red_team.plan_campaign(twin, campaign_src, campaign_tgt, paths, run_id)
+                chosen_path = plan["path"]
+                emit("red_team", f"Red team campaign (round {round_num}, mode={plan['mode']}): {' -> '.join(chosen_path)} — {plan['rationale']}",
+                     agent="adversary_simulator", payload={"path": chosen_path, "mode": plan["mode"], "campaign": plan["campaign"], "candidates": paths})
+                db.add(models.AgentDecision(run_id=run_id, agent="adversary_simulator",
+                                            decision=f"campaign: {' -> '.join(chosen_path)}",
+                                            justification=plan["rationale"], confidence=0.8,
+                                            model=meta_client.model if plan["mode"] == "live" else "deterministic",
+                                            mode=plan["mode"], evidence_refs=[], asset_ids=chosen_path,
+                                            data={"campaign": plan["campaign"]})); db.commit()
                 conns = {(c["source"], c["target"]): c for c in twin.to_dict()["connections"]}
-                def _conn(a: str, b: str):
+
+                def _conn(a, b):
                     return conns.get((a, b)) or conns.get((b, a))
 
-                hops_ok = all(
-                    _conn(chosen_path[i], chosen_path[i + 1]) is not None
-                    and _conn(chosen_path[i], chosen_path[i + 1])["active"]
-                    and _conn(chosen_path[i], chosen_path[i + 1])["traversable"]
-                    for i in range(len(chosen_path) - 1))
-                emit("policy_decision", f"Red team path {'VALIDATED' if hops_ok else 'REJECTED'}: {' -> '.join(chosen_path)} (typed network_connection steps only)",
+                hops_ok = all(_conn(chosen_path[i], chosen_path[i + 1]) is not None
+                              and _conn(chosen_path[i], chosen_path[i + 1])["active"]
+                              and _conn(chosen_path[i], chosen_path[i + 1])["traversable"]
+                              for i in range(len(chosen_path) - 1))
+                emit("policy_decision", f"Red team campaign {'VALIDATED' if hops_ok else 'REJECTED'} (allowlisted typed steps, graph-checked hops)",
                      agent="defense_executor", payload={"approved": hops_ok, "path": chosen_path})
                 if not hops_ok:
                     break
-                emit("red_team", f"Red team (round {round_num}, mode={rt_mode}) found alternate path: {' -> '.join(chosen_path)} — {rationale}",
-                     agent="adversary_simulator", payload={"path": chosen_path, "mode": rt_mode, "candidates": paths})
+                red_telemetry = []
                 for i, node in enumerate(chosen_path):
-                    emit("telemetry", f"[round {round_num}] Red team traverses {node}", agent="adversary_simulator",
-                         asset_id=node, payload={"id": f"tele-red-{run_id[:6]}-{round_num}-{i}", "event_type": "network_connection", "asset_id": node})
+                    e = {"id": f"tele-red-{run_id[:6]}-{round_num}-{i}", "event_type": "network_connection",
+                         "asset_id": node, "message": f"[round {round_num}] Red team traverses {node}", "offset_ms": 400 * (i + 1)}
+                    red_telemetry.append(e)
+                    emit("telemetry", e["message"], agent="adversary_simulator", asset_id=node, payload=e)
                 for node in chosen_path[1:-1]:
                     if twin.status.get(node) == "healthy":
                         twin.status[node] = "suspicious"
-                twin.status[scenario["target_asset"]] = "suspicious"
-                await set_state("DEFENSE_PROPOSED", f"Round {round_num}: strategist responding to red-team path", "defense_strategist")
-                prop2 = await agents.propose_defense(scenario, hyp, run_id, twin=twin)
-                applied2 = 0
-                for a in prop2.actions:
-                    d = policy_engine.evaluate(a.action_type, a.asset_id, a.params, twin)
-                    db.add(models.PolicyEvaluation(run_id=run_id, action_type=a.action_type, asset_id=a.asset_id, approved=d.approved, reasons=d.reasons))
-                    if d.approved:
-                        try:
-                            twin.apply_action(a.action_type, a.asset_id, a.params); applied2 += 1
-                            emit("defense_applied", f"[round {round_num}] Applied {a.action_type} to {a.asset_id}", agent="defense_executor", asset_id=a.asset_id)
-                        except ValueError:
-                            pass
-                db.commit()
-                sim_contained = (sim_contained or sim_detected) + 0.4 * applied2
+                twin.status[campaign_tgt] = "suspicious"
+                obs2 = agents.observe(red_telemetry)
+                hyp2 = await agents.investigate(scenario, obs2, run_id, telemetry=red_telemetry, twin=twin)
+                db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp2.hypothesis,
+                                            justification="; ".join(hyp2.confirmed), confidence=hyp2.confidence, model=hyp2.model,
+                                            mode=hyp2.mode, evidence_refs=hyp2.evidence_refs, asset_ids=hyp2.affected_assets,
+                                            data={"claim_evidence": hyp2.claim_evidence, "round": round_num})); db.commit()
+                _c, sim_contained = await defend(hyp2, round_num)
                 result = await do_verify()
-                remaining = red_team.enumerate_paths(twin, scenario["source_asset"], scenario["target_asset"])
-                resilience = round(100.0 * (1 - len(remaining) / max(len(initial_paths), 1)), 1) if initial_paths else result.metrics["defense_effectiveness_pct"]
                 rounds.append({"round": round_num, "path": chosen_path, "effectiveness_pct": result.metrics["defense_effectiveness_pct"],
-                               "resilience_score": resilience, "outcome": result.outcome, "red_team_mode": rt_mode})
-                if result.outcome == "FAIL":
+                               "resilience_score": resilience_now(), "outcome": result.outcome, "red_team_mode": plan["mode"]})
+                if pivot_kind:
+                    # exploratory pivot: recorded as its own round; the run verdict stays with the primary objective
+                    result = primary_result
+                    scenario = original_scenario
                     break
+                if _check_cancel(run_id):
+                    break
+
+        # self-healing: win back legitimate traffic where the objective stays blocked
+        if result.outcome == "PASS":
+            for entry in list(twin.containment):
+                clone = twin.clone()
+                try:
+                    if entry.startswith("isolate:"):
+                        clone.apply_action("restore_connectivity", entry.split(":", 1)[1])
+                    elif entry.startswith(("block:", "block_outbound:")):
+                        pair = entry.split(":", 1)[1].split("->")
+                        clone.apply_action("restore_connectivity", pair[0], {"source": pair[0], "target": pair[1]})
+                    else:
+                        continue
+                except ValueError:
+                    continue
+                if clone.attempt_attack_objective(scenario)["objective_blocked"]:
+                    # safe to restore on the real twin
+                    if entry.startswith("isolate:"):
+                        twin.apply_action("restore_connectivity", entry.split(":", 1)[1])
+                    else:
+                        pair = entry.split(":", 1)[1].split("->")
+                        twin.apply_action("restore_connectivity", pair[0], {"source": pair[0], "target": pair[1]})
+                    db.add(models.DefenseExecution(run_id=run_id, action_type="restore_connectivity",
+                                                    asset_id=entry.split(":", 1)[1], success=True,
+                                                    transition={"self_healing": entry}))
+                    emit("self_healing", f"Self-healing: restored {entry} — attack objective still blocked, legitimate traffic recovered",
+                         agent="defense_executor")
+                    db.commit()
+            result = await do_verify()
 
         result.metrics["rounds"] = rounds
         result.metrics["candidates"] = candidates
+        result.metrics["ai_final_choice"] = {"mode": final_choice_meta.get("mode"),
+                                             "agrees_with_simulation_optimum": final_choice_meta.get("agrees_with_optimum")}
         latest_ver = db.query(models.VerificationResultRow).filter_by(run_id=run_id).order_by(
             models.VerificationResultRow.created_at.desc()).first()
         if latest_ver:
             latest_ver.metrics = dict(result.metrics); db.commit()
+        modes = {hyp.mode}
+        run.mode = "live" if modes == {"live"} else "offline" if modes == {"offline"} else "mixed"
         db.add(models.AgentDecision(run_id=run_id, agent="verification_scientist", decision=f"VERIFICATION {result.outcome}",
-                                    justification=result.invariant, confidence=1.0 if result.outcome != "INCONCLUSIVE" else 0.4,
-                                    model="deterministic-replay", mode="offline", evidence_refs=result.evidence_refs,
-                                    asset_ids=[scenario["target_asset"]])); db.commit()
+                                    justification=result.invariant, confidence=1.0, model="deterministic-replay",
+                                    mode="offline", evidence_refs=result.evidence_refs, asset_ids=[scenario["target_asset"]])); db.commit()
 
-        if result.outcome == "PASS":  # visuals must agree with the verdict: target is PROTECTED, not "suspicious"
+        if result.outcome == "PASS":
             for aid, st in list(twin.status.items()):
-                if st == "suspicious":
-                    twin.status[aid] = "protected" if aid == scenario["target_asset"] else "healthy"
+                if aid == scenario["target_asset"] and st in ("suspicious", "compromised"):
+                    twin.status[aid] = "protected"  # target held: evidence of the attempt remains in the audit trail
+                elif st in ("suspicious", "compromised") and not twin.isolated.get(aid):
+                    twin.status[aid] = "cleared"  # attacker was here, now cleared — distinct from never-touched "healthy"
 
         for u in list(meta_client.usage):
             if u.get("run_id") == run_id:
@@ -318,7 +432,7 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         if _check_cancel(run_id):
             run.error = "cancelled by operator"
         run.ended_at = datetime.now(timezone.utc); db.commit()
-        activate_twin(twin)  # display sync: last finished run wins the shared view
+        activate_twin(twin)
         emit("completed" if run.state == "COMPLETED" else "failed",
              f"Experiment {run.state} — verification {result.outcome}", payload={"verification": result.model_dump(), "metrics": result.metrics})
     except asyncio.CancelledError:
@@ -326,11 +440,12 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         if run:
             run.state = "FAILED"; run.error = "cancelled"; run.ended_at = datetime.now(timezone.utc); db.commit()
             _emit(db, run_id, "failed", "Experiment cancelled", twin=twin)
-    except Exception as e:  # noqa: BLE001 - honest failure state
+    except Exception as e:  # noqa: BLE001
         run = db.get(models.SimulationRun, run_id)
         if run:
             run.state = "FAILED"; run.error = f"{type(e).__name__}: {e}"; run.ended_at = datetime.now(timezone.utc); db.commit()
             _emit(db, run_id, "failed", run.error, twin=twin)
     finally:
         _cancelled.discard(run_id)
+        _approvals.pop(run_id, None)
         db.close()

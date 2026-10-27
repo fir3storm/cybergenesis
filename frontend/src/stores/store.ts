@@ -18,6 +18,7 @@ interface State {
   replayVerdict: string | null
   mapFocus: boolean
   cinematicMode: boolean
+  highlightRef: string | null
   customTwins: import('../types').CustomTwinDef[]
   customScenarios: import('../types').CustomScenarioDef[]
   designerTwinId: string | null
@@ -41,6 +42,7 @@ export const useStore = create<State>((set) => ({
   replayVerdict: null,
   mapFocus: true,
   cinematicMode: false,
+  highlightRef: null,
   customTwins: [],
   customScenarios: [],
   designerTwinId: null,

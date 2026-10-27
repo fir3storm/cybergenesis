@@ -27,12 +27,19 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
         approved = False; reasons.append(f"disable_service not permitted on '{asset_id}'")
     if action_type == "block_connection":
         s, t = params.get("source", asset_id), params.get("target")
-        if not t or not twin.graph.has_edge(s, t):
+        if not t or not (twin.graph.has_edge(s, t) or twin.graph.has_edge(t, s)):
             approved = False; reasons.append("connection does not exist")
-        elif not twin.edge_active[frozenset((s, t))]:
+        elif params.get("direction") == "outbound":
+            if not twin.dir_active.get((s, t), False):
+                approved = False; reasons.append("outbound direction already blocked")
+        elif not (twin.dir_active.get((s, t), False) or twin.dir_active.get((t, s), False)):
             approved = False; reasons.append("connection already blocked")
     if action_type in ("revoke_session", "rotate_credential") and asset_id not in ("identity-provider", "admin-workstation", "employee-workstation"):
         approved = False; reasons.append(f"{action_type} only permitted on identity/workstation assets")
     if approved:
         reasons.append("allowlisted action, asset in simulation boundary, preconditions satisfied")
-    return PolicyDecision(action_type=action_type, asset_id=asset_id, approved=approved, reasons=reasons)
+    human = approved and action_type == "isolate_asset"
+    if human:
+        reasons.append("high-impact action: human approval required when estimated disruption is high")
+    return PolicyDecision(action_type=action_type, asset_id=asset_id, approved=approved, reasons=reasons,
+                          requires_human_approval=human)

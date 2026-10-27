@@ -58,6 +58,28 @@ export default function TwinDesigner() {
       ? { ...a, pos: [Math.round(x * 10) / 10, a.pos[1], Math.round(z * 10) / 10] } : a))
   }
 
+  const [mermaid, setMermaid] = useState('flowchart LR\n  ws[Workstation] --> fs[File Server]\n  fs --> db[Database]')
+  function importMermaid() {
+    const nodes = new Map<string, DAsset>()
+    const edges: DConn[] = []
+    let n = 0
+    for (const line of mermaid.split('\n')) {
+      const m = line.match(/(\w+)(?:\[([^\]]+)\])?\s*-->\s*(\w+)(?:\[([^\]]+)\])?/)
+      if (!m) continue
+      for (const [id, label] of [[m[1], m[2]], [m[3], m[4]]] as [string, string | undefined][]) {
+        if (!nodes.has(id)) {
+          n++
+          nodes.set(id, { id, name: label ?? id, asset_type: id.includes('db') || id.includes('data') ? 'database' : id.includes('fs') || id.includes('file') ? 'file_server' : 'workstation',
+            zone: 'custom', posture: 0.7, vulnerabilities: [], pos: [(n % 4) * 3.4 - 5, 1.1, Math.floor(n / 4) * 3 - 2] })
+        }
+      }
+      edges.push({ source: m[1], target: m[3], trust: 'medium', traversable: true, types: ['network'] })
+    }
+    if (!nodes.size) { setMsg('Mermaid import: no `a[Label] --> b[Label]` lines parsed.'); return }
+    setAssets([...nodes.values()]); setConns(edges)
+    setMsg(`Mermaid import: ${nodes.size} assets, ${edges.length} connections — review, then Save.`)
+  }
+
   async function save() {
     try {
       const saved = await api.createCustomTwin({ name, description: 'Designed in Twin Designer', assets, connections: conns })
@@ -86,6 +108,10 @@ export default function TwinDesigner() {
               </button>
             ))}
           </div>
+          <h2 className="mt-4 text-xs font-bold tracking-wider text-cyan-300">IMPORT (MERMAID)</h2>
+          <textarea value={mermaid} onChange={(e) => setMermaid(e.target.value)} rows={4} aria-label="Mermaid diagram"
+            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 font-mono text-[10px]" />
+          <button onClick={importMermaid} className="mt-1 w-full rounded border border-cyan-700 py-1 text-[11px] text-cyan-200">Import Mermaid → canvas</button>
           <h2 className="mt-4 text-xs font-bold tracking-wider text-cyan-300">ASSETS ({assets.length})</h2>
           {assets.map((a) => (
             <div key={a.id} className="mt-1 flex items-center justify-between rounded bg-slate-950/60 px-2 py-1 text-xs">

@@ -27,7 +27,7 @@ const SCENARIO_ICONS: Record<string, ReactNode> = {
 }
 import { api, WS } from './services/api'
 import { useStore } from './stores/store'
-import type { Asset, Twin, View } from './types'
+import type { Asset, RunResult, Twin, View } from './types'
 
 const AGENTS = [
   { id: 'observer', name: 'Observer', desc: 'Deterministic telemetry anomaly detection', engine: 'Deterministic', input: 'SimulationEvents (telemetry)', output: 'AgentObservation', duties: ['Consume synthetic telemetry', 'Detect anomaly patterns (file bursts, auth failures, network paths)', 'Emit structured observation with confidence'] },
@@ -36,6 +36,14 @@ const AGENTS = [
   { id: 'defense_strategist', name: 'Defense Strategist', desc: 'Meta Muse Spark countermeasure proposals', engine: 'Meta Muse Spark (offline fallback labelled)', input: 'IncidentHypothesis + live twin state', output: 'DefenseProposal', duties: ['Propose allowlisted countermeasures', 'Prefer least disruptive effective action', 'Retry once with policy feedback if rejected'] },
   { id: 'defense_executor', name: 'Defense Executor', desc: 'Deterministic policy gate + allowlisted execution', engine: 'Deterministic', input: 'DefenseProposal', output: 'PolicyDecision + DefenseExecutionResult', duties: ['Validate every action against the deterministic policy engine', 'Apply approved actions to the twin only', 'Record exact state transitions'] },
   { id: 'verification_scientist', name: 'Verification Scientist', desc: 'Independent replay & invariant checking', engine: 'Deterministic replay', input: 'Scenario + modified twin', output: 'VerificationResult (PASS/FAIL)', duties: ['Replay the identical attack objective', 'Compare before/after reachability or access', 'Compute effectiveness + operational cost'] },
+]
+const TOUR_STEPS: { view: View; title: string; text: string }[] = [
+  { view: 'welcome', title: '1 · The Living Twin', text: 'A synthetic enterprise in 3D. Nothing here can touch a real system — every asset, event and credential is simulated.' },
+  { view: 'experiment', title: '2 · Run the loop', text: 'Pick Red vs Blue Battle and press RUN EXPERIMENT. Red attacks, Meta Muse Spark investigates and proposes, a deterministic policy engine gates, then an independent verifier replays the attack.' },
+  { view: 'agents', title: '3 · Agents argue', text: 'Click any agent card. The red critic predicts a bypass before blue commits; the AI makes the final choice among simulated candidates.' },
+  { view: 'verification', title: '4 · Proof, not claims', text: 'Before/after reachability, optimality gap vs the NetworkX minimum cut, probabilistic breach risk, and the resilience curve over red-team rounds.' },
+  { view: 'designer', title: '5 · Build your own', text: 'Design a twin, photograph a whiteboard to generate one, or type a what-if and let Muse Spark write the scenario. Then run the same loop on it.' },
+  { view: 'benchmark', title: '6 · The numbers', text: '50 seeded networks, three defenders, one table. That is the research claim — reproducible with scripts/benchmark.py.' },
 ]
 const STAGES = ['SCENARIO_SELECTED', 'ATTACK_SIMULATING', 'TELEMETRY_COLLECTED', 'INVESTIGATING', 'DEFENSE_PROPOSED', 'POLICY_VALIDATING', 'DEFENSE_APPLYING', 'VERIFYING', 'COMPLETED']
 const DEMO_CLOCK: Record<string, string> = {
@@ -158,10 +166,44 @@ export function BenchmarkView() {
                 <div className="h-4 flex-1 rounded bg-slate-800"><div className={`h-4 rounded ${k === 'none' ? 'bg-red-500' : 'bg-emerald-400'}`} style={{ width: `${v.pass_rate_pct}%` }} /></div><span>{v.pass_rate_pct}%</span></div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">Live Muse Spark is spot-checked on the 4 builtin scenarios (all PASS, gap 0 — see Verification Lab on any live run). The 50-pair table is a real offline run, not a projection.</p>
+          <p className="mt-3 text-xs text-slate-500">Live Muse Spark is spot-checked on the builtin scenarios (all PASS, gap 0 — see Verification Lab on any live run). The 50-pair table is a real offline run, not a projection.</p>
+          {data.calibration && (
+            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3 text-sm">
+              <b className="text-cyan-200">Confidence calibration</b> <span className="text-slate-400">({data.calibration.runs_scored} scored runs from the evidence store)</span>
+              <p className="mt-1 text-xs text-slate-300">Mean Investigator confidence on PASS runs: {data.calibration.mean_confidence_pass ?? '—'} · on FAIL runs: {data.calibration.mean_confidence_fail ?? '—'}</p>
+              <p className="text-[11px] text-slate-500">{data.calibration.note}</p>
+            </div>
+          )}
+          <CompareRuns />
         </>
       )}
     </main>
+  )
+}
+
+function CompareRuns() {
+  const [runs, setRuns] = useState<{ id: string; scenario_id: string; state: string; mode: string }[]>([])
+  const [a, setA] = useState(''); const [b, setB] = useState('')
+  const [res, setRes] = useState<Record<string, RunResult>>({})
+  useEffect(() => { api.experiments().then(setRuns).catch(() => undefined) }, [])
+  const load = (id: string) => { if (id) api.results(id).then((r) => setRes((prev) => ({ ...prev, [id]: r }))).catch(() => undefined) }
+  const cell = (id: string) => {
+    const r = res[id]; if (!r) return '—'
+    return `${r.run.mode} · ${r.verification?.outcome ?? r.run.state} · eff ${String(r.verification?.metrics.defense_effectiveness_pct ?? '—')}% · gap ${String(r.verification?.metrics.optimality_gap ?? '—')} · breach risk ${String(r.verification?.metrics.baseline_breach_probability_pct ?? '—')}% → ${String(r.verification?.metrics.after_breach_probability_pct ?? '—')}%`
+  }
+  const sel = 'rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs'
+  return (
+    <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
+      <b className="text-cyan-200 text-sm">Compare runs side by side</b>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <select value={a} onChange={(e) => { setA(e.target.value); load(e.target.value) }} className={sel}><option value="">Run A…</option>{runs.map((r) => <option key={r.id} value={r.id}>{r.scenario_id} · {r.mode} · {r.state}</option>)}</select>
+        <select value={b} onChange={(e) => { setB(e.target.value); load(e.target.value) }} className={sel}><option value="">Run B…</option>{runs.map((r) => <option key={r.id} value={r.id}>{r.scenario_id} · {r.mode} · {r.state}</option>)}</select>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
+        <div className="rounded bg-slate-950/60 p-2"><b>A</b><p className="mt-1 text-slate-300">{cell(a)}</p></div>
+        <div className="rounded bg-slate-950/60 p-2"><b>B</b><p className="mt-1 text-slate-300">{cell(b)}</p></div>
+      </div>
+    </div>
   )
 }
 
@@ -253,6 +295,7 @@ export default function App() {
   const [replayIdx, setReplayIdx] = useState<number | null>(null)
   const [replayPlaying, setReplayPlaying] = useState(false)
   const [snapshots, setSnapshots] = useState<{ label: string; snapshot: { status: Record<string, string> } }[]>([])
+  const [tourStep, setTourStep] = useState<number | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
 
@@ -417,21 +460,24 @@ export default function App() {
     }
   })()
 
+  const lastEvent = s.events[s.events.length - 1]
+  const approvalPending = lastEvent?.event_type === 'approval_required' ? lastEvent : null
+
   const selected = s.twin?.assets.find((a) => a.id === s.selectedAsset) ?? null
   const scenario = s.scenarios.find((x) => x.id === s.scenarioId)
-  const nav: { id: View; label: string; icon: ReactNode }[] = [
-    { id: 'welcome', label: 'Welcome', icon: <Home size={15} /> },
-    { id: 'twin', label: 'Living Twin', icon: <Globe size={15} /> },
-    { id: 'experiment', label: 'Experiment', icon: <FlaskConical size={15} /> },
-    { id: 'agents', label: 'Agents', icon: <Bot size={15} /> },
-    { id: 'attackpath', label: 'Attack Path', icon: <Route size={15} /> },
-    { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} /> },
-    { id: 'evidence', label: 'Evidence', icon: <FileText size={15} /> },
-    { id: 'designer', label: 'Twin Designer', icon: <PenTool size={15} /> },
-    { id: 'playbook', label: 'Playbook', icon: <Swords size={15} /> },
-    { id: 'library', label: 'Library', icon: <Boxes size={15} /> },
-    { id: 'benchmark', label: 'Benchmark', icon: <BarChart3 size={15} /> },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} /> },
+  const nav: { id: View; label: string; icon: ReactNode; group: string }[] = [
+    { id: 'welcome', label: 'Welcome', icon: <Home size={15} />, group: 'RUN' },
+    { id: 'experiment', label: 'Experiment', icon: <FlaskConical size={15} />, group: 'RUN' },
+    { id: 'twin', label: 'Living Twin', icon: <Globe size={15} />, group: 'INSPECT' },
+    { id: 'agents', label: 'Agents', icon: <Bot size={15} />, group: 'INSPECT' },
+    { id: 'attackpath', label: 'Attack Path', icon: <Route size={15} />, group: 'INSPECT' },
+    { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} />, group: 'INSPECT' },
+    { id: 'evidence', label: 'Evidence', icon: <FileText size={15} />, group: 'INSPECT' },
+    { id: 'designer', label: 'Twin Designer', icon: <PenTool size={15} />, group: 'BUILD' },
+    { id: 'playbook', label: 'Playbook', icon: <Swords size={15} />, group: 'BUILD' },
+    { id: 'library', label: 'Library', icon: <Boxes size={15} />, group: 'BUILD' },
+    { id: 'benchmark', label: 'Benchmark', icon: <BarChart3 size={15} />, group: 'PROOF' },
+    { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} />, group: 'PROOF' },
   ]
   const live = s.modelStatus?.mode === 'live'
 
@@ -448,11 +494,16 @@ export default function App() {
             Meta tokens: {s.results.usage.prompt_tokens} in + {s.results.usage.completion_tokens} out · {s.results.usage.calls} calls
           </span>
         )}
-        <nav className="ml-auto flex flex-wrap gap-1" aria-label="Primary">
-          {nav.map((n) => (
-            <button key={n.id} onClick={() => s.set({ view: n.id })}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs ${s.view === n.id ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-300 hover:bg-slate-800'}`}>
-              {n.icon}{n.label}</button>
+        <nav className="ml-auto flex flex-wrap items-center gap-1" aria-label="Primary">
+          {(['RUN', 'INSPECT', 'BUILD', 'PROOF'] as const).map((group) => (
+            <span key={group} className="flex items-center gap-1">
+              <span className="ml-2 font-mono text-[9px] tracking-widest text-slate-600">{group}</span>
+              {nav.filter((n) => n.group === group).map((n) => (
+                <button key={n.id} onClick={() => s.set({ view: n.id })}
+                  className={`flex items-center gap-1 px-2 py-1.5 rounded text-xs ${s.view === n.id ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/50' : 'text-slate-300 hover:bg-slate-800'}`}>
+                  {n.icon}{n.label}</button>
+              ))}
+            </span>
           ))}
         </nav>
       </header>
@@ -470,6 +521,7 @@ export default function App() {
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button onClick={() => s.set({ view: 'twin' })} className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Enter the Digital Twin</button>
             <button onClick={() => void runDemo('ransomware_activity')} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-slate-950 hover:bg-emerald-400"><Play size={16} /> Run Autonomous Defense Demo</button>
+            <button onClick={() => { setTourStep(0); s.set({ view: TOUR_STEPS[0].view }) }} className="rounded-lg border border-violet-600 px-5 py-3 text-violet-200 hover:bg-violet-950/50">▶ 60-Second Guided Tour</button>
             <button onClick={() => s.set({ view: 'agents' })} className="rounded-lg border border-cyan-700 px-5 py-3 hover:bg-slate-800">Explore Architecture</button>
             <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-5 py-3 disabled:opacity-40" title={s.runId ? 'Download evidence report' : 'Run an experiment first'}><Download size={15} className="inline" /> Download Report</button>
           </div>
@@ -711,7 +763,13 @@ export default function App() {
                     <p className="mt-1 text-[11px] text-slate-500">Output is schema-validated; the Executor/Verifier are deterministic and independent of the LLM.</p></div>
                   <div><h3 className="text-xs font-bold tracking-wider text-cyan-300">LATEST ACTIVITY</h3>
                     {agentEvents.length === 0 && agentDecisions.length === 0 && <p className="mt-1 text-xs text-slate-500">Nothing yet for this run.</p>}
-                    {agentDecisions.map((d, i) => <p key={i} className="mt-1 text-xs text-slate-200">{d.decision} <span className="text-slate-500">({(d.confidence * 100).toFixed(0)}% · {d.mode})</span></p>)}
+                    {agentDecisions.map((d, i) => <div key={i}><p className="mt-1 text-xs text-slate-200">{d.decision} <span className="text-slate-500">({(d.confidence * 100).toFixed(0)}% · {d.mode})</span></p>
+                      {(d.data?.claim_evidence ?? []).map((ce, j) => (
+                        <p key={j} className="mt-0.5 text-[10px] text-slate-400">{ce.claim.slice(0, 90)} {ce.evidence_refs.map((ref) => (
+                          <button key={ref} onClick={() => { s.set({ highlightRef: ref, view: 'evidence', selectedAsset: d.asset_ids[0] ?? null }) }}
+                            className="mr-1 rounded bg-cyan-950 border border-cyan-800 px-1 font-mono text-cyan-300 hover:bg-cyan-900" title="Show this evidence record">⌖ {ref}</button>))}
+                        </p>))}
+                    </div>)}
                     {agentEvents.slice(-4).map((e, i) => <p key={i} className="mt-1 font-mono text-[10px] text-slate-400">{e.event_type}: {e.message.slice(0, 110)}</p>)}
                   </div>
                 </div>
@@ -800,6 +858,39 @@ export default function App() {
         </main>
       )}
 
+      {tourStep !== null && (
+        <div className="fixed bottom-4 left-1/2 z-50 w-[min(560px,92vw)] -translate-x-1/2 rounded-2xl border border-violet-500/70 bg-slate-950/95 p-4 shadow-2xl" role="dialog" aria-label="Guided tour">
+          <div className="flex items-center justify-between">
+            <b className="text-violet-200">{TOUR_STEPS[tourStep].title}</b>
+            <span className="font-mono text-[10px] text-slate-500">{tourStep + 1}/{TOUR_STEPS.length}</span>
+          </div>
+          <p className="mt-1 text-sm text-slate-200">{TOUR_STEPS[tourStep].text}</p>
+          <div className="mt-2 flex justify-between">
+            <button onClick={() => setTourStep(null)} className="text-xs text-slate-400 underline">End tour</button>
+            <div className="flex gap-2">
+              {tourStep > 0 && <button onClick={() => { const n = tourStep - 1; setTourStep(n); s.set({ view: TOUR_STEPS[n].view }) }} className="rounded border border-slate-600 px-3 py-1 text-xs">Back</button>}
+              {tourStep < TOUR_STEPS.length - 1
+                ? <button onClick={() => { const n = tourStep + 1; setTourStep(n); s.set({ view: TOUR_STEPS[n].view }) }} className="rounded bg-violet-600 px-3 py-1 text-xs font-bold">Next →</button>
+                : <button onClick={() => setTourStep(null)} className="rounded bg-emerald-600 px-3 py-1 text-xs font-bold text-slate-950">Finish</button>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {approvalPending && s.runId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" role="alertdialog" aria-label="Human approval required">
+          <div className="w-[min(520px,92vw)] rounded-2xl border border-amber-500 bg-slate-950 p-5">
+            <h2 className="text-lg font-black text-amber-300">⚠ Human Approval Required</h2>
+            <p className="mt-1 text-sm text-slate-200">{approvalPending.message}</p>
+            <p className="mt-1 text-xs text-slate-400">Responsible-AI gate: a high-disruption defense will not execute without an operator decision. Rejecting (or timing out) leaves the twin undefended and verification will honestly FAIL.</p>
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => void api.approve(s.runId!, true)} className="rounded bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950">Approve defense</button>
+              <button onClick={() => void api.approve(s.runId!, false)} className="rounded border border-red-500 px-4 py-2 text-sm text-red-300">Reject</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {cinematic && (
         <div className="fixed inset-0 z-50 bg-[#020617]/97 p-4" role="dialog" aria-label="Cinematic twin mode">
           <div className="mb-2 flex items-center justify-between">
@@ -823,21 +914,28 @@ export default function App() {
 
 function EvidenceView() {
   const s = useStore()
-  const load = () => { if (s.runId) api.evidence(s.runId).then((ev) => useStore.setState({ events: ev.map((e) => ({ event_type: e.kind, message: `${e.ref} — ${e.summary}` })) })).catch(() => undefined) }
+  const [rows, setRows] = useState<{ id: string; kind: string; ref: string; summary: string }[] | null>(null)
+  const load = () => { if (s.runId) api.evidence(s.runId).then(setRows).catch(() => undefined) }
+  useEffect(() => { if (s.highlightRef) load() }, [s.highlightRef]) // eslint-disable-line
   return (
     <main className="p-6 max-w-4xl">
       <h1 className="text-2xl font-black text-cyan-200">Experiment Evidence</h1>
-      <p className="text-sm text-slate-400">Append-only audit trail stored in the backend database. Every record below came from a stored run.</p>
+      <p className="text-sm text-slate-400">Append-only audit trail stored in the backend database. Clicking a ⌖ citation in the Agents view lands here with that record highlighted.</p>
       <div className="mt-3 flex gap-2">
         <button onClick={load} className="rounded bg-cyan-600 px-3 py-1.5 text-xs font-bold">Load evidence for current run</button>
         <button onClick={() => s.runId && api.report(s.runId).then((r) => {
           const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })
-          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `cybergenesis-report-${s.runId}.json`; a.click()
-        })} disabled={!s.runId} className="rounded border border-slate-600 px-3 py-1.5 text-xs disabled:opacity-40">Export report</button>
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `cybergenesis-run-bundle-${s.runId}.json`; a.click()
+        })} disabled={!s.runId} className="rounded border border-slate-600 px-3 py-1.5 text-xs disabled:opacity-40">Export run bundle (replayable JSON)</button>
       </div>
-      <div className="mt-4 space-y-1">{s.events.map((e, i) => (
-        <div key={i} className="rounded border border-slate-800 glass-panel px-3 py-2 text-xs"><span className="font-mono text-cyan-300">{e.event_type}</span> <span className="text-slate-300">{e.message}</span></div>
-      ))}</div>
+      {s.highlightRef && <p className="mt-2 text-xs text-cyan-300">Highlighting citation: <span className="font-mono">{s.highlightRef}</span></p>}
+      <div className="mt-4 space-y-1">
+        {(rows ?? s.events.map((e) => ({ id: '', kind: e.event_type, ref: '', summary: e.message }))).map((e, i) => (
+          <div key={i} className={`rounded border px-3 py-2 text-xs ${s.highlightRef && e.ref === s.highlightRef ? 'border-amber-400 bg-amber-500/15' : 'border-slate-800 glass-panel'}`}>
+            <span className="font-mono text-cyan-300">{e.kind}</span> {e.ref && <span className="font-mono text-slate-500">{e.ref}</span>} <span className="text-slate-300">{e.summary}</span>
+          </div>
+        ))}
+      </div>
     </main>
   )
 }

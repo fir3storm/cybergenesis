@@ -17,6 +17,14 @@ Negative test: verification with **no defense applied returns FAIL** — the ver
 
 Determinism: identical seed → identical telemetry and state snapshots (tested). Evidence references resolve to stored `evidence_records` rows (tested).
 
+## Frontier pass (2026-10-27, second review round)
+- Red team now plans campaigns on the twin's actual directed graph (same arcs as `find_path`), pivots to new footholds/targets (incl. stolen-identity via admin workstation) when the original objective is closed, and every hop is policy-validated. Rounds are fully recorded (candidates, final choice, critic, executions, decisions, rejections).
+- Simulation no longer overrides the AI: candidates are sent back to Muse Spark, which makes the final choice; each run reports whether the AI agreed with the simulation optimum.
+- One-way (outbound-only) connection blocking makes exfiltration defense an egress control; inbound legitimate flow keeps working (unit-tested).
+- Post-PASS statuses: target = `protected`, traversed assets = `cleared` (attack evidence stays visible).
+- Monte Carlo breach probability (1,000 seeded replays, posture+vulnerability-weighted) and disrupted-user estimates accompany the binary verdict.
+- Human approval gate (off by default; enabled in the local demo env): defenses disrupting ≥2 legitimate paths wait for an operator decision in the UI; rejection/timeout honestly fails verification.
+
 ## Limitations
 - Metrics derive from the synthetic graph model, not real network traffic; times are wall-clock orchestration times at demo step delays.
 - Live Meta inference verified 2026-10-27 with a project key (kept in gitignored `backend/.env`, never committed). Without a key the app runs in labelled offline mode.

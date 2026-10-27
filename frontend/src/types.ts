@@ -11,14 +11,14 @@ export interface RunResult {
   run: { id: string; scenario_id: string; seed: number; state: string; mode: string; error: string | null; metrics: Record<string, unknown> };
   usage?: { prompt_tokens: number; completion_tokens: number; calls: number; models: string[] };
   verification: { outcome: string; invariant: string; checks: { name: string; passed: boolean; detail: string }[]; metrics: Record<string, unknown> } | null;
-  decisions: { agent: string; decision: string; justification: string; confidence: number; model: string; mode: string; asset_ids: string[] }[];
+  decisions: { agent: string; decision: string; justification: string; confidence: number; model: string; mode: string; asset_ids: string[]; data?: { claim_evidence?: { claim: string; evidence_refs: string[] }[] } }[];
   policy: { action_type: string; asset_id: string; approved: boolean; reasons: string[] }[];
   executions: { action_type: string; asset_id: string; success: boolean; transition: Record<string, unknown> }[];
 }
 export interface ModelStatus { configured: boolean; reachable: boolean; model: string; mode: string; detail: string }
 export type View = 'welcome' | 'twin' | 'experiment' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library' | 'benchmark'
 
-export interface LibraryItem { id: string; label: string; description: string; params_contract?: string; default_posture?: number; default_zone?: string }
+export interface LibraryItem { id: string; label: string; description: string; params_contract?: string; default_posture?: number; default_zone?: string; mitre?: string; d3fend?: string }
 export interface Library { asset_types: LibraryItem[]; attack_steps: LibraryItem[]; defense_actions: LibraryItem[]; verification_kinds: string[]; zones: string[] }
 export interface CustomTwinDef { id: string; name: string; description: string; assets: { id: string; name: string; asset_type: string; zone: string; posture?: number; pos: number[]; vulnerabilities?: string[] }[]; connections: { source: string; target: string; trust?: string; traversable?: boolean; types?: string[] }[]; created_at: string }
 export interface CustomScenarioDef { id: string; name: string; description: string; definition: Record<string, unknown>; created_at: string }

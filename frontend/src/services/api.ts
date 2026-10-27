@@ -31,7 +31,7 @@ export const api = {
   },
   experiments: () => j<{ id: string; scenario_id: string; state: string; mode: string; created_at: string }[]>('/api/experiments'),
   library: () => j<Library>('/api/library'),
-  benchmark: () => j<{ available: boolean; pairs?: number; scope?: string; detail?: string; summary?: Record<string, { pass_rate_pct: number; mean_effectiveness_pct: number; mean_optimality_gap: number; mean_disrupted: number }> }>('/api/benchmark'),
+  benchmark: () => j<{ available: boolean; pairs?: number; scope?: string; detail?: string; calibration?: { runs_scored: number; mean_confidence_pass: number | null; mean_confidence_fail: number | null; note?: string }; summary?: Record<string, { pass_rate_pct: number; mean_effectiveness_pct: number; mean_optimality_gap: number; mean_disrupted: number }> }>('/api/benchmark'),
   customTwins: () => j<CustomTwinDef[]>('/api/twins/custom'),
   createCustomTwin: (body: unknown) => j<CustomTwinDef>('/api/twins/custom', { method: 'POST', body: JSON.stringify(body) }),
   deleteCustomTwin: (id: string) => j<{ deleted: boolean }>(`/api/twins/custom/${id}`, { method: 'DELETE' }),
@@ -41,4 +41,6 @@ export const api = {
   createCustomScenario: (body: unknown) => j<CustomScenarioDef>('/api/scenarios/custom', { method: 'POST', body: JSON.stringify(body) }),
   deleteCustomScenario: (id: string) => j<{ deleted: boolean }>(`/api/scenarios/custom/${id}`, { method: 'DELETE' }),
   createCustomExperiment: (body: unknown) => j<{ id: string }>('/api/experiments/custom', { method: 'POST', body: JSON.stringify(body) }),
+  approve: (id: string, approved: boolean) => j<{ recorded: boolean }>(`/api/experiments/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) }),
+  fromText: (prompt_text: string, name: string) => j<CustomScenarioDef>('/api/scenarios/from-text', { method: 'POST', body: JSON.stringify({ prompt_text, name }) }),
 }

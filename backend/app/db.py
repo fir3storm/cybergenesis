@@ -26,6 +26,11 @@ def init_db() -> None:
             for col in ("custom_twin_id", "custom_scenario_id"):
                 if col not in cols:
                     conn.execute(text(f"ALTER TABLE simulation_runs ADD COLUMN {col} VARCHAR"))
+    if "agent_decisions" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("agent_decisions")}
+        if "data" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE agent_decisions ADD COLUMN data JSON"))
 
 
 def get_db():

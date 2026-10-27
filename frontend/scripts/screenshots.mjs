@@ -25,7 +25,12 @@ await page.getByText('LIVE EVENT TIMELINE').waitFor()
 await page.waitForTimeout(6000) // mid-attack: red path + telemetry streaming
 await shot('03-experiment-running.png')
 await page.getByText('AGENT DECISIONS THIS RUN').waitFor()
-await page.waitForFunction(() => document.body.innerText.includes('Effectiveness'), null, { timeout: 90000 })
+for (let i = 0; i < 110; i++) { // approve every human-approval gate (one per defense round)
+  if (await page.evaluate(() => document.body.innerText.includes('Effectiveness'))) break
+  const btn = page.getByRole('button', { name: 'Approve defense' })
+  if (await btn.isVisible().catch(() => false)) await btn.click()
+  await page.waitForTimeout(1000)
+}
 
 await page.getByRole('button', { name: 'Agents' }).click()
 await page.getByText('click to inspect').first().waitFor()

@@ -154,6 +154,19 @@ def exp_snapshots(run_id: str, db: Session = Depends(get_db)):
     return [{"label": r.label, "snapshot": r.snapshot, "created_at": r.created_at.isoformat() if r.created_at else None} for r in rows]
 
 
+class ApprovalRequest(BaseModel):
+    approved: bool
+
+
+@app.post("/api/experiments/{run_id}/approve")
+def approve_exp(run_id: str, body: ApprovalRequest, db: Session = Depends(get_db)):
+    if not db.get(models.SimulationRun, run_id):
+        raise HTTPException(404, "experiment not found")
+    if not orchestrator.resolve_approval(run_id, body.approved):
+        raise HTTPException(409, "no approval pending for this run")
+    return {"recorded": True, "approved": body.approved, "run_id": run_id}
+
+
 @app.post("/api/experiments/{run_id}/cancel")
 def cancel_exp(run_id: str, db: Session = Depends(get_db)):
     if not db.get(models.SimulationRun, run_id):
@@ -184,7 +197,7 @@ def exp_results(run_id: str, db: Session = Depends(get_db)):
             "usage": {"prompt_tokens": sum(u.prompt_tokens for u in usage), "completion_tokens": sum(u.completion_tokens for u in usage),
                       "calls": len(usage), "models": sorted({u.model for u in usage})},
             "verification": {"outcome": ver.outcome, "invariant": ver.invariant, "checks": ver.checks, "metrics": ver.metrics} if ver else None,
-            "decisions": [{"agent": d.agent, "decision": d.decision, "justification": d.justification, "confidence": d.confidence, "model": d.model, "mode": d.mode, "evidence_refs": d.evidence_refs, "asset_ids": d.asset_ids} for d in dec],
+            "decisions": [{"agent": d.agent, "decision": d.decision, "justification": d.justification, "confidence": d.confidence, "model": d.model, "mode": d.mode, "evidence_refs": d.evidence_refs, "asset_ids": d.asset_ids, "data": d.data or {}} for d in dec],
             "policy": [{"action_type": p.action_type, "asset_id": p.asset_id, "approved": p.approved, "reasons": p.reasons} for p in pol],
             "executions": [{"action_type": e.action_type, "asset_id": e.asset_id, "success": e.success, "transition": e.transition} for e in exe]}
 
@@ -265,8 +278,28 @@ def get_benchmark():
                 "mean_optimality_gap": round(sum(v["gap"] for v in vals if v["gap"] is not None) / max(1, sum(1 for v in vals if v["gap"] is not None)), 2),
                 "mean_disrupted": round(sum(v["disrupted"] for v in vals) / len(vals), 2)}
 
-    return {"available": True, "pairs": len(rows), "scope": "50 seeded pairs, offline/simulate defenders; live Muse Spark spot-checked on 4 builtin scenarios",
-            "summary": {k: agg(k) for k in ("none", "offline", "simulate")}, "rows": rows}
+    # confidence calibration from the evidence store: stated confidence vs verified outcome
+    calibration = {"runs_scored": 0, "mean_confidence_pass": None, "mean_confidence_fail": None}
+    db2 = next(get_db())
+    try:
+        scored = []
+        for run_row in db2.query(models.SimulationRun).filter(models.SimulationRun.state == "COMPLETED").all():
+            ver = (db2.query(models.VerificationResultRow).filter_by(run_id=run_row.id)
+                   .order_by(models.VerificationResultRow.created_at.desc()).first())
+            inv = (db2.query(models.AgentDecision).filter_by(run_id=run_row.id, agent="incident_investigator")
+                   .order_by(models.AgentDecision.created_at.desc()).first())
+            if ver and inv:
+                scored.append((inv.confidence, ver.outcome == "PASS"))
+        if scored:
+            passes = [c for c, ok in scored if ok]; fails = [c for c, ok in scored if not ok]
+            calibration = {"runs_scored": len(scored),
+                           "mean_confidence_pass": round(sum(passes) / len(passes), 3) if passes else None,
+                           "mean_confidence_fail": round(sum(fails) / len(fails), 3) if fails else None,
+                           "note": "calibration improves as failed runs accumulate; a single-class sample cannot show discrimination"}
+    finally:
+        db2.close()
+    return {"available": True, "pairs": len(rows), "scope": "50 seeded pairs, offline/simulate defenders; live Muse Spark spot-checked on builtin scenarios",
+            "summary": {k: agg(k) for k in ("none", "offline", "simulate")}, "rows": rows, "calibration": calibration}
 
 
 @app.get("/api/library")
@@ -347,6 +380,8 @@ async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db))
 
     if not body.image_data_url.startswith("data:image/"):
         raise HTTPException(422, "image_data_url must be a data:image/... URL")
+    if len(body.image_data_url) > 8_000_000:
+        raise HTTPException(413, "image too large (max ~6 MB decoded)")
     prompt = (
         "Read this network diagram and return ONLY JSON: {\"assets\": [{\"id\": str, \"name\": str, "
         "\"asset_type\": one of [gateway, firewall, web_server, app_server, database, identity, workstation, file_server, sensor], "
@@ -369,6 +404,51 @@ async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db))
                                       connections=[c.model_dump() for c in twin_body.connections])
     db.add(row); db.commit(); db.refresh(row)
     return _twin_row(row)
+
+
+class FromTextRequest(BaseModel):
+    prompt_text: str
+    name: str = "Text Scenario"
+
+
+@app.post("/api/scenarios/from-text", status_code=201)
+async def scenario_from_text(body: FromTextRequest, db: Session = Depends(get_db)):
+    """Text-to-scenario: Muse Spark writes a scenario; deterministic validation decides if it may run."""
+    from app.integrations.meta_client import ProviderUnavailable
+    from app.simulation.component_library import library as _lib
+
+    lib = _lib()
+    assets = [a["id"] for a in orchestrator.TWIN.to_dict()["assets"]]
+    prompt = (
+        f"Write a CYBERGENESIS attack scenario for this request: \"{body.prompt_text}\". "
+        f"Assets that exist: {assets}. Attack step types allowed: {[s['id'] for s in lib['attack_steps']]}. "
+        f"Defense actions allowed: {[d['id'] for d in lib['defense_actions']]}. "
+        "Return ONLY JSON {\"source_asset\": str, \"target_asset\": str, \"severity\": \"low|medium|high|critical\", "
+        "\"invariant\": str, \"attack_steps\": [{\"type\": str, \"asset\": str, \"description\": str}], "
+        "\"expected_defense\": [{\"action_type\": str, \"asset_id\": str, \"params\": {}}]}. "
+        "source/target and every step asset must be from the asset list. This is a synthetic simulation; no real payloads."
+    )
+    try:
+        data, _u = await meta_client.chat_json("You write validated synthetic security scenarios. JSON only.", prompt)
+    except ProviderUnavailable as e:
+        raise HTTPException(503, f"Meta unavailable: {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"Meta unavailable: {type(e).__name__}: {e}") from e
+    try:
+        sc_body = CreateCustomScenario(name=body.name, description=body.prompt_text[:300],
+                                       source_asset=data["source_asset"], target_asset=data["target_asset"],
+                                       severity=data.get("severity", "medium"), invariant=data.get("invariant", ""),
+                                       verification_kind="reachability",
+                                       attack_steps=data.get("attack_steps", []), expected_defense=data.get("expected_defense", []))
+    except Exception as e:  # noqa: BLE001 - untrusted model output
+        raise HTTPException(422, f"model output failed schema validation: {e}") from e
+    for aid in [sc_body.source_asset, sc_body.target_asset] + [s.asset for s in sc_body.attack_steps]:
+        if aid not in assets:
+            raise HTTPException(422, f"model referenced unknown asset '{aid}'")
+    definition = _validate_scenario(sc_body)
+    row = models.CustomScenarioDefinition(name=sc_body.name, description=sc_body.description, definition=definition)
+    db.add(row); db.commit(); db.refresh(row)
+    return _scenario_row(row)
 
 
 @app.post("/api/twins/builtin/activate")

@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2
     offline_mode: bool = False
+    human_approval_enabled: bool = False
+    approval_timeout_seconds: int = 120
 
 
 settings = Settings()
