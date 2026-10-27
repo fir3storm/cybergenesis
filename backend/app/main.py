@@ -647,6 +647,72 @@ def experiment_messages(run_id: str, db: Session = Depends(get_db)):
              "payload": r.payload, "evidence_refs": r.evidence_refs, "seq": r.seq} for r in rows]
 
 
+_eval_runs: dict[str, dict] = {}
+
+
+class EvalRunRequest(BaseModel):
+    n: int = 10
+    seed: int = 7
+    mode: str = "offline"
+
+
+@app.post("/api/agents/eval/run", status_code=202)
+def agents_eval_run(body: EvalRunRequest):
+    import threading
+    import uuid as _uuid
+
+    from app.agents.eval import run_eval_sync
+
+    run_id = _uuid.uuid4().hex[:12]
+    _eval_runs[run_id] = {"state": "RUNNING", "done": 0, "total": body.n, "result": None}
+
+    def _job():
+        try:
+            result = run_eval_sync(body.n, body.seed, body.mode,
+                                   progress=lambda d, t: _eval_runs[run_id].update({"done": d}))
+            _eval_runs[run_id].update({"state": "COMPLETED", "result": result})
+        except Exception as e:  # noqa: BLE001
+            _eval_runs[run_id].update({"state": "FAILED", "error": f"{type(e).__name__}: {e}"})
+
+    threading.Thread(target=_job, daemon=True, name=f"eval-{run_id}").start()
+    return {"run_id": run_id, "state": "RUNNING", "n": body.n, "seed": body.seed, "mode": body.mode}
+
+
+@app.get("/api/agents/eval/run/{run_id}")
+def agents_eval_status(run_id: str):
+    row = _eval_runs.get(run_id)
+    if not row:
+        raise HTTPException(404, "eval run not found")
+    return {"run_id": run_id, **row}
+
+
+@app.get("/api/agents/eval/latest")
+def agents_eval_latest(mode: str | None = None):
+    done = [r for r in _eval_runs.values() if r["state"] == "COMPLETED" and r["result"]]
+    if mode:
+        done = [r for r in done if r["result"].get("mode") == mode]
+    if not done:
+        return {"available": False, "detail": "no eval run yet — POST /api/agents/eval/run"}
+    return {"available": True, "result": done[-1]["result"]}
+
+
+@app.websocket("/ws/agents/eval/{run_id}")
+async def ws_eval(ws: WebSocket, run_id: str):
+    await ws.accept()
+    try:
+        while True:
+            row = _eval_runs.get(run_id)
+            if not row:
+                await ws.send_text(json.dumps({"state": "NOT_FOUND"}))
+                break
+            await ws.send_text(json.dumps({"run_id": run_id, "state": row["state"], "done": row["done"], "total": row["total"]}))
+            if row["state"] in ("COMPLETED", "FAILED"):
+                break
+            await asyncio.sleep(0.7)
+    except WebSocketDisconnect:
+        pass
+
+
 @app.get("/api/library")
 def get_library():
     return library()

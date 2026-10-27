@@ -47,7 +47,7 @@ def generate_pair(rng: random.Random, idx: int) -> tuple[list[dict], list[dict],
         for a, b in zip(spine, spine[1:]):
             if not any({c["source"], c["target"]} == {a, b} for c in conns):
                 conns.append({"source": a, "target": b, "traversable": True, "types": ["network"]})
-    scenario = {"id": f"gen-{idx}", "source_asset": src, "target_asset": tgt, "verification_kind": "reachability",
+    scenario = {"id": f"gen-{idx}", "name": f"Generated Pair {idx}", "source_asset": src, "target_asset": tgt, "verification_kind": "reachability",
                 "objectives": ["reach_target"], "invariant": f"{src} cannot reach {tgt}",
                 "attack_steps": [{"type": "network_connection", "asset": src, "description": "generated attack"}],
                 "expected_defense": [{"action_type": "isolate_asset", "asset_id": src, "params": {}}]}

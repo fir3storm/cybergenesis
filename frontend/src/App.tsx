@@ -202,6 +202,58 @@ export function BattlePanel() {
   )
 }
 
+export function ScorecardsView() {
+  const [latest, setLatest] = useState<Awaited<ReturnType<typeof api.evalLatest>> | null>(null)
+  const [status, setStatus] = useState('')
+  const load = () => api.evalLatest().then(setLatest).catch(() => undefined)
+  useEffect(() => { load() }, [])
+  const run = (mode: string) => {
+    setStatus(`running ${mode} eval…`)
+    api.evalRun(10, 7, mode).then(async (r) => {
+      for (let i = 0; i < 120; i++) {
+        const st = await api.evalStatus(r.run_id)
+        setStatus(`${st.state} ${st.done}/${st.total}`)
+        if (st.state === 'COMPLETED') { load(); break }
+        if (st.state === 'FAILED') break
+        await new Promise((res) => setTimeout(res, 800))
+      }
+    }).catch((e) => setStatus(`failed: ${(e as Error).message}`))
+  }
+  const agents = latest?.result?.agents ?? {}
+  return (
+    <main className="p-6 max-w-5xl">
+      <h1 className="text-2xl font-black text-cyan-200">Agent Scorecards</h1>
+      <p className="mt-1 text-sm text-slate-400">Ground-truth evaluation over generated twins (investigator precision/recall, strategist pass rate + optimality, red validity, auditor precision/recall, identity recall, decoy trips, dialect parsing, citation validity, calibration).</p>
+      <div className="mt-3 flex gap-2">
+        <button onClick={() => run('offline')} className="rounded bg-cyan-600 px-3 py-2 text-xs font-bold">Run offline eval (n=10)</button>
+        <button onClick={() => run('live')} className="rounded bg-violet-600 px-3 py-2 text-xs font-bold">Run live eval</button>
+        <span className="py-2 text-xs text-slate-400">{status}</span>
+      </div>
+      {!latest?.available && <p className="mt-3 text-slate-500 text-sm">No eval yet — run one.</p>}
+      {Object.entries(agents).map(([id, metrics]) => (
+        <div key={id} className="mt-3 rounded-xl border border-slate-800 glass-panel p-3">
+          <b className="font-mono text-cyan-200">{id}</b> <span className="text-xs text-slate-500">mode: {latest?.result?.mode}</span>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {Object.entries(metrics).map(([k, v]) => (
+              <span key={k} className="rounded bg-slate-950/70 px-2 py-1 font-mono text-[10px] text-slate-300">{k}: {String(v)}</span>
+            ))}
+          </div>
+        </div>
+      ))}
+      {latest?.result?.calibration && Object.entries(latest.result.calibration).map(([agent, buckets]) => (
+        <div key={agent} className="mt-3 rounded-xl border border-slate-800 glass-panel p-3">
+          <b className="text-sm text-cyan-200">Calibration — {agent}</b>
+          {buckets.map((b) => (
+            <div key={b.bucket} className="mt-1 flex items-center gap-2 text-xs"><span className="w-16 font-mono">{b.bucket}</span>
+              <div className="h-3 flex-1 rounded bg-slate-800"><div className="h-3 rounded bg-cyan-400" style={{ width: `${(b.accuracy ?? 0) * 100}%` }} /></div>
+              <span>{b.accuracy === null ? `n=${b.n}` : `${Math.round((b.accuracy ?? 0) * 100)}% (n=${b.n})`}</span></div>
+          ))}
+        </div>
+      ))}
+    </main>
+  )
+}
+
 export function BattleView({ onRunBattle }: { onRunBattle: () => void }) {
   const s = useStore()
   const rounds = (s.results?.verification?.metrics.rounds as { round: number }[] | undefined) ?? []
@@ -639,6 +691,7 @@ export default function App() {
     { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} />, group: 'PROOF' },
     { id: 'evidence', label: 'Evidence', icon: <FileText size={15} />, group: 'PROOF' },
     { id: 'benchmark', label: 'Proof / Benchmark', icon: <BarChart3 size={15} />, group: 'PROOF' },
+    { id: 'scorecards', label: 'Scorecards', icon: <BarChart3 size={15} />, group: 'PROOF' },
   ]
   const live = s.modelStatus?.mode === 'live'
 
@@ -1014,6 +1067,7 @@ export default function App() {
       {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
       {s.view === 'battle' && <BattleView onRunBattle={() => void runDemo('red_vs_blue_battle')} />}
       {s.view === 'benchmark' && <BenchmarkView />}
+      {s.view === 'scorecards' && <ScorecardsView />}
       {s.view === 'evidence' && <EvidenceView />}
       {s.view === 'settings' && (
         <main className="p-6 max-w-2xl space-y-3 text-sm">
