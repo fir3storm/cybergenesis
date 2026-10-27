@@ -42,6 +42,7 @@ export const api = {
   deleteCustomScenario: (id: string) => j<{ deleted: boolean }>(`/api/scenarios/custom/${id}`, { method: 'DELETE' }),
   createCustomExperiment: (body: unknown) => j<{ id: string }>('/api/experiments/custom', { method: 'POST', body: JSON.stringify(body) }),
   agents: () => j<{ id: string; name: string; team: string; engine: string; description: string; tools: string[]; can_propose_actions: string[]; prompt_version: string; prompt_hash: string; scorecard: { runs: number; last_mode: string | null; last_confidence: number | null } }[]>('/api/agents'),
+  messages: (runId: string) => j<{ id: string; from_agent: string; to_agent: string | null; kind: string; payload: Record<string, unknown>; evidence_refs: string[]; seq: number }[]>(`/api/experiments/${runId}/messages`),
   agentDetail: (id: string) => j<{ duties: string[]; input_model: string; output_model: string; timeout_s: number; max_tokens: number }>(`/api/agents/${id}`),
   approve: (id: string, approved: boolean) => j<{ recorded: boolean }>(`/api/experiments/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) }),
   deny: (id: string) => j<{ recorded: boolean }>(`/api/experiments/${id}/deny`, { method: 'POST' }),
