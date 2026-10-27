@@ -71,7 +71,8 @@ def _extend_grammar() -> None:
     GRAMMAR["panos"] = GRAMMAR["panos"] + [(f"show {x}", ("exec",), f"show {x}") for x in (
         "system info", "routing route", "session all", "nat-policy rules", "user user-ids", "jobs all", "wildfire status")]
     GRAMMAR["routeros"] = GRAMMAR["routeros"] + [(f"/{x} print", ("exec",), f"{x}") for x in (
-        "interface bridge", "ip dhcp-server lease", "ip dns", "system resource", "log", "user", "radius")]
+        "interface bridge", "ip dhcp-server lease", "ip dns", "system resource", "log", "user", "radius",
+        "system package", "ip firewall nat", "ip firewall mangle", "routing ospf neighbor")]
     GRAMMAR["bash"] = GRAMMAR["bash"] + [(c, ("exec",), c) for c in (
         "df -h", "free -m", "uptime", "whoami", "id", "env", "history", "tail", "grep", "find", "chmod", "chown", "useradd", "passwd")]
     GRAMMAR["powershell"] = GRAMMAR["powershell"] + [(c, ("exec",), c) for c in (
