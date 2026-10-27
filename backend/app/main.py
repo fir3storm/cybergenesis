@@ -167,6 +167,15 @@ def approve_exp(run_id: str, body: ApprovalRequest, db: Session = Depends(get_db
     return {"recorded": True, "approved": body.approved, "run_id": run_id}
 
 
+@app.post("/api/experiments/{run_id}/deny")
+def deny_exp(run_id: str, db: Session = Depends(get_db)):
+    if not db.get(models.SimulationRun, run_id):
+        raise HTTPException(404, "experiment not found")
+    if not orchestrator.resolve_approval(run_id, False):
+        raise HTTPException(409, "no approval pending for this run")
+    return {"recorded": True, "approved": False, "run_id": run_id}
+
+
 @app.post("/api/experiments/{run_id}/cancel")
 def cancel_exp(run_id: str, db: Session = Depends(get_db)):
     if not db.get(models.SimulationRun, run_id):
@@ -306,6 +315,145 @@ def get_benchmark():
             "summary": {k: agg(k) for k in ("none", "offline", "simulate")}, "rows": rows, "calibration": calibration}
 
 
+@app.get("/api/learning/curve")
+def learning_curve(db: Session = Depends(get_db)):
+    """Optimality gap over completed runs (learning-across-runs evidence)."""
+    points = []
+    for run_row in db.query(models.SimulationRun).filter(models.SimulationRun.state == "COMPLETED") \
+            .order_by(models.SimulationRun.created_at).all():
+        ver = (db.query(models.VerificationResultRow).filter_by(run_id=run_row.id)
+               .order_by(models.VerificationResultRow.created_at.desc()).first())
+        if ver:
+            points.append({"run_id": run_row.id, "scenario_id": run_row.scenario_id, "mode": run_row.mode,
+                           "outcome": ver.outcome, "optimality_gap": ver.metrics.get("optimality_gap"),
+                           "ai_matched_optimum": ver.metrics.get("ai_matched_optimum"),
+                           "created_at": run_row.created_at.isoformat() if run_row.created_at else None})
+    return {"points": points, "runs": len(points)}
+
+
+@app.get("/api/benchmark/calibration")
+def benchmark_calibration(db: Session = Depends(get_db)):
+    """Investigator confidence in 5 buckets vs verified PASS rate."""
+    buckets = [{"bucket": f"{i / 5:.1f}-{(i + 1) / 5:.1f}", "n": 0, "passes": 0} for i in range(5)]
+    for run_row in db.query(models.SimulationRun).filter(models.SimulationRun.state == "COMPLETED").all():
+        ver = (db.query(models.VerificationResultRow).filter_by(run_id=run_row.id)
+               .order_by(models.VerificationResultRow.created_at.desc()).first())
+        inv = (db.query(models.AgentDecision).filter_by(run_id=run_row.id, agent="incident_investigator")
+               .order_by(models.AgentDecision.created_at.desc()).first())
+        if ver and inv:
+            idx = min(int(inv.confidence * 5), 4)
+            buckets[idx]["n"] += 1
+            buckets[idx]["passes"] += int(ver.outcome == "PASS")
+    for b in buckets:
+        b["pass_rate_pct"] = round(100 * b["passes"] / b["n"], 1) if b["n"] else None
+    return {"buckets": buckets, "note": "buckets with n=0 have no scored runs yet"}
+
+
+_bench_runs: dict[str, dict] = {}
+
+
+class BenchmarkRunRequest(BaseModel):
+    n: int = 20
+    seed: int = 7
+    mode: str = "offline"
+
+
+@app.post("/api/benchmark/run", status_code=202)
+async def benchmark_run(body: BenchmarkRunRequest):
+    import asyncio as _asyncio
+    import uuid as _uuid
+
+    from app.benchmark.runner import run_benchmark, summarize
+
+    run_id = _uuid.uuid4().hex[:12]
+    _bench_runs[run_id] = {"state": "RUNNING", "done": 0, "total": body.n, "rows": [], "summary": None}
+
+    def _progress(done: int, total: int, _row: dict) -> None:
+        _bench_runs[run_id]["done"] = done
+
+    async def _job() -> None:
+        try:
+            rows = await _asyncio.to_thread(run_benchmark, body.n, body.seed, _progress)
+            _bench_runs[run_id].update({"state": "COMPLETED", "rows": rows, "summary": summarize(rows)})
+        except Exception as e:  # noqa: BLE001 - honest failure
+            _bench_runs[run_id].update({"state": "FAILED", "error": f"{type(e).__name__}: {e}"})
+
+    _asyncio.create_task(_job())
+    return {"run_id": run_id, "state": "RUNNING", "n": body.n, "seed": body.seed, "mode": body.mode}
+
+
+@app.get("/api/benchmark/run/{run_id}")
+def benchmark_run_status(run_id: str):
+    row = _bench_runs.get(run_id)
+    if not row:
+        raise HTTPException(404, "benchmark run not found")
+    return {"run_id": run_id, **row}
+
+
+@app.get("/api/benchmark/run/{run_id}/export")
+def benchmark_run_export(run_id: str, format: str = "json"):
+    import csv
+    import io
+    import json as _json
+
+    from fastapi.responses import PlainTextResponse
+
+    row = _bench_runs.get(run_id)
+    if not row:
+        raise HTTPException(404, "benchmark run not found")
+    if format == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["pair", "source", "target", "defender", "pass", "effectiveness", "gap", "disrupted", "risk_after"])
+        for r in row["rows"]:
+            for k in ("none", "offline", "simulate"):
+                w.writerow([r["pair"], r["source"], r["target"], k, r[k]["pass"], r[k]["effectiveness"], r[k]["gap"], r[k]["disrupted"], r[k]["risk_after"]])
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv")
+    return PlainTextResponse(_json.dumps(row, indent=1), media_type="application/json")
+
+
+@app.websocket("/ws/benchmark/{run_id}")
+async def ws_benchmark(ws: WebSocket, run_id: str):
+    await ws.accept()
+    try:
+        while True:
+            row = _bench_runs.get(run_id)
+            if not row:
+                await ws.send_text(json.dumps({"state": "NOT_FOUND"}))
+                break
+            await ws.send_text(json.dumps({"run_id": run_id, "state": row["state"], "done": row["done"], "total": row["total"]}))
+            if row["state"] in ("COMPLETED", "FAILED"):
+                break
+            await asyncio.sleep(0.7)
+    except WebSocketDisconnect:
+        pass
+
+
+@app.get("/api/devices/catalog")
+def devices_catalog(category: str | None = None, vendor: str | None = None, q: str | None = None,
+                    tier: str | None = None, limit: int = 50, offset: int = 0):
+    from app.devices.registry import query_catalog
+
+    return query_catalog(category=category, vendor=vendor, q=q, tier=tier, limit=min(limit, 200), offset=offset)
+
+
+@app.get("/api/devices/catalog/{device_id}")
+def device_by_id(device_id: str):
+    from app.devices.registry import BY_ID
+
+    m = BY_ID.get(device_id)
+    if not m:
+        raise HTTPException(404, "device not in catalog")
+    return m.model_dump()
+
+
+@app.get("/api/devices/builtin-map")
+def devices_builtin_map():
+    from app.devices.registry import BUILTIN_DEVICE_MAP
+
+    return BUILTIN_DEVICE_MAP
+
+
 @app.get("/api/library")
 def get_library():
     return library()
@@ -384,8 +532,8 @@ async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db))
 
     if not body.image_data_url.startswith("data:image/"):
         raise HTTPException(422, "image_data_url must be a data:image/... URL")
-    if len(body.image_data_url) > 8_000_000:
-        raise HTTPException(413, "image too large (max ~6 MB decoded)")
+    if len(body.image_data_url) > 4_000_000:
+        raise HTTPException(413, "image too large (max 4 MB data URL)")
     prompt = (
         "Read this network diagram and return ONLY JSON: {\"assets\": [{\"id\": str, \"name\": str, "
         "\"asset_type\": one of [gateway, firewall, web_server, app_server, database, identity, workstation, file_server, sensor], "
@@ -411,7 +559,8 @@ async def twin_from_image(body: FromImageRequest, db: Session = Depends(get_db))
 
 
 class FromTextRequest(BaseModel):
-    prompt_text: str
+    prompt_text: str = ""
+    prompt: str = ""
     name: str = "Text Scenario"
 
 
@@ -424,7 +573,7 @@ async def scenario_from_text(body: FromTextRequest, db: Session = Depends(get_db
     lib = _lib()
     assets = [a["id"] for a in orchestrator.TWIN.to_dict()["assets"]]
     prompt = (
-        f"Write a CYBERGENESIS attack scenario for this request: \"{body.prompt_text}\". "
+        f"Write a CYBERGENESIS attack scenario for this request: \"{body.prompt_text or body.prompt}\". "
         f"Assets that exist: {assets}. Attack step types allowed: {[s['id'] for s in lib['attack_steps']]}. "
         f"Defense actions allowed: {[d['id'] for d in lib['defense_actions']]}. "
         "Return ONLY JSON {\"source_asset\": str, \"target_asset\": str, \"severity\": \"low|medium|high|critical\", "
@@ -439,7 +588,7 @@ async def scenario_from_text(body: FromTextRequest, db: Session = Depends(get_db
     except Exception as e:  # noqa: BLE001
         raise HTTPException(503, f"Meta unavailable: {type(e).__name__}: {e}") from e
     try:
-        sc_body = CreateCustomScenario(name=body.name, description=body.prompt_text[:300],
+        sc_body = CreateCustomScenario(name=body.name, description=(body.prompt_text or body.prompt)[:300],
                                        source_asset=data["source_asset"], target_asset=data["target_asset"],
                                        severity=data.get("severity", "medium"), invariant=data.get("invariant", ""),
                                        verification_kind="reachability",

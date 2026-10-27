@@ -1,0 +1,38 @@
+"""Family templates: compact CSV rows expand into full manifests."""
+
+FAMILY_TEMPLATES: dict[str, dict] = {
+    "router": {"cli": "ios", "gui": "netdevice", "skin": "netdevice", "form": "1RU", "model3d": "appliance", "icon": "router",
+               "ports": [{"prefix": "Gi", "start": 0, "count": 4, "speed": "1G", "media": "copper"}, {"prefix": "Te", "start": 0, "count": 2, "speed": "10G", "media": "sfp"}],
+               "capabilities": ["routing", "acl", "nat", "vpn"], "services": ["ssh"]},
+    "switch": {"cli": "ios", "gui": "netdevice", "skin": "netdevice", "form": "1RU", "model3d": "appliance", "icon": "switch",
+               "ports": [{"prefix": "Gi", "start": 1, "count": 24, "speed": "1G", "media": "copper", "poe": True}, {"prefix": "Te", "start": 1, "count": 4, "speed": "10G", "media": "sfp"}],
+               "capabilities": ["switching", "vlan", "acl"], "services": ["ssh"]},
+    "firewall": {"cli": "fortios", "gui": "ngfw", "skin": "ngfw", "form": "1RU", "model3d": "appliance", "icon": "shield",
+                 "ports": [{"prefix": "port", "start": 1, "count": 8, "speed": "1G", "media": "copper"}, {"prefix": "sfp", "start": 1, "count": 2, "speed": "10G", "media": "sfp"}],
+                 "capabilities": ["firewall", "nat", "vpn", "ips"], "services": ["https", "ssh"]},
+    "wireless": {"cli": "generic", "gui": "netdevice", "skin": "wireless", "form": "AP", "model3d": "ap", "icon": "wifi",
+                 "ports": [{"prefix": "eth", "start": 0, "count": 1, "speed": "1G", "media": "copper", "poe": True}],
+                 "capabilities": ["wireless", "vlan"], "services": ["https"]},
+    "security": {"cli": "bash", "gui": "adc", "skin": "adc", "form": "2RU", "model3d": "appliance", "icon": "scale",
+                 "ports": [{"prefix": "eth", "start": 1, "count": 4, "speed": "10G", "media": "sfp"}],
+                 "capabilities": ["load_balancing", "waf", "tls"], "services": ["https"]},
+    "server": {"cli": "bash", "gui": "linux-server", "skin": "server", "form": "2RU", "model3d": "server2u", "icon": "server",
+               "ports": [{"prefix": "eno", "start": 1, "count": 2, "speed": "10G", "media": "copper"}, {"prefix": "idrac", "start": 0, "count": 1, "speed": "1G", "media": "copper"}],
+               "capabilities": ["compute", "bmc"], "services": ["ssh", "https"]},
+    "endpoint": {"cli": "powershell", "gui": "windows-desktop", "skin": "desktop", "form": "laptop", "model3d": "laptop", "icon": "monitor",
+                 "ports": [{"prefix": "eth", "start": 0, "count": 1, "speed": "1G", "media": "copper"}, {"prefix": "wifi", "start": 0, "count": 1, "speed": "wifi", "media": "wifi"}],
+                 "capabilities": ["endpoint"], "services": []},
+    "virtual": {"cli": "bash", "gui": "hypervisor", "skin": "cloud", "form": "virtual", "model3d": "cloud", "icon": "cloud",
+                "ports": [{"prefix": "vnic", "start": 0, "count": 4, "speed": "10G", "media": "virtual"}],
+                "capabilities": ["virtualization", "storage"], "services": ["https"]},
+    "ot": {"cli": "none", "gui": "ot-hmi", "skin": "ot", "form": "DIN-rail", "model3d": "plc", "icon": "factory",
+           "ports": [{"prefix": "X1", "start": 1, "count": 2, "speed": "100M", "media": "copper"}],
+           "capabilities": ["plc", "hmi"], "services": ["s7comm"]},
+    "identity": {"cli": "bash", "gui": "linux-server", "skin": "identity", "form": "virtual", "model3d": "cloud", "icon": "key",
+                 "ports": [{"prefix": "https", "start": 443, "count": 1, "speed": "cloud", "media": "virtual"}],
+                 "capabilities": ["sso", "mfa", "directory"], "services": ["https", "ldaps"]},
+}
+
+CATEGORY_BY_FAMILY = {"router": "router", "switch": "switch", "firewall": "firewall", "wireless": "wireless",
+                      "security": "security", "server": "server", "endpoint": "endpoint", "virtual": "virtual",
+                      "ot": "ot", "identity": "identity"}

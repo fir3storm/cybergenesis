@@ -42,5 +42,8 @@ export const api = {
   deleteCustomScenario: (id: string) => j<{ deleted: boolean }>(`/api/scenarios/custom/${id}`, { method: 'DELETE' }),
   createCustomExperiment: (body: unknown) => j<{ id: string }>('/api/experiments/custom', { method: 'POST', body: JSON.stringify(body) }),
   approve: (id: string, approved: boolean) => j<{ recorded: boolean }>(`/api/experiments/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved }) }),
+  deny: (id: string) => j<{ recorded: boolean }>(`/api/experiments/${id}/deny`, { method: 'POST' }),
+  learningCurve: () => j<{ points: { run_id: string; scenario_id: string; mode: string; outcome: string; optimality_gap: number | null }[]; runs: number }>('/api/learning/curve'),
+  calibration: () => j<{ buckets: { bucket: string; n: number; passes: number; pass_rate_pct: number | null }[] }>('/api/benchmark/calibration'),
   fromText: (prompt_text: string, name: string) => j<CustomScenarioDef>('/api/scenarios/from-text', { method: 'POST', body: JSON.stringify({ prompt_text, name }) }),
 }

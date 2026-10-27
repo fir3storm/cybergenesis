@@ -7,16 +7,17 @@ import type { Library } from '../types'
 interface Step { type: string; asset: string; description: string }
 interface Defense { action_type: string; asset_id: string; params: Record<string, string> }
 
-function TextToScenario() {
-  const { set, customScenarios } = useStore()
+function TextToScenario({ onRunCustom }: { onRunCustom: (scenarioDbId: string, twinDbId: string | null) => void }) {
+  const { set } = useStore()
   const [text, setText] = useState('what if the admin laptop is phished?')
   const [msg, setMsg] = useState<string | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
   const go = () => {
     setMsg('Muse Spark is writing the scenario…')
     api.fromText(text, 'AI What-If Scenario').then((sc) => {
-      setMsg(`Created "${sc.name}" — validated against the asset/step/action allowlists. Run it from the list on the right.`)
+      setCreatedId(sc.id)
+      setMsg(`Created "${sc.name}" — validated against the asset/step/action allowlists.`)
       api.customScenarios().then((s) => set({ customScenarios: s })).catch(() => undefined)
-      void customScenarios
     }).catch((e) => setMsg(`Failed honestly: ${(e as Error).message}`))
   }
   return (
@@ -25,6 +26,7 @@ function TextToScenario() {
       <div className="mt-2 flex gap-2">
         <input value={text} onChange={(e) => setText(e.target.value)} className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-2 text-sm" aria-label="What-if prompt" />
         <button onClick={go} className="rounded bg-violet-600 px-3 py-2 text-xs font-bold">Generate + Validate</button>
+        {createdId && <button onClick={() => onRunCustom(createdId, null)} className="rounded bg-emerald-500 px-3 py-2 text-xs font-bold text-slate-950">▶ Run now</button>}
       </div>
       {msg && <p className="mt-1 text-xs text-slate-300">{msg}</p>}
     </div>
@@ -81,7 +83,7 @@ export default function AttackPlaybook({ onRunCustom }: { onRunCustom: (scenario
       <h1 className="text-2xl font-black text-cyan-200">Attack Playbook Creator</h1>
       <p className="mt-1 text-sm text-slate-400">Compose a synthetic attack from the step library, choose the expected defense, save, and run it through the same Observe → Reason → Policy → Act → Verify loop. Step types are allowlisted — arbitrary payloads are rejected by the API.</p>
       {msg && <div className="mt-3 rounded border border-cyan-800 bg-slate-900 px-3 py-2 text-sm text-cyan-200">{msg}</div>}
-      <div className="mt-4"><TextToScenario /></div>
+      <div className="mt-4"><TextToScenario onRunCustom={onRunCustom} /></div>
       <div className="mt-4 grid gap-4 lg:grid-cols-12">
         <section className="lg:col-span-4 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
           <h2 className="text-xs font-bold tracking-wider text-cyan-300">1 · STEP LIBRARY</h2>

@@ -9,7 +9,7 @@ import httpx
 
 from app.core.config import settings
 
-PROMPT_VERSION = "cybergenesis-v2"
+PROMPT_VERSION = "cybergenesis-v3"
 
 
 class ProviderUnavailable(Exception):

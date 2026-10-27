@@ -18,3 +18,13 @@ test('welcome loads and demo completes with verification', async ({ page }) => {
   await page.getByRole('button', { name: 'Verification Lab' }).first().click()
   await expect(page.getByText(/^(PASS|FAIL)$/).first()).toBeVisible({ timeout: 60_000 })
 })
+
+test('playbook text-to-scenario input and battle view exist', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: /BUILD/ }).hover()
+  await page.getByRole('menuitem', { name: /Playbook/ }).click()
+  await expect(page.getByLabel('What-if prompt')).toBeVisible()
+  await page.getByRole('button', { name: /RUN/ }).hover()
+  await page.getByRole('menuitem', { name: /Battle/ }).click()
+  await expect(page.getByText('Battle — Red vs Blue')).toBeVisible()
+})

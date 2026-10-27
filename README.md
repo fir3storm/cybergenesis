@@ -1,5 +1,7 @@
 # CYBERGENESIS — The Autonomous Self-Defending Digital Twin
 
+[![CI](https://github.com/fir3storm/cybergenesis/actions/workflows/ci.yml/badge.svg)](https://github.com/fir3storm/cybergenesis/actions/workflows/ci.yml)
+
 **Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026 · Powered by Meta Muse Spark**
 
 ![CYBERGENESIS battle loop](docs/battle.gif)

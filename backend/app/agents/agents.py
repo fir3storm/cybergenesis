@@ -11,8 +11,8 @@ INVESTIGATOR_SYSTEM = (
     "You are given the real twin topology, live asset states, and the exact synthetic telemetry events, each with an id like tele-<scenario>-42-0. "
     "Ground every confirmed claim in specific event ids; put anything not directly evidenced under speculation. "
     "Return ONLY JSON: {\"hypothesis\": str, \"affected_assets\": [str], \"threat_level\": \"low|medium|high|critical\", "
-    "\"confirmed\": [str], \"speculation\": [str], \"confidence\": float, "
-    "\"claim_evidence\": [{\"claim\": str, \"evidence_refs\": [str]}]} where each claim cites only the event ids that directly support it. "
+    "\"confirmed\": [{\"claim\": str, \"evidence_ids\": [str]}], \"speculation\": [str], \"confidence\": float} "
+    "where every confirmed claim cites only the telemetry event ids that directly support it. "
     "No commands, no instructions to execute."
 )
 STRATEGIST_SYSTEM = (
@@ -70,11 +70,32 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
                      + f". Attack path source->target: {twin.find_path(scenario['source_asset'], scenario['target_asset'])}.")
     try:
         data, _ = await meta_client.chat_json(INVESTIGATOR_SYSTEM, evidence, run_id)
+        raw_confirmed = data.get("confirmed", [])
+        items: list[dict] = []
+        strings: list[str] = []
+        for c in raw_confirmed if isinstance(raw_confirmed, list) else []:
+            if isinstance(c, dict):
+                items.append({"claim": str(c.get("claim", "")), "evidence_ids": list(c.get("evidence_ids", []))})
+                strings.append(str(c.get("claim", "")))
+            else:
+                strings.append(str(c))
+        data = {**data, "confirmed": strings}
         h = IncidentHypothesis(**{**data, "model": meta_client.model, "mode": "live",
                                   "evidence_refs": obs.event_ids, "affected_assets": data.get("affected_assets", obs.asset_ids)})
-        known = set(obs.event_ids)  # keep only citations that point at real stored telemetry
-        h.claim_evidence = [{"claim": str(c.get("claim", "")), "evidence_refs": [r for r in c.get("evidence_refs", []) if r in known]}
-                            for c in h.claim_evidence if c.get("claim")]
+        known = set(obs.event_ids)  # validate citations against real stored telemetry
+        warnings: list[str] = []
+        validated: list[dict] = []
+        for it in items:
+            good = [r for r in it["evidence_ids"] if r in known]
+            bad = [r for r in it["evidence_ids"] if r not in known]
+            if bad:
+                warnings.append(f"unknown evidence ids moved to speculation: {bad}")
+                h.speculation = h.speculation + [f"{it['claim']} (unverified citation)"]
+            if good:
+                validated.append({"claim": it["claim"], "evidence_ids": good})
+        h.confirmed_items = validated
+        h.claim_evidence = [{"claim": v["claim"], "evidence_refs": v["evidence_ids"]} for v in validated]
+        h.citation_warnings = warnings
         return h
     except Exception as e:  # fallback is deterministic + labelled with the reason
         reason = f"{type(e).__name__}: {e}"[:220]
@@ -91,6 +112,7 @@ async def investigate(scenario: dict, obs: AgentObservation, run_id: str, teleme
             affected_assets=obs.asset_ids, threat_level=scenario.get("severity", "high"),
             confirmed=confirmed, speculation=["Adversary intent beyond the simulated objective is not inferred"],
             evidence_refs=obs.event_ids, claim_evidence=claim_evidence,
+            confirmed_items=[{"claim": c["claim"], "evidence_ids": c["evidence_refs"]} for c in claim_evidence],
             confidence=0.86, model="deterministic-offline", mode="offline",
             fallback_reason=reason)
 

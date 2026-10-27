@@ -12,5 +12,11 @@ No real-target discovery or scanning; no exploitation, payloads, propagation, ra
 3. **Defender → twin:** allowlist (`isolate_asset`, `block_connection`, `revoke_session`, `rotate_credential`, `apply_patch`, `disable_service`, `restore_connectivity`) + per-action preconditions (e.g., core assets can never be isolated). Every transition is recorded in `defense_executions` and evidence.
 4. **API → clients:** typed schemas, unknown scenarios/actions rejected (422/403), API key never returned (`api_key_exposed: false`), local-development exposure only.
 
+## Red-team campaign boundary (Phase 1+)
+The red team is an LLM *planner over a validated graph*, not an executor: Muse Spark returns a campaign (foothold / identity pivot / objective / typed steps) which `evaluate_campaign` checks deterministically — allowlisted step types, existing assets, and every hop an active traversable arc (or a compromised synthetic identity pivot). Invalid campaigns are rejected with feedback and one retry. Red moves are additionally hop-validated before application in every round.
+
+## Human approval & token budget (Phase 4)
+Defenses estimated to disrupt ≥2 legitimate paths (or isolating an identity asset) pause in `AWAITING_APPROVAL` when `HUMAN_APPROVAL_ENABLED=true`; an operator must call `/approve` or `/deny`, with auto-deny after `APPROVAL_TIMEOUT_SECONDS` (default 120). `AUTO_APPROVE=true` is a demo-only setting that still logs the approval event. Live Meta calls are capped by `MAX_TOKENS_PER_RUN` (default 20000); exceeding it forces a labelled offline fallback with the budget reason. Model usage is stored per run (locked dict) with prompt version + prompt hash.
+
 ## Residual risks
 A malicious prompt-injection via scenario text could bias an LLM proposal — mitigated because policy, not the LLM, authorises execution, and verification independently replays outcomes. Synthetic credentials (`admin-01` v1→v2) are labels, not secrets.

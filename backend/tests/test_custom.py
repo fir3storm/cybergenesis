@@ -127,7 +127,7 @@ async def test_vision_and_text_to_scenario_mocked(monkeypatch):
     monkeypatch.setattr(mc_mod.meta_client, "chat_vision_json", fake_vision)
     r = client.post("/api/twins/from-image", json={"image_data_url": "data:image/png;base64,AAAA", "name": "Mock Diagram"})
     assert r.status_code == 201, r.text
-    assert client.post("/api/twins/from-image", json={"image_data_url": "data:image/png;base64," + "A" * 8_100_000}).status_code == 413
+    assert client.post("/api/twins/from-image", json={"image_data_url": "data:image/png;base64," + "A" * 4_100_000}).status_code == 413
     client.delete(f"/api/twins/custom/{r.json()['id']}")
 
     async def fake_chat(system, user, run_id=None):
@@ -277,6 +277,70 @@ async def test_phase3_run_metrics_present():
     assert m["risk_before_pct"] is not None and m["risk_after_pct"] == 0.0
     assert "disrupted_before_healing" in m and "users_affected" in m
     assert "nodes_compromised_before_containment" in m
+
+
+@pytest.mark.asyncio
+async def test_phase4_learning_calibration_and_token_budget(monkeypatch):
+    from app.core.config import settings
+    from app.integrations.meta_client import ProviderUnavailable, meta_client
+
+    assert client.get("/api/learning/curve").json()["runs"] >= 0
+    cal = client.get("/api/benchmark/calibration").json()
+    assert len(cal["buckets"]) == 5
+    # token budget: exhaust it, next live call must refuse with the budget reason
+    monkeypatch.setattr(settings, "max_tokens_per_run", 0)
+    monkeypatch.setattr(meta_client, "key", "test-key")
+    monkeypatch.setattr(settings, "offline_mode", False)
+    with pytest.raises(ProviderUnavailable, match="token budget"):
+        await meta_client.chat_json("sys", "user", run_id="budget-test")
+
+
+@pytest.mark.asyncio
+async def test_phase4_confirmed_items_citations_validated(monkeypatch):
+    from app.agents import agents
+    from app.schemas import AgentObservation
+
+    async def fake_chat(system, user, run_id=None):
+        return ({"hypothesis": "phish leads to burst", "affected_assets": ["employee-workstation"],
+                 "confirmed": [{"claim": "burst observed", "evidence_ids": ["tele-ransomware_activity-42-1", "tele-INVENTED-9"]}],
+                 "speculation": [], "confidence": 0.9}, {})
+
+    monkeypatch.setattr(agents.meta_client, "chat_json", fake_chat)
+    obs = AgentObservation(anomalous=True, asset_ids=["employee-workstation"],
+                           event_ids=["tele-ransomware_activity-42-0", "tele-ransomware_activity-42-1"],
+                           anomaly_type="x", summary="s", confidence=0.9)
+    from app.simulation.scenarios import SCENARIOS
+
+    h = await agents.investigate(SCENARIOS["ransomware_activity"], obs, "r1")
+    assert h.confirmed_items and h.confirmed_items[0]["evidence_ids"] == ["tele-ransomware_activity-42-1"]
+    assert h.citation_warnings  # invented id was caught and moved out of confirmed citations
+
+
+@pytest.mark.asyncio
+async def test_phase5_hallucinated_asset_rejected_and_benchmark_run(monkeypatch):
+    import asyncio as _asyncio
+
+    from app import main as main_mod
+
+    async def fake_chat(system, user, run_id=None):
+        return ({"source_asset": "ghost-server", "target_asset": "file-server", "severity": "high",
+                 "invariant": "x", "attack_steps": [{"type": "network_connection", "asset": "ghost-server", "description": "x"}],
+                 "expected_defense": []}, {})
+
+    monkeypatch.setattr(main_mod.meta_client, "chat_json", fake_chat)
+    r = client.post("/api/scenarios/from-text", json={"prompt": "what if a ghost attacks?"})
+    assert r.status_code == 422  # hallucinated asset id must not be saved
+
+    br = client.post("/api/benchmark/run", json={"n": 3, "seed": 7, "mode": "offline"})
+    assert br.status_code == 202
+    rid = br.json()["run_id"]
+    for _ in range(300):
+        st = client.get(f"/api/benchmark/run/{rid}").json()
+        if st["state"] in ("COMPLETED", "FAILED"):
+            break
+        await _asyncio.sleep(0.5)
+    assert st["state"] == "COMPLETED" and len(st["rows"]) == 3
+    assert client.get(f"/api/benchmark/run/{rid}/export?format=csv").status_code == 200
 
 
 def test_benchmark_endpoint():

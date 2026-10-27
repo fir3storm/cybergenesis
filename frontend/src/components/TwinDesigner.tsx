@@ -80,6 +80,22 @@ export default function TwinDesigner() {
     setMsg(`Mermaid import: ${nodes.size} assets, ${edges.length} connections — review, then Save.`)
   }
 
+  function handleImageFile(f: File) {
+    if (!['image/png', 'image/jpeg'].includes(f.type)) { setMsg('Only PNG/JPEG images are accepted.'); return }
+    if (f.size > 4_000_000) { setMsg(`Image rejected: ${(f.size / 1e6).toFixed(1)} MB exceeds the 4 MB limit.`); return }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setMsg('Sending diagram to Muse Spark vision…')
+      api.fromImage(String(reader.result), name).then((t) => {
+        setAssets(t.assets.map((a) => ({ ...a, posture: a.posture ?? 0.7, vulnerabilities: a.vulnerabilities ?? [], pos: [a.pos[0], a.pos[1], a.pos[2]] as [number, number, number] })))
+        setConns(t.connections.map((c) => ({ source: c.source, target: c.target, trust: c.trust ?? 'medium', traversable: c.traversable ?? true, types: c.types ?? ['network'] })))
+        setMsg(`Meta vision generated "${t.name}" (${t.assets.length} assets) — edit on the canvas, then Save/Activate.`)
+        void refresh()
+      }).catch((err) => setMsg(`Vision failed honestly: ${(err as Error).message}`))
+    }
+    reader.readAsDataURL(f)
+  }
+
   async function save() {
     try {
       const saved = await api.createCustomTwin({ name, description: 'Designed in Twin Designer', assets, connections: conns })
@@ -128,7 +144,8 @@ export default function TwinDesigner() {
           ))}
         </section>
 
-        <section className="lg:col-span-6">
+        <section className="lg:col-span-6" onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) handleImageFile(f) }}>
           <svg ref={svgRef} viewBox="0 0 720 400" className="w-full rounded-xl border border-cyan-900 bg-[#04101f]"
             onPointerMove={onMove} onPointerUp={() => { drag.current = null }} role="img" aria-label="Twin design canvas. Assets are also listed as text on the left.">
             {Array.from({ length: 13 }, (_, i) => <line key={`v${i}`} x1={i * 60} y1={0} x2={i * 60} y2={400} stroke="#0e2a3f" />)}
@@ -166,9 +183,10 @@ export default function TwinDesigner() {
             ))}
             <label className="flex cursor-pointer items-center gap-1 rounded border border-violet-600 px-3 py-2 text-xs text-violet-200 hover:bg-violet-950/50">
               📷 Generate from whiteboard photo (Meta vision)
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+              <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
+                if (f.size > 4_000_000) { setMsg(`Image rejected: ${(f.size / 1e6).toFixed(1)} MB exceeds the 4 MB limit.`); return }
                 const reader = new FileReader()
                 reader.onload = () => {
                   setMsg('Sending diagram to Muse Spark vision…')

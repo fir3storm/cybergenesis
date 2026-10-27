@@ -16,7 +16,7 @@ export interface RunResult {
   executions: { action_type: string; asset_id: string; success: boolean; transition: Record<string, unknown> }[];
 }
 export interface ModelStatus { configured: boolean; reachable: boolean; model: string; mode: string; detail: string }
-export type View = 'welcome' | 'twin' | 'experiment' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library' | 'benchmark'
+export type View = 'welcome' | 'twin' | 'experiment' | 'battle' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library' | 'benchmark'
 
 export interface LibraryItem { id: string; label: string; description: string; params_contract?: string; default_posture?: number; default_zone?: string; mitre?: string; d3fend?: string }
 export interface Library { asset_types: LibraryItem[]; attack_steps: LibraryItem[]; defense_actions: LibraryItem[]; verification_kinds: string[]; zones: string[] }

@@ -163,7 +163,8 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
         db.add(models.AgentDecision(run_id=run_id, agent="incident_investigator", decision=hyp.hypothesis,
                                     justification="; ".join(hyp.confirmed), confidence=hyp.confidence, model=hyp.model,
                                     mode=hyp.mode, evidence_refs=hyp.evidence_refs, asset_ids=hyp.affected_assets,
-                                    data={"claim_evidence": hyp.claim_evidence})); db.commit()
+                                    data={"claim_evidence": hyp.claim_evidence, "confirmed_items": hyp.confirmed_items,
+                                          "citation_warnings": hyp.citation_warnings})); db.commit()
         emit("agent_decision", hyp.hypothesis, agent="incident_investigator", payload=hyp.model_dump())
 
         # race against time: the attack advances one hop per 2.0s of simulated time;
@@ -266,22 +267,29 @@ async def run_experiment(run_id: str, step_delay_ms: int | None = None) -> None:
             db.commit()
 
             # human approval gate for high-disruption defenses
+            needs_approval = [d for d in decisions if d.requires_human_approval]
             disrupted_est = chosen_cand["disrupted"] if chosen_cand else None
             if settings.human_approval_enabled and disrupted_est is not None and disrupted_est >= 2:
-                entry = {"event": asyncio.Event(), "approved": None}
-                _approvals[run_id] = entry
-                emit("approval_required", f"Human approval required: '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths. Approve in the UI.",
-                     agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est})
-                try:
-                    await asyncio.wait_for(entry["event"].wait(), timeout=settings.approval_timeout_seconds)
-                    approved_by_human = bool(entry["approved"])
-                except asyncio.TimeoutError:
-                    approved_by_human = False
-                    emit("approval_timeout", "Human approval timed out — defense NOT applied", agent="defense_executor")
-                _approvals.pop(run_id, None)
-                if not approved_by_human:
-                    emit("defense_rejected", "Defense rejected by human operator (or approval timeout)", agent="defense_executor")
-                    return candidates, proposal
+                if settings.auto_approve:
+                    emit("approval_auto", f"Auto-approved (demo setting): '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths — logged, not hidden",
+                         agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est,
+                                                            "requires_human_approval": bool(needs_approval)})
+                else:
+                    await set_state("AWAITING_APPROVAL", "Awaiting human approval for high-disruption defense", "defense_executor")
+                    entry = {"event": asyncio.Event(), "approved": None}
+                    _approvals[run_id] = entry
+                    emit("approval_required", f"Human approval required: '{chosen_cand['label']}' disrupts {disrupted_est} legitimate paths. Approve in the UI.",
+                         agent="defense_executor", payload={"actions": [a.model_dump() for a in chosen], "disrupted": disrupted_est})
+                    try:
+                        await asyncio.wait_for(entry["event"].wait(), timeout=settings.approval_timeout_seconds)
+                        approved_by_human = bool(entry["approved"])
+                    except asyncio.TimeoutError:
+                        approved_by_human = False
+                        emit("approval_timeout", f"Human approval auto-denied after {settings.approval_timeout_seconds}s — defense NOT applied", agent="defense_executor")
+                    _approvals.pop(run_id, None)
+                    if not approved_by_human:
+                        emit("defense_rejected", "Defense rejected by human operator (or approval timeout)", agent="defense_executor")
+                        return candidates, proposal
             await _delay()
 
             await set_state("DEFENSE_APPLYING", "Applying approved simulated defenses", "defense_executor")

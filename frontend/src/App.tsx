@@ -199,9 +199,63 @@ export function BattlePanel() {
   )
 }
 
+export function BattleView({ onRunBattle }: { onRunBattle: () => void }) {
+  const s = useStore()
+  const rounds = (s.results?.verification?.metrics.rounds as { round: number }[] | undefined) ?? []
+  const red = s.events.filter((e) => ['adversary_simulator'].includes(e.agent ?? '') || e.event_type === 'red_critic' || e.event_type === 'debate')
+  const blue = s.events.filter((e) => ['incident_investigator', 'defense_strategist', 'defense_executor'].includes(e.agent ?? ''))
+  const debates = s.events.filter((e) => e.event_type === 'debate' || e.event_type === 'red_critic')
+  return (
+    <main className="p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <div>
+          <h1 className="text-2xl font-black text-cyan-200">Battle — Red vs Blue</h1>
+          <p className="text-xs text-slate-400">Adaptive adversary on the left, defense on the right, the twin in the middle. Round {Math.max(rounds.length, s.runState === 'IDLE' ? 0 : 1)} · state {s.runState}</p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => { s.set({ scenarioId: 'red_vs_blue_battle' }); onRunBattle() }} className="rounded-lg bg-red-500 px-4 py-2 text-sm font-bold text-white">⚔ Run Battle</button>
+          <button onClick={() => s.set({ view: 'verification' })} className="rounded-lg border border-slate-600 px-3 py-2 text-sm">Resilience Curve →</button>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-12 gap-3">
+        <section className="col-span-12 lg:col-span-3 space-y-2" aria-label="Red team reasoning">
+          <h2 className="text-xs font-bold tracking-wider text-red-300">🔴 RED — CAMPAIGNS & CRITIC</h2>
+          {red.length === 0 && <p className="text-xs text-slate-500">No red activity yet. Run the battle.</p>}
+          {[...red].reverse().slice(0, 10).map((e, i) => (
+            <div key={i} className="rounded-xl border border-red-900/50 bg-red-950/25 p-2 text-[11px] text-slate-200">
+              <span className="font-mono text-red-300">{e.event_type}</span> — {e.message.slice(0, 220)}
+            </div>
+          ))}
+          {debates.map((e, i) => (
+            <div key={i} className="rounded-2xl rounded-tl-sm border border-violet-700/60 bg-violet-950/40 p-2 text-[11px] text-violet-100">💬 {e.message.slice(0, 220)}</div>
+          ))}
+        </section>
+        <section className="col-span-12 lg:col-span-6">
+          <div className="h-[560px] rounded-2xl border border-cyan-900 overflow-hidden bg-slate-950">
+            {s.twin ? <TwinView twin={s.twin} /> : <SkeletonTwin />}
+          </div>
+          <AttackChain />
+        </section>
+        <section className="col-span-12 lg:col-span-3 space-y-2" aria-label="Blue team reasoning">
+          <h2 className="text-xs font-bold tracking-wider text-cyan-300">🔵 BLUE — INVESTIGATE · SIMULATE · DEFEND</h2>
+          {blue.length === 0 && <p className="text-xs text-slate-500">No blue activity yet.</p>}
+          {[...blue].reverse().slice(0, 10).map((e, i) => (
+            <div key={i} className="rounded-xl border border-cyan-900/50 bg-cyan-950/25 p-2 text-[11px] text-slate-200">
+              <span className="font-mono text-cyan-300">{e.event_type}</span>{e.agent && <span className="text-violet-300"> · {e.agent}</span>} — {e.message.slice(0, 220)}
+            </div>
+          ))}
+        </section>
+      </div>
+    </main>
+  )
+}
+
 export function BenchmarkView() {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.benchmark>> | null>(null)
+  const [curve, setCurve] = useState<Awaited<ReturnType<typeof api.learningCurve>> | null>(null)
+  const [cal, setCal] = useState<Awaited<ReturnType<typeof api.calibration>> | null>(null)
   useEffect(() => { api.benchmark().then(setData).catch(() => setData({ available: false, detail: 'benchmark endpoint unreachable' })) }, [])
+  useEffect(() => { api.learningCurve().then(setCurve).catch(() => undefined); api.calibration().then(setCal).catch(() => undefined) }, [])
   return (
     <main className="p-6 max-w-4xl">
       <h1 className="text-2xl font-black text-cyan-200">Benchmark</h1>
@@ -232,6 +286,31 @@ export function BenchmarkView() {
             </div>
           )}
           <CompareRuns />
+          {curve && curve.points.length > 0 && (
+            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
+              <b className="text-cyan-200 text-sm">Learning curve — optimality gap over runs</b>
+              <div className="mt-2 flex items-end gap-1" role="img" aria-label="Optimality gap per run">
+                {curve.points.slice(-24).map((p, i) => (
+                  <div key={i} title={`${p.scenario_id} (${p.mode}): gap ${p.optimality_gap ?? '—'}`}
+                    className={`w-3 rounded-t ${p.outcome === 'PASS' ? 'bg-emerald-400' : 'bg-red-400'}`}
+                    style={{ height: `${8 + Math.min((p.optimality_gap ?? 0) * 14, 56)}px` }} />
+                ))}
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">{curve.runs} completed runs · bar height = optimality gap · green = PASS. Past verified defenses are fed back to the Strategist as examples.</p>
+            </div>
+          )}
+          {cal && (
+            <div className="mt-4 rounded-xl border border-slate-800 glass-panel p-3">
+              <b className="text-cyan-200 text-sm">Confidence calibration (5 buckets)</b>
+              <div className="mt-2 space-y-1">
+                {cal.buckets.map((b) => (
+                  <div key={b.bucket} className="flex items-center gap-2 text-xs"><span className="w-16 font-mono">{b.bucket}</span>
+                    <div className="h-3 flex-1 rounded bg-slate-800"><div className="h-3 rounded bg-cyan-400" style={{ width: `${b.pass_rate_pct ?? 0}%` }} /></div>
+                    <span>{b.pass_rate_pct === null ? `n=${b.n} (no data)` : `${b.pass_rate_pct}% PASS (n=${b.n})`}</span></div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </main>
@@ -353,8 +432,20 @@ export default function App() {
   const [replayPlaying, setReplayPlaying] = useState(false)
   const [snapshots, setSnapshots] = useState<{ label: string; snapshot: { status: Record<string, string> } }[]>([])
   const [tourStep, setTourStep] = useState<number | null>(null)
+  const [whatIf, setWhatIf] = useState('what if the admin laptop is phished?')
+  const [whatIfMsg, setWhatIfMsg] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const pollRef = useRef<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (!localStorage.getItem('cybergenesis_tour_seen')) {
+      const t = window.setTimeout(() => setTourStep(0), 900)
+      localStorage.setItem('cybergenesis_tour_seen', '1')
+      return () => window.clearTimeout(t)
+    }
+    return undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     api.twin().then((t) => s.set({ twin: t })).catch((e) => s.set({ error: `Backend unreachable: ${e.message}. Start backend on :8000.` }))
@@ -525,16 +616,16 @@ export default function App() {
   const nav: { id: View; label: string; icon: ReactNode; group: string }[] = [
     { id: 'welcome', label: 'Welcome', icon: <Home size={15} />, group: 'RUN' },
     { id: 'experiment', label: 'Experiment', icon: <FlaskConical size={15} />, group: 'RUN' },
+    { id: 'battle', label: 'Battle', icon: <Swords size={15} />, group: 'RUN' },
     { id: 'twin', label: 'Living Twin', icon: <Globe size={15} />, group: 'INSPECT' },
-    { id: 'agents', label: 'Agents', icon: <Bot size={15} />, group: 'INSPECT' },
     { id: 'attackpath', label: 'Attack Path', icon: <Route size={15} />, group: 'INSPECT' },
-    { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} />, group: 'INSPECT' },
-    { id: 'evidence', label: 'Evidence', icon: <FileText size={15} />, group: 'INSPECT' },
+    { id: 'agents', label: 'Agents', icon: <Bot size={15} />, group: 'INSPECT' },
     { id: 'designer', label: 'Twin Designer', icon: <PenTool size={15} />, group: 'BUILD' },
     { id: 'playbook', label: 'Playbook', icon: <Swords size={15} />, group: 'BUILD' },
     { id: 'library', label: 'Library', icon: <Boxes size={15} />, group: 'BUILD' },
-    { id: 'benchmark', label: 'Benchmark', icon: <BarChart3 size={15} />, group: 'PROOF' },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon size={15} />, group: 'PROOF' },
+    { id: 'verification', label: 'Verification Lab', icon: <ShieldCheck size={15} />, group: 'PROOF' },
+    { id: 'evidence', label: 'Evidence', icon: <FileText size={15} />, group: 'PROOF' },
+    { id: 'benchmark', label: 'Proof / Benchmark', icon: <BarChart3 size={15} />, group: 'PROOF' },
   ]
   const live = s.modelStatus?.mode === 'live'
 
@@ -579,6 +670,16 @@ export default function App() {
             <button onClick={() => s.set({ view: 'agents' })} className="rounded-lg border border-cyan-700 px-5 py-3 hover:bg-slate-800">Explore Architecture</button>
             <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-5 py-3 disabled:opacity-40" title={s.runId ? 'Download evidence report' : 'Run an experiment first'}><Download size={15} className="inline" /> Download Report</button>
           </div>
+          <div className="mx-auto mt-8 flex max-w-xl gap-2">
+            <input value={whatIf} onChange={(e) => setWhatIf(e.target.value)} aria-label="What-if scenario prompt"
+              className="flex-1 rounded-lg border border-violet-700 bg-slate-900 px-3 py-2 text-sm" />
+            <button onClick={() => {
+              setWhatIfMsg('Muse Spark is writing the scenario…')
+              api.fromText(whatIf, 'AI What-If Scenario').then(() => { setWhatIfMsg('Scenario created and validated — opening the Playbook to run it.'); s.set({ view: 'playbook' }) })
+                .catch((e) => setWhatIfMsg(`Failed honestly: ${(e as Error).message}`))
+            }} className="rounded-lg bg-violet-600 px-3 py-2 text-sm font-bold">✨ Ask a what-if</button>
+          </div>
+          {whatIfMsg && <p className="mt-1 text-xs text-violet-300">{whatIfMsg}</p>}
           <p className="mt-10 text-xs font-mono text-slate-500">Powered by Meta Muse Spark · Created by Dr. Abhirup Guha · Meta Global AI Developer Hackathon 2026</p>
           <div className="mx-auto mt-8 h-[380px] max-w-5xl rounded-2xl border border-cyan-900 overflow-hidden">
             {s.twin ? <TwinView twin={s.twin} /> : <div className="p-8 text-slate-400">Loading twin… (backend on :8000 required)</div>}
@@ -720,7 +821,7 @@ export default function App() {
                 )}
                 {s.events.length === 0 && <p className="text-xs text-slate-500">No events yet — press RUN EXPERIMENT. (Space also runs, R resets, 1–4 pick a scenario.)</p>}
                 {[...s.events].reverse().map((e, i) => (
-                  <div key={i} className={`border-b border-slate-800 py-1 text-xs ${replayIdx === s.events.length - 1 - i ? 'bg-amber-500/15' : ''}`}>
+                  <div key={i} className={`border-b border-slate-800 py-1 text-xs ${replayIdx === s.events.length - 1 - i ? 'bg-amber-500/15' : ''} ${s.highlightRef && e.payload?.id === s.highlightRef ? 'bg-cyan-500/20 border-l-2 border-l-cyan-300' : ''}`}>
                     <span className="font-mono text-cyan-400">{e.event_type}</span>
                     {e.agent && <span className="text-violet-300"> · {e.agent}</span>}
                     {e.asset_id && <span className="text-amber-300"> · {e.asset_id}</span>}
@@ -898,6 +999,7 @@ export default function App() {
       {s.view === 'designer' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Twin Designer…</div>}><TwinDesigner /></Suspense>}
       {s.view === 'playbook' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Attack Playbook…</div>}><AttackPlaybook onRunCustom={(sid, tid) => void runCustomExperiment(sid, tid)} /></Suspense>}
       {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
+      {s.view === 'battle' && <BattleView onRunBattle={() => void runDemo('red_vs_blue_battle')} />}
       {s.view === 'benchmark' && <BenchmarkView />}
       {s.view === 'evidence' && <EvidenceView />}
       {s.view === 'settings' && (
@@ -939,9 +1041,15 @@ export default function App() {
             <h2 className="text-lg font-black text-amber-300">⚠ Human Approval Required</h2>
             <p className="mt-1 text-sm text-slate-200">{approvalPending.message}</p>
             <p className="mt-1 text-xs text-slate-400">Responsible-AI gate: a high-disruption defense will not execute without an operator decision. Rejecting (or timing out) leaves the twin undefended and verification will honestly FAIL.</p>
+            {(() => {
+              const acts = (approvalPending.payload?.actions ?? []) as { action_type: string; asset_id: string }[]
+              return acts.length ? (
+                <p className="mt-1 font-mono text-[11px] text-slate-400">Actions: {acts.map((a) => `${a.action_type} on ${a.asset_id}`).join(', ')} · disrupted paths: {String(approvalPending.payload?.disrupted ?? '—')}</p>
+              ) : null
+            })()}
             <div className="mt-3 flex gap-2">
               <button onClick={() => void api.approve(s.runId!, true)} className="rounded bg-emerald-500 px-4 py-2 text-sm font-bold text-slate-950">Approve defense</button>
-              <button onClick={() => void api.approve(s.runId!, false)} className="rounded border border-red-500 px-4 py-2 text-sm text-red-300">Reject</button>
+              <button onClick={() => void api.deny(s.runId!)} className="rounded border border-red-500 px-4 py-2 text-sm text-red-300">Reject</button>
             </div>
           </div>
         </div>
@@ -983,6 +1091,19 @@ function EvidenceView() {
           const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })
           const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `cybergenesis-run-bundle-${s.runId}.json`; a.click()
         })} disabled={!s.runId} className="rounded border border-slate-600 px-3 py-1.5 text-xs disabled:opacity-40">Export run bundle (replayable JSON)</button>
+        <label className="cursor-pointer rounded border border-slate-600 px-3 py-1.5 text-xs hover:bg-slate-800">
+          Import run bundle
+          <input type="file" accept="application/json" className="hidden" onChange={(e) => {
+            const f = e.target.files?.[0]; if (!f) return
+            f.text().then((txt) => {
+              const bundle = JSON.parse(txt) as RunResult & { run?: RunResult['run'] }
+              if (bundle.run?.id && bundle.verification !== undefined) {
+                s.set({ results: bundle, runId: bundle.run.id, runState: bundle.run.state, error: null })
+                setRows(null)
+              }
+            }).catch(() => s.set({ error: 'Invalid run bundle file' }))
+          }} />
+        </label>
       </div>
       {s.highlightRef && <p className="mt-2 text-xs text-cyan-300">Highlighting citation: <span className="font-mono">{s.highlightRef}</span></p>}
       <div className="mt-4 space-y-1">
