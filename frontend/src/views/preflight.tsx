@@ -57,7 +57,7 @@ export function PreflightPanel() {
             <tbody>
               {result.results.map((r) => (
                 <tr key={r.scenario_id} className={r.status === 'REGRESSION' ? 'text-red-300' : 'text-slate-200'}>
-                  <td>{r.scenario_id}</td><td>{r.status}</td>
+                  <td title={r.scenario_id}>{r.scenario_name || r.scenario_id}</td><td>{r.status}</td>
                   <td>{String(r.baseline_reachable)}</td><td>{String(r.after_reachable)}</td>
                   <td>{r.new_paths.length ? r.new_paths.map((p) => p.join(' → ')).join('; ') : '—'}</td>
                 </tr>

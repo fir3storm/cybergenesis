@@ -14,6 +14,7 @@ from app.simulation.twin import DigitalTwin
 from app.verification.optimality import build_optimality_proof, check_optimality_proof
 
 SC = {"id": "t", "source_asset": "s", "target_asset": "t", "verification_kind": "reachability"}
+ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 
 
 def _twin(assets, conns):
@@ -117,6 +118,39 @@ def test_tamper_edit_hash_fails():
     proof["graph_sha256"] = "0" * 64
     ok, reasons = check_optimality_proof(proof)
     assert not ok and any("graph_sha256" in r for r in reasons)
+
+
+def _forged_no_path():
+    proof = _valid_proof()
+    proof.update({"witness_paths": [], "lower_bound": 0, "defense_cut": [], "defense_cut_size": 0,
+                  "is_cut": False, "optimality_gap": None, "verdict": "NO_PATH_AT_BASELINE"})
+    return proof
+
+
+def test_forged_no_path_verdict_fails_in_both_checkers():
+    import importlib.util
+
+    ok, reasons = check_optimality_proof(_forged_no_path())
+    assert not ok and any("NO_PATH_AT_BASELINE" in r for r in reasons)
+    spec = importlib.util.spec_from_file_location("verify_cert", os.path.join(ROOT, "scripts", "verify_cert.py"))
+    vc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(vc)
+    ok, reasons = vc.check_optimality_proof(_forged_no_path())
+    assert not ok and any("NO_PATH_AT_BASELINE" in r for r in reasons)
+
+
+def test_capped_path_search_never_turns_a_real_cut_into_not_a_cut(monkeypatch):
+    from app.verification import optimality
+
+    # simulate the 2000-path cap missing every relevant edge on a huge graph
+    monkeypatch.setattr(optimality, "_edges_on_some_path", lambda *a, **k: set())
+    base = _two_path_twin()
+    final = base.clone()
+    _block(final, "a", "t")
+    _block(final, "b", "t")
+    proof = build_optimality_proof(base, final, SC)
+    assert proof["verdict"] in ("OPTIMAL", "SUBOPTIMAL") and proof["is_cut"]
+    assert check_optimality_proof(proof)[0]
 
 
 def test_tamper_edit_lower_bound_fails():

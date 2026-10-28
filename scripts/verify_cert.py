@@ -112,6 +112,18 @@ def check_optimality_proof(proof) -> tuple[bool, list[str]]:
         reasons.append(f"is_cut claim {proof['is_cut']} disagrees with recomputation (path remains: {has_path})")
     k = len(witness)
     verdict, gap = proof["verdict"], proof["optimality_gap"]
+    if verdict == "NO_PATH_AT_BASELINE":
+        full: dict[str, list[str]] = {}
+        for a, b in graph_edges:
+            full.setdefault(a, []).append(b)
+        reach, q = {src}, deque([src])
+        while q:
+            for nb in full.get(q.popleft(), []):
+                if nb not in reach:
+                    reach.add(nb)
+                    q.append(nb)
+        if tgt in reach:
+            reasons.append("verdict NO_PATH_AT_BASELINE but graph_edges contain a source->target path")
     if k == 0:
         if verdict != "NO_PATH_AT_BASELINE":
             reasons.append(f"verdict {verdict} inconsistent: no witness paths but verdict is not NO_PATH_AT_BASELINE")

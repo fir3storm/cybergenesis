@@ -28,6 +28,7 @@ class ProviderUnavailable(Exception):
 
 
 MAX_RETRY_WAIT_S = 20.0
+HEALTH_CACHE_S = 600.0
 
 
 def _retry_wait(r: httpx.Response, attempt: int) -> float | None:
@@ -69,6 +70,7 @@ class MetaModelClient:
     """
 
     def __init__(self) -> None:
+        self._health_cache: dict[tuple, tuple[float, dict]] = {}
         self.base = settings.model_api_base_url.rstrip("/")
         self.model = settings.meta_model
         self.key = settings.model_api_key
@@ -155,16 +157,34 @@ class MetaModelClient:
                     "detail": ("OFFLINE_MODE explicitly enabled"
                                if settings.offline_mode else
                                f"no API key for {self.provider_label} — offline simulation mode (set one in Settings)")}
+        # Listing /models proves only that the key is accepted: a wrong model
+        # name or an exhausted quota still lists fine. So one tiny real chat
+        # request decides "live", cached per provider/model/key so page loads
+        # do not spend quota.
+        cache_key = (self.base, self.model, hashlib.sha256(self.key.encode()).hexdigest()[:12])
+        cached = self._health_cache.get(cache_key)
+        if cached and time.time() - cached[0] < HEALTH_CACHE_S:
+            return cached[1]
+        headers = {"Authorization": f"Bearer {self.key}"}
+        body = {"model": self.model, "max_tokens": 16, "messages": [{"role": "user", "content": "Reply with: ok"}]}
         try:
-            async with httpx.AsyncClient(timeout=8) as c:
-                r = await c.get(f"{self.base}/models", headers={"Authorization": f"Bearer {self.key}"})
-            ok = r.status_code < 500
-            return {"configured": True, "reachable": ok, "model": self.model,
-                    "mode": "live" if ok else "offline",
-                    "detail": f"provider responded HTTP {r.status_code}"}
+            async with httpx.AsyncClient(timeout=20) as c:
+                for _ in range(2):  # one retry for Command Code's intermittent region 403
+                    r = await c.post(f"{self.base}/chat/completions", headers=headers, json=body)
+                    if not (r.status_code == 403 and "model_region_unavailable" in r.text):
+                        break
+            ok = r.status_code < 400
+            reason = {401: "key rejected", 403: "access denied", 404: "model not found",
+                      429: "rate limit or quota exhausted"}.get(r.status_code, "")
+            result = {"configured": True, "reachable": r.status_code < 500, "model": self.model,
+                      "mode": "live" if ok else "offline",
+                      "detail": (f"model answered (HTTP {r.status_code})" if ok else
+                                 f"model {self.model} unusable: HTTP {r.status_code}{' — ' + reason if reason else ''}")}
         except Exception as e:  # noqa: BLE001 - surfaced honestly to UI
             return {"configured": True, "reachable": False, "model": self.model,
                     "mode": "offline", "detail": f"provider unreachable: {type(e).__name__}"}
+        self._health_cache[cache_key] = (time.time(), result)
+        return result
 
     async def chat_json(self, system: str, user: str, run_id: str | None = None,
                         tier: str | None = None) -> tuple[dict, dict]:

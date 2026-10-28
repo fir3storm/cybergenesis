@@ -114,6 +114,22 @@ def test_region_403_is_retried_and_cap_sent(monkeypatch, _no_real_sleep):
     assert sent == [_cfg.settings.model_max_tokens_per_call] * 2
 
 
+def test_health_wrong_model_is_not_live(monkeypatch):
+    # /models would list fine; only a real call shows the model is unusable
+    mc = _live_client(monkeypatch)
+    _patch_async_client(monkeypatch, [(404, {"error": "model not found"})])
+    h = asyncio.run(mc.health())
+    assert h["mode"] == "offline" and "model not found" in h["detail"]
+
+
+def test_health_live_result_is_cached(monkeypatch):
+    mc = _live_client(monkeypatch)
+    calls = _patch_async_client(monkeypatch, [(200, {"choices": [{"message": {"content": "ok"}}]})])
+    assert asyncio.run(mc.health())["mode"] == "live"
+    assert asyncio.run(mc.health())["mode"] == "live"
+    assert calls["n"] == 1  # page loads must not spend quota
+
+
 def test_client_error_is_not_retried(monkeypatch):
     mc = _live_client(monkeypatch)
     calls = _patch_async_client(monkeypatch, [(404, {"error": "model not found"})] * 5)

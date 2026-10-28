@@ -1401,7 +1401,11 @@ def twin_preflight(twin_id: str, body: PreflightRequest, db: Session = Depends(g
     from app.simulation.importers import ImportError_
     from app.simulation.preflight import run_preflight
 
-    if twin_id in ("builtin", "active"):
+    if twin_id == "builtin":
+        # the pristine built-in network: after a demo run orchestrator.TWIN still
+        # carries that run's defenses, which would hide exposures from preflight
+        twin = DigitalTwin()
+    elif twin_id == "active":
         twin = orchestrator.TWIN
     else:
         row = db.get(models.CustomTwinDefinition, twin_id)

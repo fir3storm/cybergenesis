@@ -1,4 +1,5 @@
 ﻿*.db
+*.db.bak-*
 arena_memory.json
 provider_settings.json
 .env

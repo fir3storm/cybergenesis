@@ -166,16 +166,12 @@ def derive_ops_from_definition(twin: DigitalTwin, definition: dict) -> list[Chan
                 ops.append({"op": "add_vulnerability", "asset_id": aid, "vuln": v})
             for v in sorted(set(cur_assets[aid].get("vulnerabilities") or []) - set(a.get("vulnerabilities") or [])):
                 ops.append({"op": "remove_vulnerability", "asset_id": aid, "vuln": v})
-    # connections in the importer shape may list each direction separately; collapse to pairs
+    # importer connections list each direction separately, as (source, target) pairs
     def _pairs(conns):
-        out = set()
-        for c in conns:
-            out.add((c["source"], c["target"]))
-        return out
+        return {(c["source"], c["target"]) for c in conns}
 
-    _pairs(twin.to_dict()["connections"])
-    # current traversable directed pairs from edge_defs state is approximated by
-    # to_dict connections (one entry per edge_def); expand both directions when traversable
+    # current traversable directed pairs: to_dict has one entry per edge_def,
+    # so expand both directions when active
     cur_directed = set()
     for c in twin.to_dict()["connections"]:
         if c.get("dir_forward_active", c.get("active")):

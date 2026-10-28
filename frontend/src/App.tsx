@@ -446,6 +446,15 @@ export default function App() {
     { id: 'scorecards', label: 'Scorecards', icon: <BarChart3 size={15} />, group: 'PROOF' },
   ]
   const live = s.modelStatus?.mode === 'live'
+  // the provider badge says what *would* happen; this says what the last run actually used
+  const lastRunAi = (() => {
+    const ds = s.results?.decisions ?? []
+    if (!ds.length) return null
+    const nLive = ds.filter((d) => d.mode === 'live').length
+    const reason = ds.map((d) => d.justification.match(/unavailable: ([^)]*)\)/)?.[1]).find(Boolean)
+    if (nLive) return { live: true, label: `last run: ${nLive} live AI decision${nLive === 1 ? '' : 's'}`, title: [...new Set(ds.filter((d) => d.mode === 'live').map((d) => d.model))].join(', ') }
+    return { live: false, label: 'last run: offline (no live AI)', title: reason ? `provider failed: ${reason}` : 'every decision was deterministic' }
+  })()
   // proof + briefing describe the finished run; fetching earlier certifies a half-done twin
   const finalOutcome = s.runState === 'COMPLETED' ? s.results?.verification?.outcome : undefined
 
@@ -457,6 +466,11 @@ export default function App() {
           {live ? `● LIVE ${{ meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE' }[s.modelStatus?.provider ?? 'meta'] ?? 'AI'} AI` : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
         </span>
         <span className="text-[11px] text-slate-400 font-mono">{s.modelStatus?.detail}</span>
+        {lastRunAi && (
+          <span title={lastRunAi.title} className={`text-[11px] font-mono px-2 py-1 rounded-full border ${lastRunAi.live ? 'border-emerald-500/60 text-emerald-300' : 'border-amber-500/60 text-amber-300'}`}>
+            {lastRunAi.label}
+          </span>
+        )}
         {s.results?.usage && s.results.usage.calls > 0 && (
           <span className="text-[11px] font-mono px-2 py-1 rounded-full border border-violet-500/60 text-violet-300" title="Real AI provider usage for the current run">
             AI tokens: {s.results.usage.prompt_tokens} in + {s.results.usage.completion_tokens} out · {s.results.usage.calls} calls
@@ -493,8 +507,14 @@ export default function App() {
           <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="text-4xl sm:text-6xl md:text-8xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300">CYBERGENESIS</motion.h1>
           <p className="mt-4 text-xl text-slate-300">The Autonomous Self-Defending Digital Twin</p>
           <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">Observe → Reason → Propose → Validate → Act → Retest → Prove. A closed-loop autonomous defense experiment on a synthetic enterprise twin — every result computed, replayed, and evidenced. Synthetic data only; no real targets.</p>
-          <div className={`mx-auto mt-6 w-fit rounded-full border px-4 py-2 font-mono text-sm ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
-            <span className="animate-pulse">●</span> {live ? `LIVE ${PROVIDER_LABEL[s.modelStatus?.provider ?? 'meta']} AI — ${s.modelStatus?.model ?? 'muse-spark-1.3'} is reasoning on this twin` : 'OFFLINE SIMULATION — deterministic mode (set MODEL_API_KEY for LIVE AI)'}
+          {/* fixed-height slot: the status resolves after a real model probe, and
+              resizing here used to shift the buttons below mid-click */}
+          <div className="mt-6 flex min-h-[4.5rem] items-start justify-center">
+            <div className={`w-fit rounded-full border px-4 py-2 font-mono text-sm ${!s.modelStatus ? 'border-slate-600 text-slate-400' : live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
+              <span className="animate-pulse">●</span> {!s.modelStatus ? 'Checking AI provider…'
+                : live ? `LIVE ${PROVIDER_LABEL[s.modelStatus.provider ?? 'meta']} AI — ${s.modelStatus.model} is reasoning on this twin`
+                  : `OFFLINE SIMULATION — deterministic mode (${s.modelStatus.configured ? s.modelStatus.detail : 'add an AI provider key in Settings for LIVE AI'})`}
+            </div>
           </div>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button onClick={() => s.set({ view: 'twin' })} className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Enter the Digital Twin</button>

@@ -72,23 +72,28 @@ def test_new_path_on_many_path_twin_is_found_and_uses_new_edge():
     assert all(("web-server", "database") in set(itertools.pairwise(p)) for p in row["new_paths"])
 
 
+def test_builtin_preflight_ignores_last_run_defenses():
+    from app.orchestration import orchestrator
+
+    # leave the live twin defended, as a finished demo run does
+    orchestrator.TWIN.apply_action("quarantine_vlan", "employee-workstation", {})
+    try:
+        r = client.post("/api/twins/builtin/preflight",
+                        json={"change": [{"op": "set_posture", "asset_id": "app-server", "posture": 0.9}],
+                              "scenario_ids": ["ransomware_activity"]}).json()
+        row = r["results"][0]
+        assert row["baseline_reachable"] is True, "builtin must be the pristine twin, not the defended live one"
+        assert row["scenario_name"] and row["scenario_name"] != row["scenario_id"]
+    finally:
+        client.post("/api/demo/reset")
+
+
 def test_removing_only_link_is_improved():
-    # baseline for this scenario is the built graph; removing app->db cuts the only route
+    # web -> app -> db is the only route; cutting app->db must read IMPROVED, not PASS-by-default
     r = run_preflight(_twin(), SC, {"ops": [{"op": "remove_link", "src": "app-server", "dst": "database"}]})
-    assert r["results"][0]["status"] in ("IMPROVED", "REGRESSION", "STILL_EXPOSED", "OK")
-    # the direct assertion: after-change reachability must not be a new regression
-    assert r["verdict"] == "PASS"
-
-
-def test_removing_link_improved_when_it_was_only_path():
-    twin = _twin()
-    # use live-graph paths as ground truth for this twin
-    r = run_preflight(twin, SC, [{"op": "remove_link", "src": "app-server", "dst": "database"}])
     row = r["results"][0]
-    if row["baseline_reachable"]:
-        assert row["status"] == "IMPROVED" and not row["after_reachable"]
-    else:
-        assert row["status"] == "OK"
+    assert row["baseline_reachable"] is True and row["after_reachable"] is False
+    assert row["status"] == "IMPROVED" and r["verdict"] == "PASS"
 
 
 def test_stored_twin_unchanged_after_preflight():

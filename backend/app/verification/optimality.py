@@ -108,10 +108,18 @@ def build_optimality_proof(baseline_twin, final_twin, scenario) -> dict:
     on_path = _edges_on_some_path(g, src, tgt)
     relevant = [e for e in removed if tuple(e) in on_path]
 
-    cut_set = {tuple(e) for e in relevant}
-    remaining = nx.DiGraph()
-    remaining.add_edges_from([tuple(e) for e in graph_edges if tuple(e) not in cut_set])
-    is_cut = not (src in remaining and tgt in remaining and nx.has_path(remaining, src, tgt))
+    def _cuts(edges) -> bool:
+        cut_set = {tuple(e) for e in edges}
+        remaining = nx.DiGraph()
+        remaining.add_edges_from([tuple(e) for e in graph_edges if tuple(e) not in cut_set])
+        return not (src in remaining and tgt in remaining and nx.has_path(remaining, src, tgt))
+
+    is_cut = _cuts(relevant)
+    if not is_cut and _cuts(removed):
+        # the capped simple-path search missed a relevant edge on a large
+        # graph: certify the full removed set instead. That can only overstate
+        # the gap, never report a real cut as NOT_A_CUT.
+        relevant, is_cut = removed, True
 
     if not is_cut:
         gap, verdict = None, "NOT_A_CUT"
@@ -192,6 +200,12 @@ def check_optimality_proof(proof) -> tuple[bool, list[str]]:
     k = len(witness)
     verdict = proof["verdict"]
     gap = proof["optimality_gap"]
+    if verdict == "NO_PATH_AT_BASELINE":
+        base = nx.DiGraph()
+        base.add_nodes_from([src, tgt])
+        base.add_edges_from([tuple(e) for e in graph_edges])
+        if nx.has_path(base, src, tgt):
+            reasons.append("verdict NO_PATH_AT_BASELINE but graph_edges contain a source->target path")
     if k == 0:
         if verdict != "NO_PATH_AT_BASELINE":
             reasons.append(f"verdict {verdict} inconsistent: no witness paths but verdict is not NO_PATH_AT_BASELINE")
