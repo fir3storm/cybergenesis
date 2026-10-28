@@ -18,9 +18,12 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from app.core.config import settings
 from app.simulation.twin import DigitalTwin
 
-DEMO_KEY = os.environ.get("CERT_DEMO_KEY")
+# pydantic-settings reads backend/.env but does not export it to os.environ,
+# so fall back to settings or a key kept only in .env is never seen.
+DEMO_KEY = os.environ.get("CERT_DEMO_KEY") or settings.cert_demo_key
 if not DEMO_KEY:
     raise RuntimeError(
         "CERT_DEMO_KEY environment variable is not set: set CERT_DEMO_KEY to a long random "
@@ -35,7 +38,7 @@ def signing_key() -> Ed25519PrivateKey:
     """Ed25519 key, created on first use and kept on this machine (gitignored PEM)."""
     global _SIGNING_KEY
     if _SIGNING_KEY is None:
-        path = Path(os.environ.get("CERT_SIGNING_KEY_PATH", "./cert_signing_key.pem"))
+        path = Path(os.environ.get("CERT_SIGNING_KEY_PATH") or settings.cert_signing_key_path)
         if path.exists():
             key = serialization.load_pem_private_key(path.read_bytes(), password=None)
             if not isinstance(key, Ed25519PrivateKey):

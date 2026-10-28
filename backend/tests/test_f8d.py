@@ -23,6 +23,32 @@ def _verify(path) -> subprocess.CompletedProcess:
 
 
 @pytest.mark.asyncio
+async def test_quarantine_pass_is_optimal_and_lowers_risk():
+    rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    cert = client.get(f"/api/experiments/{rid}/certificate").json()
+    assert cert["optimality_proof"]["verdict"] == "OPTIMAL"
+    m = client.get(f"/api/experiments/{rid}/results").json()["verification"]["metrics"]
+    assert m["primary_objective_blocked"] is True
+    # the Monte Carlo risk must use the same compiled graph as the reachability check
+    assert m["risk_after_pct"] < m["risk_before_pct"]
+
+
+@pytest.mark.asyncio
+async def test_certificate_refuses_run_without_final_snapshot():
+    from app import models
+    from app.db import SessionLocal
+
+    rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42}).json()["id"]
+    await run_experiment(rid)
+    with SessionLocal() as db:  # simulate a run aborted before its final state was stored
+        db.query(models.AssetStateSnapshot).filter_by(run_id=rid, label="post_remediation").delete()
+        db.commit()
+    r = client.get(f"/api/experiments/{rid}/certificate")
+    assert r.status_code == 409 and "post-remediation" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_certificate_valid_then_tampered_invalid(tmp_path):
     rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 42}).json()["id"]
     await run_experiment(rid)

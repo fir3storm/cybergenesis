@@ -145,11 +145,12 @@ def main() -> int:
     if not args:
         print("usage: verify_cert.py certificate.json [twin.json] [--pubkey HEX]")
         return 2
-    with open(args[0], encoding="utf-8") as fh:
+    # utf-8-sig: certificates re-saved on Windows (Notepad, PowerShell) often carry a BOM
+    with open(args[0], encoding="utf-8-sig") as fh:
         cert = json.loads(fh.read())
     twin = cert["final_twin"]
     if len(args) > 1:
-        with open(args[1], encoding="utf-8") as fh:
+        with open(args[1], encoding="utf-8-sig") as fh:
             twin = json.loads(fh.read())
     reasons: list[str] = []
 

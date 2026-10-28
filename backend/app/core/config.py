@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     arena_memory_path: str = "./arena_memory.json"
     # Shared secret for write-capable settings endpoints; auto-seeded at startup if unset
     admin_token: str = ""
+    # Proof certificates: legacy HMAC secret and the Ed25519 key file (read from .env too)
+    cert_demo_key: str = ""
+    cert_signing_key_path: str = "./cert_signing_key.pem"
 
 
 settings = Settings()

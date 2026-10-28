@@ -446,6 +446,8 @@ export default function App() {
     { id: 'scorecards', label: 'Scorecards', icon: <BarChart3 size={15} />, group: 'PROOF' },
   ]
   const live = s.modelStatus?.mode === 'live'
+  // proof + briefing describe the finished run; fetching earlier certifies a half-done twin
+  const finalOutcome = s.runState === 'COMPLETED' ? s.results?.verification?.outcome : undefined
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-100">
@@ -476,7 +478,7 @@ export default function App() {
 
       {s.view === 'welcome' && (
         <main className="relative overflow-hidden px-6 py-16 text-center">
-          <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="text-6xl md:text-8xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300">CYBERGENESIS</motion.h1>
+          <motion.h1 initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="text-4xl sm:text-6xl md:text-8xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300">CYBERGENESIS</motion.h1>
           <p className="mt-4 text-xl text-slate-300">The Autonomous Self-Defending Digital Twin</p>
           <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">Observe → Reason → Propose → Validate → Act → Retest → Prove. A closed-loop autonomous defense experiment on a synthetic enterprise twin — every result computed, replayed, and evidenced. Synthetic data only; no real targets.</p>
           <div className={`mx-auto mt-6 w-fit rounded-full border px-4 py-2 font-mono text-sm ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
@@ -691,8 +693,8 @@ export default function App() {
                     <div className={`text-2xl font-black ${s.results.verification.outcome === 'PASS' ? 'text-emerald-300' : 'text-red-300'}`}>{s.results.verification.outcome}</div>
                     <p className="text-xs text-slate-400">Effectiveness {String(s.results.verification.metrics.defense_effectiveness_pct)}% · disrupted legit paths: {String(s.results.verification.metrics.operational_impact_disrupted_legit_paths)}</p>
                     <button onClick={() => s.set({ view: 'verification' })} className="mt-1 text-xs text-cyan-300 underline">Open Verification Lab →</button>
-                    <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
-                    <BriefingCard runId={s.runId} outcome={s.results.verification.outcome} />
+                    <ProofCard runId={s.runId} outcome={finalOutcome} />
+                    <BriefingCard runId={s.runId} outcome={finalOutcome} />
                   </>
                 ) : <p className="text-xs text-slate-500">No outcome yet. A failed or rejected defense will show FAIL here — honestly.</p>}
               </section>
@@ -833,8 +835,8 @@ export default function App() {
                 <span className="text-xs text-slate-400">Deterministic replay: identical seed produces identical telemetry (proven in backend tests).</span>
               </div>
               {s.replayVerdict && <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">{s.replayVerdict}</p>}
-              <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
-              <BriefingCard runId={s.runId} outcome={s.results.verification.outcome} />
+              <ProofCard runId={s.runId} outcome={finalOutcome} />
+              <BriefingCard runId={s.runId} outcome={finalOutcome} />
             </div>
           )}
         </main>

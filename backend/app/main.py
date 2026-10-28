@@ -533,12 +533,15 @@ def exp_certificate(run_id: str, db: Session = Depends(get_db)):
     else:
         scenario = _SC[r.scenario_id]
     snaps = {s.label: s.snapshot for s in db.query(models.AssetStateSnapshot).filter_by(run_id=run_id).all()}
+    # Never certify the live twin in place of the run's own final state: mid-run
+    # (or after an aborted run) that would sign a proof about the wrong network.
+    if "post_remediation" not in snaps:
+        raise HTTPException(409, "run has not finished: no post-remediation snapshot to certify yet")
     baseline = _DT()
     if "baseline" in snaps:
         baseline.restore(snaps["baseline"])
     final = orchestrator.TWIN.clone()
-    if "post_remediation" in snaps:
-        final.restore(snaps["post_remediation"])
+    final.restore(snaps["post_remediation"])
     executions = [{"action_type": e.action_type, "asset_id": e.asset_id, "success": e.success, "transition": e.transition}
                   for e in db.query(models.DefenseExecution).filter_by(run_id=run_id).all()]
     verifications = [{"outcome": v.outcome, "invariant": v.invariant, "checks": v.checks, "metrics": v.metrics} for v in vers]

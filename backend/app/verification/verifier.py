@@ -40,11 +40,14 @@ def _breach_probability(twin: DigitalTwin, scenario: dict, trials: int = 1000, s
     rng = random.Random(seed)
     hits = 0
     isolated = set(twin.assets_status_isolated())
+    # same compiled graph the reachability checks use, so quarantine / ACL
+    # defenses that block the path also lower the risk estimate
+    live = twin.live_graph(tgt)
     arcs: dict[str, list[tuple[str, float]]] = {}
     for node in twin.graph.nodes:
         lst = []
         for nxt in twin.graph.successors(node):
-            if nxt in isolated or not twin.dir_active.get((node, nxt), False):
+            if nxt in isolated or not twin.dir_active.get((node, nxt), False) or not live.has_edge(node, nxt):
                 continue
             if not twin.graph[node][nxt].get("traversable", False) or not twin.hop_allowed(nxt, tgt):
                 continue
