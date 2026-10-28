@@ -8,6 +8,8 @@
   "identity": null,
   "verification_kind": "reachability",
   "objectives": ["reach_database_from_web"],
+  "proc_name": "synthetic-pivot.exe",
+  "mark_target_suspicious": true,
   "attack_steps": [
     {"type": "network_connection", "asset": "web-server", "description": "Exposed synthetic service on web server probed"},
     {"type": "network_connection", "asset": "app-server", "description": "Simulated pivot attempt from web server to application server"},

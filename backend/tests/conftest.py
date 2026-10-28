@@ -4,6 +4,10 @@ import tempfile
 from pathlib import Path
 
 os.environ.setdefault("CERT_DEMO_KEY", "test-cert-key")  # required by app.verification.certificate at import
+# Explicit empty admin token opts the write-capable settings endpoints into the
+# open dev gate. A generated token would gate them and break the provider tests
+# that exercise activation without a token.
+os.environ["ADMIN_TOKEN"] = ""
 # Test isolation: a throwaway sqlite DB in a temp dir, set BEFORE any app
 # import reads settings — tests must never touch the demo DB (cybergenesis.db).
 _TEST_DB_PATH = Path(tempfile.mkdtemp(prefix="cybergenesis-tests-")) / "cybergenesis-test.db"

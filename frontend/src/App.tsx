@@ -70,6 +70,13 @@ const DEMO_CLOCK: Record<string, string> = {
 
 
 
+// The banner must name the *live* provider, not a hardcoded brand. A Meta
+// key is not a Meta run: switching to Command Code / Kilo / Google must change
+// what the UI claims is reasoning on the twin.
+const PROVIDER_LABEL: Record<string, string> = {
+  meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE',
+}
+
 export function NavDropdown({ group, items, active, onSelect }: {
   group: string
   items: { id: View; label: string; icon: ReactNode }[]
@@ -468,7 +475,7 @@ export default function App() {
           <p className="mt-4 text-xl text-slate-300">The Autonomous Self-Defending Digital Twin</p>
           <p className="mx-auto mt-3 max-w-2xl text-sm text-slate-400">Observe → Reason → Propose → Validate → Act → Retest → Prove. A closed-loop autonomous defense experiment on a synthetic enterprise twin — every result computed, replayed, and evidenced. Synthetic data only; no real targets.</p>
           <div className={`mx-auto mt-6 w-fit rounded-full border px-4 py-2 font-mono text-sm ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
-            <span className="animate-pulse">●</span> {live ? 'LIVE META AI — Muse Spark is reasoning on this twin' : 'OFFLINE SIMULATION — deterministic mode (set MODEL_API_KEY for LIVE META AI)'}
+            <span className="animate-pulse">●</span> {live ? `LIVE ${PROVIDER_LABEL[s.modelStatus?.provider ?? 'meta']} AI — ${s.modelStatus?.model ?? 'muse-spark-1.3'} is reasoning on this twin` : 'OFFLINE SIMULATION — deterministic mode (set MODEL_API_KEY for LIVE AI)'}
           </div>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button onClick={() => s.set({ view: 'twin' })} className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Enter the Digital Twin</button>

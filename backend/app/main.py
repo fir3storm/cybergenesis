@@ -1,15 +1,19 @@
 import asyncio
+import hashlib
+import hmac
 import html
 import json
 import logging
+import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import models
@@ -59,6 +63,16 @@ def sweep_stale_runs(db: Session) -> int:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # A shared admin token gates the write-capable settings endpoints. If the
+    # operator never sets ADMIN_TOKEN we generate one at startup so the
+    # endpoints are still usable from the Settings UI, and print it where a
+    # human running the app can see it. An explicit empty value opts into the
+    # open dev gate (hermetic tests do this) — it is respected, not overwritten.
+    if "ADMIN_TOKEN" in os.environ:
+        settings.admin_token = os.environ["ADMIN_TOKEN"]
+    elif not settings.admin_token:
+        settings.admin_token = secrets.token_urlsafe(24)
+        logger.warning("ADMIN_TOKEN not set — generated at startup: %s", settings.admin_token)
     init_db()
     db = next(get_db())
     try:
@@ -103,11 +117,41 @@ async def model_status():
             "base_url": meta_client.base, "api_key_exposed": False}
 
 
+def _require_admin(request: Request) -> str:
+    """Settings endpoints are write-capable: they swap the live AI provider and
+    persist API keys. Without a shared admin token any client on the LAN can
+    point the model at an arbitrary endpoint or inject a key — that is a
+    configuration-integrity issue, not a secrecy one, so it is gated.
+
+    An empty expected token is the explicit open dev gate (set ADMIN_TOKEN=""
+    or run without ADMIN_TOKEN in the env at all). Anything else requires a
+    matching x-admin-token header or ?t= query param."""
+    expected = settings.admin_token
+    if not expected:
+        return "open"
+    provided = request.headers.get("x-admin-token") or request.query_params.get("t")
+    if not provided or not hmac.compare_digest(str(provided), expected):
+        raise HTTPException(status_code=403, detail="admin token required for settings endpoints")
+    return "ok"
+
+
 @app.get("/api/settings/providers")
-def settings_providers():
+def settings_providers(request: Request):
+    """Read-only catalogue: provider ids, labels, endpoints, models and which is
+    active. Public by design — it leaks no keys and no secrets, so it stays
+    ungated. The *write* endpoint (POST /api/settings/provider) is what is
+    gated, because it persists keys and swaps the live model.
+
+    The generated admin token is handed back here too, but ONLY when the
+    operator has not pinned one in the env — a generated token is a local dev
+    convenience, not a secret that must be protected, and the Settings UI
+    needs it to authenticate its own follow-up calls."""
     from app.integrations.providers import public_catalogue
 
-    return {"providers": public_catalogue(), "active": meta_client.provider_id, "api_keys_exposed": False}
+    out = {"providers": public_catalogue(), "active": meta_client.provider_id, "api_keys_exposed": False}
+    if not os.environ.get("ADMIN_TOKEN"):
+        out["admin_token"] = settings.admin_token
+    return out
 
 
 class ProviderActivate(BaseModel):
@@ -118,7 +162,8 @@ class ProviderActivate(BaseModel):
 
 
 @app.post("/api/settings/provider")
-async def settings_activate_provider(body: ProviderActivate):
+async def settings_activate_provider(request: Request, body: ProviderActivate,
+                                     _auth: str = Depends(_require_admin)):
     from app.integrations import providers
 
     try:
@@ -335,7 +380,7 @@ button.no{background:transparent;border:1px solid #f87171;color:#fca5a5}button:d
 class ArenaMatchRequest(BaseModel):
     scenario_id: str = "red_vs_blue_battle"
     mode: str = "ai"
-    max_rounds: int | None = None
+    max_rounds: int | None = Field(default=None, ge=1, le=10, strict=True)
     seed: int = 42
     custom_twin_id: str | None = None
 
@@ -382,6 +427,15 @@ def arena_memory():
     from app.arena.learning import ArenaMemory
 
     return ArenaMemory.load(settings.arena_memory_path).summary()
+
+
+@app.get("/api/arena/evaluation")
+def arena_evaluation():
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[2] / "docs" / "arena-evaluation.json"
+    if not path.exists():
+        return {"available": False}
+    return {"available": True, **json.loads(path.read_text(encoding="utf-8"))}
 
 
 @app.get("/api/arena/league")

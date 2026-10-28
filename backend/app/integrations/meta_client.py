@@ -113,13 +113,15 @@ class MetaModelClient:
         return bool(self.key and self.model) and not settings.offline_mode
 
     async def health(self) -> dict:
-        if not self.key:
+        # Must agree with the `configured` property: offline mode means the
+        # client will never call a live provider, so it is not configured.
+        if not self.key or settings.offline_mode:
             return {"configured": False, "reachable": False, "model": self.model, "provider": self.provider_id,
                     "provider_label": self.provider_label,
-                    "mode": "offline", "detail": f"no API key for {self.provider_label} â€” offline simulation mode (set one in Settings)"}
-        if settings.offline_mode:
-            return {"configured": True, "reachable": False, "model": self.model,
-                    "mode": "offline", "detail": "OFFLINE_MODE explicitly enabled"}
+                    "mode": "offline",
+                    "detail": ("OFFLINE_MODE explicitly enabled"
+                               if settings.offline_mode else
+                               f"no API key for {self.provider_label} — offline simulation mode (set one in Settings)")}
         try:
             async with httpx.AsyncClient(timeout=8) as c:
                 r = await c.get(f"{self.base}/models", headers={"Authorization": f"Bearer {self.key}"})

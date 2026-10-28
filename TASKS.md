@@ -56,7 +56,7 @@
 - [x] AI red team rounds (max 3): NetworkX path enumeration, Muse Spark chooses among validated paths only, loop re-defends; resilience curve in Verification Lab
 - [x] Whiteboard → twin via Muse Spark vision (`POST /api/twins/from-image` + Designer upload). Live-tested: all 10 assets/types correctly read from a twin screenshot
 - [x] Benchmark: 50 seeded pairs, `scripts/benchmark.py` + `docs/benchmark.md` (none 0%, offline/simulate 100%, mean gap 0.16)
-- [x] UX: cinematic mode, replay player + timeline scrubber over stored snapshots, 1×/2×/4× speed (server step-delay param)
+- [x] UX: cinematic mode, replay player + timeline scrubber over stored snapshots, 1—/2—/4— speed (server step-delay param)
 
 ## F8d-finish — Proof certificate in the UI (2026-10-28)
 - [x] `api.getCertificate(runId)`; ProofCard in Experiment Console, Verification Lab + Evidence (PASS only, `certificate-<runId>.json`, signature/hash-chain short, campaigns replayed, verify-locally hint); README "Proof-carrying defense"; Playwright asserts the downloaded file's signature + `unreachable_proof`; backend `test_f8d` valid/tampered
@@ -80,9 +80,30 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 ## Multi-provider Settings (2026-10-28)
 - [x] Four AI providers behind the one OpenAI-compatible client: Meta Muse Spark, Command Code (`api.commandcode.ai/provider/v1`), Kilo Gateway (`ai-gateway.kilo.ai/api/v1`), Google AI Studio (`generativelanguage.googleapis.com/v1beta/openai`); Settings UI activates any provider at runtime (key + model + base URL), keys stored locally only and never returned by an API; env vars remain a fallback; header badge names the live provider; 4 backend tests + live UI probe
 
+## Working-tree hardening (2026-10-28)
+- [x] Scenario-driven `apply_attack` extras (`spread`, `mark_target_suspicious`, `proc_name`, `process_asset_types`) moved out of hardcoded `scenario["id"]` branches into JSON — a new scenario is authored purely in JSON, `twin.py` needs no edit; `_asset_type_of()` helper added
+- [x] Identity pivot in `policies/engine.py` keyed on asset_type (`IDENTITY_SCOPE_TYPES = {"identity","workstation"}`), so generated/custom twins (ids like `db-main`) qualify — not just hardcoded names
+- [x] Arena `learned_blue_chooser` ranking documented: blockers first, then learned block rate, then disruption, then invasiveness
+- [x] `test_catalog.py` rewritten to the real contract (200 total, category counts, 20 flagships, `BY_ID` completeness, `BUILTIN_DEVICE_MAP` resolution, `query_catalog` paging/filtering) — fixed the 3 failing assertions that assumed object accessors on the dict-shaped API response
+- [x] Full backend suite: **174 passed, 1 skipped** (was 3 failed)
+
+## Competition readiness pass (2026-10-28)
+- [x] **Arena reroute loop**: `engine.py` replays Blue's candidate on a clone, applies atomically only if every action passes policy (no partial defense), and Red reroutes when only the *selected* route is blocked — matches end on route-survival or round-budget-exhaustion, not on bare reachability. `selected_path_blocked` + `winner_so_far: red|adapting|blue` per round; `max_rounds` validated 1..10 at the API boundary
+- [x] **Decision provenance**: every round emits `decisions[]` (adversary_simulator + defense_strategist) with agent_role, evidence_refs, asset_ids, action, justification, confidence, model_id, timestamp, mode, fallback_reason; `ai.py` carries typed `BlueChoice`/`RedChoice` Pydantic schemas (`extra="forbid"`) and records `last_decision`/`last_mode` on both choosers
+- [x] **Held-out evaluation**: `app/arena/evaluation.py` — paired deterministic vs learned on generated held-out twins, training memory frozen and re-asserted unchanged, per-case wins/disruption/latency/tokens/fallbacks; `scripts/evaluate_arena.py` writes `docs/arena-evaluation.json`; `/api/arena/evaluation` + Arena UI panel surface it. Honest: no claim of AI superiority from deterministic evidence
+- [x] **Context isolation**: `ArenaMemory.for_context(scenario_id, custom_twin_id)` — scenario-scoped scores, legacy global scores do not leak into unseen scenarios, persistent across matches
+- [x] **Tests**: 15 new arena tests (`test_arena_adaptive`, `test_arena_evaluation`, `test_arena_context`, `test_arena_b3` additions) — reroute, residual-exposure-at-budget, invalid-route rejection, round limits, atomic rejected proposal + audit; frontend `arena.test.tsx` (training count, stop-after-match, failure stops session)
+- [x] Full gates: backend **189 passed / 1 skipped**, frontend 28 passed, `tsc -b` clean, ruff clean, evaluation report generated
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.
 
 ## Verified evidence
 - `scripts/test.sh` equivalent gates: pytest 13 passed/1 skipped, ruff clean, vitest 1 passed, Playwright e2e 1 passed, `tsc -b && vite build` OK.
+
+### Arena training enhancement — 2026-10-28
+- Added bounded sequential self-play sessions (3/5/10/20 battles), stop-after-match control, outcome history and replay selection.
+- Scoped strategy memory by scenario and custom twin; preserved aggregate historical reporting and existing chooser ranking.
+- Exposed current-scenario experience and clarified that learning updates outcome scores, not model weights. Sessions run while the arena is mounted; persisted completed matches remain available afterward.
+- Verified: 23 arena backend tests; 28 frontend tests including training completion, stop and failure handling; TypeScript and production build passed (existing large-chunk warning).

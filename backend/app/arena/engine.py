@@ -14,6 +14,9 @@ choices) can replace the deterministic defaults without touching the
 engine. Synthetic data only; no payloads, no shell, no network.
 """
 
+from datetime import UTC, datetime
+from itertools import pairwise
+
 from app.agents.red_team import enumerate_paths, sort_campaign_paths
 from app.policies.engine import evaluate
 from app.simulation.candidates import evaluate_candidates
@@ -57,8 +60,12 @@ async def play_match_async(scenario: dict, twin: DigitalTwin | None = None, max_
     arena_twin = (twin or DigitalTwin()).clone()
     baseline = arena_twin.clone()
     arena_twin.apply_attack(scenario, seed=seed)
+    initial_twin = arena_twin.to_dict()
     limit = max_rounds if max_rounds is not None else int(scenario.get("max_rounds") or 5)
+    if type(limit) is not int or not 1 <= limit <= 10:
+        raise ValueError("max_rounds must be an integer between 1 and 10")
     rounds: list[dict] = []
+    decisions: list[dict] = []
     winner: str | None = None
     reason = ""
 
@@ -70,29 +77,59 @@ async def play_match_async(scenario: dict, twin: DigitalTwin | None = None, max_
             break
         red_path = None
         if scenario.get("verification_kind") == "reachability":
-            red_path = await _maybe_await(red_chooser(arena_twin, scenario, rounds))
+            red_path = await _maybe_await(red_chooser(arena_twin.clone(), scenario, rounds))
             if red_path is None:
                 winner, reason = "blue", "red found no validated path to the target"
                 break
-        cand = await _maybe_await(blue_chooser(arena_twin.clone(), baseline, scenario, rounds))
+            if red_path not in enumerate_paths(arena_twin, scenario["source_asset"], scenario["target_asset"]):
+                raise ValueError("red route is not a validated path")
+        round_scenario = {**scenario, "arena_red_path": red_path}
+        cand = await _maybe_await(blue_chooser(arena_twin.clone(), baseline.clone(), round_scenario, rounds))
         applied: list[dict] = []
         rejected: list[str] = []
         disrupted = None
+        trial = arena_twin.clone()
         if cand is not None:
             disrupted = cand.get("disrupted")
             for a in cand.get("actions", []):
-                d = evaluate(a["action_type"], a["asset_id"], a.get("params", {}), arena_twin)
+                d = evaluate(a["action_type"], a["asset_id"], a.get("params", {}), trial)
                 if not d.approved:
                     rejected.append(f"{a['action_type']}: {'; '.join(d.reasons)}")
                     continue
                 try:
-                    arena_twin.apply_action(a["action_type"], a["asset_id"], a.get("params", {}))
+                    trial.apply_action(a["action_type"], a["asset_id"], a.get("params", {}))
                     applied.append(a)
                 except ValueError as e:
                     rejected.append(f"{a['action_type']}: {e}")
+        if not rejected:
+            arena_twin = trial
+        else:
+            applied = []  # A proposal is atomic: no partial defense survives rejection.
+        disrupted = arena_twin.legitimate_disrupted(baseline)
         reached_after = _red_reached(arena_twin, scenario)
+        selected_survives = reached_after
+        if red_path:
+            graph = arena_twin.live_graph(scenario["target_asset"])
+            selected_survives = reached_after and all(graph.has_edge(a, b) for a, b in pairwise(red_path))
+        evidence_ref = f"arena-round-{n}"
+        for role, chooser, action, assets in (
+            ("adversary_simulator", red_chooser, {"path": red_path}, red_path or [scenario["source_asset"]]),
+            ("defense_strategist", blue_chooser, {"actions": (cand or {}).get("actions", [])},
+             [a["asset_id"] for a in (cand or {}).get("actions", [])]),
+        ):
+            provenance = getattr(chooser, "last_decision", {})
+            decisions.append({"agent_role": role, "evidence_refs": [evidence_ref], "asset_ids": assets,
+                              "action": action, "justification": provenance.get("rationale", "Deterministic validated strategy"),
+                              "confidence": provenance.get("confidence", 1.0),
+                              "model_id": provenance.get("model_id", "deterministic"),
+                              "timestamp": datetime.now(UTC).isoformat(),
+                              "mode": getattr(chooser, "last_mode", "offline"),
+                              "fallback_reason": provenance.get("fallback_reason")})
         rounds.append({
             "round": n,
+            "evidence_ref": evidence_ref,
+            "twin_after": arena_twin.to_dict(),
+            "selected_path_blocked": not selected_survives,
             "red_path": red_path,
             "red_reached_before": True,
             "blue_candidate": (cand or {}).get("label"),
@@ -102,9 +139,9 @@ async def play_match_async(scenario: dict, twin: DigitalTwin | None = None, max_
             "policy_rejections": rejected,
             "disrupted": disrupted,
             "target_reachable_after": reached_after,
-            "winner_so_far": "red" if reached_after else "blue",
+            "winner_so_far": "red" if selected_survives else ("adapting" if reached_after else "blue"),
         })
-        if reached_after:
+        if selected_survives:
             winner, reason = "red", f"defense in round {n} did not block the objective: red reached the target"
             break
     if winner is None:
@@ -114,6 +151,8 @@ async def play_match_async(scenario: dict, twin: DigitalTwin | None = None, max_
             winner, reason = "blue", f"blue survived {limit} round(s) with the target blocked"
 
     return {
+        "initial_twin": initial_twin,
+        "decisions": decisions,
         "winner": winner,
         "reason": reason,
         "scenario_id": scenario.get("id"),
@@ -121,7 +160,7 @@ async def play_match_async(scenario: dict, twin: DigitalTwin | None = None, max_
         "rounds_played": len(rounds),
         "rounds": rounds,
         "target_reachable_final": _red_reached(arena_twin, scenario),
-        "total_disrupted": sum(r["disrupted"] or 0 for r in rounds),
+        "total_disrupted": arena_twin.legitimate_disrupted(baseline),
         "final_twin": arena_twin.to_dict(),
     }
 

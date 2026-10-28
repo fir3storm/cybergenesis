@@ -31,7 +31,12 @@ def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
         a, b = seq[i], seq[i + 1]
         if graph.has_edge(a, b):
             continue
-        if pivot_ok and (a in ("identity-provider", "admin-workstation") or b in ("database", "identity-provider", "admin-workstation")):
+        # Identity pivot: a hop from an identity/workstation asset into a
+        # protected asset (database/identity) is covered by a live synthetic
+        # identity, even when the arc itself is not traversable. Keyed on
+        # asset_type so generated/custom twins (ids like "db-main") qualify.
+        if pivot_ok and (_asset_type(twin, a) in IDENTITY_SCOPE_TYPES
+                         or _asset_type(twin, b) in ("database", "identity")):
             continue  # identity pivot: IdP/workstation -> protected asset with a live synthetic identity
         reasons.append(f"hop {a} -> {b} is not an active traversable arc")
     if campaign.get("foothold") not in assets:

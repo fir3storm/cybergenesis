@@ -7,6 +7,8 @@ needs. Modes: ai (Meta picks among validated moves, learned fallback),
 learned (score memory only), deterministic (B1 defaults).
 """
 
+from uuid import uuid4
+
 from app import models
 from app.arena.ai import AiBlueChooser, AiRedChooser
 from app.arena.engine import deterministic_blue, deterministic_red, play_match_async
@@ -50,16 +52,26 @@ async def play_and_store(db, scenario_id: str, mode: str = "ai", max_rounds: int
                          seed: int = 42, custom_twin_id: str | None = None) -> dict:
     scenario, twin = _resolve(db, scenario_id, custom_twin_id)
     memory = ArenaMemory.load(settings.arena_memory_path)
-    red, blue = _choosers(mode, memory)
+    context_memory = memory.for_context(scenario_id, custom_twin_id)
+    red, blue = _choosers(mode, context_memory)
+    match_id = str(uuid4())
+    if mode == "ai":
+        red.run_id = blue.run_id = match_id
     result = await play_match_async(scenario, twin=twin, max_rounds=max_rounds, seed=seed,
                                     red_chooser=red, blue_chooser=blue)
+    # Reload after inference so concurrent completed matches are not overwritten.
+    memory = ArenaMemory.load(settings.arena_memory_path)
+    context_memory = memory.for_context(scenario_id, custom_twin_id)
+    result["scenario_snapshot"] = scenario
+    context_memory.record_match(result)
     memory.record_match(result)
     memory.save(settings.arena_memory_path)
-    row = models.ArenaMatch(scenario_id=scenario_id, winner=result["winner"], reason=result["reason"],
+    row = models.ArenaMatch(id=match_id, scenario_id=scenario_id, winner=result["winner"], reason=result["reason"],
                             mode=mode, rounds_played=result["rounds_played"], payload=result)
     db.add(row); db.commit(); db.refresh(row)
     return {"id": row.id, "created_at": row.created_at.isoformat() if row.created_at else None,
-            "mode": mode, **result, "memory": memory.summary()}
+            "mode": mode, **result, "memory": memory.summary(),
+            "context_memory": context_memory.summary()}
 
 
 def build_arena_certificate(db, match_id: str) -> dict:
@@ -73,8 +85,10 @@ def build_arena_certificate(db, match_id: str) -> dict:
     row = db.get(models.ArenaMatch, match_id)
     if not row:
         raise ArenaError("arena match not found")
-    scenario, _twin = _resolve(db, row.scenario_id, None)
     p = row.payload or {}
+    scenario = p.get("scenario_snapshot")
+    if scenario is None:
+        scenario, _twin = _resolve(db, row.scenario_id, None)
     cert: dict = {
         "kind": "arena_match",
         "version": 1,

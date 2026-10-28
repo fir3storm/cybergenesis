@@ -8,6 +8,14 @@
   "identity": null,
   "verification_kind": "reachability",
   "objectives": ["reach_file_server", "modify_shared_files"],
+  "proc_name": "synthetic-locker.exe",
+  "spread": {
+    "source_compromised": true,
+    "asset": "file-server",
+    "files_per_min": [180, 240],
+    "offset_ms": 2400,
+    "severity": "critical"
+  },
   "attack_steps": [
     {"type": "process_start", "asset": "employee-workstation", "description": "Synthetic suspicious process starts on employee workstation"},
     {"type": "file_modification_burst", "asset": "employee-workstation", "description": "High-volume synthetic file modifications detected (240 files/min, synthetic)"},

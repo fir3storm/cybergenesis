@@ -12,6 +12,9 @@ export function ProviderSettings({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null)
 
   const load = () => api.providers().then((r) => {
+    if (r.admin_token) {
+      try { sessionStorage.setItem('cybergenesis_admin_token', r.admin_token) } catch {}
+    }
     setProviders(r.providers)
     setDrafts(Object.fromEntries(r.providers.map((p) => [p.id, { key: '', model: p.model, base: p.base_url }])))
   }).catch((e: Error) => setMsg(`Could not load providers: ${e.message}`))

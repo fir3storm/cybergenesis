@@ -12,6 +12,8 @@ restarts. Synthetic data only.
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from app.agents.red_team import enumerate_paths, sort_campaign_paths
@@ -22,6 +24,13 @@ from app.simulation.twin import DigitalTwin
 class ArenaMemory:
     def __init__(self, data: dict | None = None):
         self.data: dict = data or {"blue": {}, "red": {}, "matches": 0}
+
+    def for_context(self, scenario_id: str, twin_id: str | None) -> "ArenaMemory":
+        """Share a persisted bucket scoped to a scenario and twin, never global priors."""
+        key = json.dumps([scenario_id, twin_id], separators=(",", ":"))
+        bucket = self.data.setdefault("contexts", {}).setdefault(
+            key, {"blue": {}, "red": {}, "matches": 0})
+        return ArenaMemory(bucket)
 
     # --- recording -----------------------------------------------------
     def record_match(self, result: dict) -> None:
@@ -38,7 +47,7 @@ class ArenaMemory:
                 k = " > ".join(path)
                 e = self.data["red"].setdefault(k, {"plays": 0, "reaches": 0})
                 e["plays"] += 1
-                e["reaches"] += 1 if r.get("target_reachable_after") else 0
+                e["reaches"] += int(not r["selected_path_blocked"]) if "selected_path_blocked" in r else int(bool(r.get("target_reachable_after")))
 
     # --- scoring -------------------------------------------------------
     @staticmethod
@@ -55,7 +64,16 @@ class ArenaMemory:
 
     # --- persistence ---------------------------------------------------
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=destination.parent, prefix="arena-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(self.data, stream, indent=2)
+            os.replace(temporary, destination)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     @classmethod
     def load(cls, path: str | Path) -> "ArenaMemory":
@@ -72,7 +90,14 @@ class ArenaMemory:
 
 
 def learned_blue_chooser(memory: ArenaMemory):
-    """Feasible candidate with the best learned block rate, cheap first."""
+    """Feasible candidate with the best learned block rate.
+
+    Ranking (min over tuples): blockers first, then the best learned block
+    rate (Beta-smoothed, so unseen options stay explorable), then the lowest
+    average disruption, then the least invasive action set, then label.
+    A fresh blocking candidate therefore beats a non-blocking one regardless
+    of history — that is the whole point of a defense.
+    """
     def choose(twin: DigitalTwin, baseline: DigitalTwin, scenario: dict, history: list[dict]) -> dict | None:
         proposal = scenario.get("expected_defense") or []
         cands = [c for c in evaluate_candidates(twin, baseline, scenario, [dict(a) for a in proposal]) if c.get("feasible")]

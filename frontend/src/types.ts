@@ -69,8 +69,19 @@ export interface AgentMsg { id: string; from_agent: string; to_agent: string | n
 
 export type View = 'welcome' | 'twin' | 'experiment' | 'battle' | 'arena' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library' | 'benchmark' | 'scorecards'
 
+export interface ArenaDecision {
+  agent_role: string; justification: string; confidence: number; model_id: string;
+  mode: string; timestamp: string; evidence_refs: string[]; fallback_reason?: string | null
+}
+export interface ArenaEvaluation {
+  available: boolean; created_at?: string; seed?: number; limitations?: string; live_requested?: boolean;
+  summary?: Record<string, {cases: number; blue_wins: number; mean_disrupted: number; mean_latency_ms: number; tokens: number; live_cases: number; fallbacks: number}>
+}
 export interface ArenaRound {
+  twin_after?: Twin
   round: number
+  selected_path_blocked?: boolean
+  evidence_ref?: string
   red_path: string[] | null
   blue_candidate: string | null
   blue_actions: { action_type: string; asset_id: string }[]
@@ -82,6 +93,8 @@ export interface ArenaRound {
   winner_so_far: string
 }
 export interface ArenaMatch {
+  initial_twin?: Twin
+  decisions?: ArenaDecision[]
   id: string
   scenario_id: string
   winner: string
@@ -92,6 +105,7 @@ export interface ArenaMatch {
   target_reachable_final: boolean
   total_disrupted: number
   final_twin: Twin
+  context_memory?: ArenaMemorySummary
   memory?: ArenaMemorySummary
   created_at?: string | null
 }

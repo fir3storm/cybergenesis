@@ -1,20 +1,33 @@
-import type { ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin } from '../types'
+import type { ArenaEvaluation, ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' }, ...init })
+  const r = await fetch(`${API}${path}`, { headers: _authHeaders(), ...init })
   if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`)
   return r.json() as Promise<T>
+}
+
+function _authHeaders(): HeadersInit {
+  // The admin token is either provided by the backend (when ADMIN_TOKEN env var is NOT set)
+  // or must be read from the environment by the frontend (when ADMIN_TOKEN IS set).
+  // We store it in sessionStorage after the first successful /api/settings/providers call.
+  const envToken = (import.meta as unknown as { env: Record<string, string> }).env.VITE_ADMIN_TOKEN
+  try {
+    const t = envToken || sessionStorage.getItem('cybergenesis_admin_token')
+    return t ? { 'x-admin-token': t, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+  } catch {
+    return envToken ? { 'x-admin-token': envToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+  }
 }
 
 export const api = {
   health: () => j<{ status: string }>('/api/health'),
   modelStatus: () => j<ModelStatus>('/api/models/status'),
-  providers: () => j<{ providers: ProviderInfo[]; active: string }>('/api/settings/providers'),
+  providers: () => j<{ providers: ProviderInfo[]; active: string; admin_token?: string }>('/api/settings/providers'),
   activateProvider: (provider: string, api_key: string, model: string, base_url: string) =>
-    j<ModelStatus & { active: string }>('/api/settings/provider', { method: 'POST', body: JSON.stringify({ provider, api_key: api_key || null, model, base_url: base_url || null }) }),
+    j<ModelStatus & { active: string }>('/api/settings/provider', { method: 'POST', body: JSON.stringify({ provider, api_key: api_key || null, model, base_url: base_url || null }), headers: _authHeaders() }),
   twin: () => j<Twin>('/api/twin'),
   reset: () => j<{ twin: Twin }>('/api/twin/reset', { method: 'POST' }),
   scenarios: () => j<Scenario[]>('/api/scenarios'),
@@ -80,6 +93,7 @@ export const api = {
   arenaMatches: () => j<{ id: string; scenario_id: string; winner: string; mode: string; rounds_played: number }[]>('/api/arena/matches'),
   arenaMatch: (id: string) => j<ArenaMatch>(`/api/arena/matches/${id}`),
   arenaMemory: () => j<ArenaMemorySummary>('/api/arena/memory'),
+  arenaEvaluation: () => j<ArenaEvaluation>('/api/arena/evaluation'),
   arenaLeague: () => j<ArenaLeague>('/api/arena/league'),
   arenaCertificate: (id: string) => j<Record<string, unknown>>(`/api/arena/matches/${id}/certificate`),
 }

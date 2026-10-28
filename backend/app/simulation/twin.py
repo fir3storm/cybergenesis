@@ -630,7 +630,13 @@ class DigitalTwin:
 
     # --- attack simulation -------------------------------------------------
     def apply_attack(self, scenario: dict, seed: int = 42) -> list[dict]:
-        """Typed scenario steps only. Mutates twin to attacked state; returns telemetry."""
+        """Typed scenario steps only. Mutates twin to attacked state; returns telemetry.
+
+        Scenario-driven extras (spread, target marking, process naming, the
+        asset types that spawn a process) come from the scenario definition, so
+        a new scenario is authored purely in JSON — this method needs no edit.
+        Defaults keep a bare scenario well-behaved.
+        """
         # stable cross-process seed (builtin hash() is randomized per process)
         rng = random.Random(seed + zlib.crc32(scenario["id"].encode()) % 1000)
         events: list[dict] = []
@@ -645,30 +651,39 @@ class DigitalTwin:
                            "message": step["description"], "offset_ms": 400 * (i + 1),
                            "severity": "high" if i >= 1 else "medium",
                            "detail": {"step": i, "seed": seed}})
-        if scenario["id"] == "ransomware_activity":
-            self.set_state(src, "status", "compromised")
-            if self.reachable(src, tgt):
-                self.set_state(tgt, "status", "suspicious")
-                events.append({"id": f"tele-{scenario['id']}-{seed}-spread", "event_type": "file_modification_burst", "asset_id": tgt, "synthetic": True,
-                               "message": f"Synthetic shared-file modifications spreading ({180 + rng.randint(0, 60)} files/min)",
-                               "offset_ms": 2400, "severity": "critical", "detail": {"spread": True}})
+        # Scenario-driven spread: a burst that reaches beyond the last step's asset.
+        spread = scenario.get("spread")
+        if spread:
+            if spread.get("source_compromised", False):
+                self.set_state(src, "status", "compromised")
+            spread_asset = spread.get("asset", tgt)
+            if self.reachable(src, spread_asset):
+                self.set_state(spread_asset, "status", "suspicious")
+                lo, hi = spread.get("files_per_min", [180, 240])
+                events.append({"id": f"tele-{scenario['id']}-{seed}-spread", "event_type": "file_modification_burst",
+                               "asset_id": spread_asset, "synthetic": True,
+                               "message": f"Synthetic shared-file modifications spreading ({lo + rng.randint(0, hi - lo)} files/min)",
+                               "offset_ms": spread.get("offset_ms", 2400), "severity": spread.get("severity", "critical"),
+                               "detail": {"spread": True}})
+        # Marking the target suspicious on reachability (lateral-movement style).
+        if scenario.get("mark_target_suspicious") and self.reachable(src, tgt):
+            self.set_state(tgt, "status", "suspicious")
         if scenario.get("identity"):
             ident = self.identities[scenario["identity"]]
             ident["session_active"] = True; ident["compromised"] = True
             self.status["identity-provider"] = "suspicious"; self.set_state(src, "status", "compromised")
-        if scenario["id"] == "lateral_movement" and self.reachable(src, tgt):
-            self.set_state(tgt, "status", "suspicious")
-        proc_name = {"ransomware_activity": "synthetic-locker.exe",
-                     "compromised_identity": "synthetic-token-thief.exe",
-                     "lateral_movement": "synthetic-pivot.exe",
-                     "data_exfiltration": "synthetic-exfil.exe",
-                     "red_vs_blue_battle": "synthetic-locker.exe"}.get(scenario["id"], "suspicious-synthetic.exe")
-        windows_assets = {"employee-workstation", "admin-workstation", "file-server", "identity-provider"}
+        proc_name = scenario.get("proc_name", "suspicious-synthetic.exe")
+        process_asset_types = set(scenario.get("process_asset_types", ["workstation", "file_server", "identity"]))
         for aid, st in self.status.items():
-            if st == "compromised" and aid in windows_assets and not any(p.get("suspicious") for p in self.processes.get(aid, [])):
+            if st == "compromised" and self._asset_type_of(aid) in process_asset_types \
+                    and not any(p.get("suspicious") for p in self.processes.get(aid, [])):
                 self.processes.setdefault(aid, []).append(
                     {"name": proc_name, "pid": 6666, "suspicious": True, "scenario": scenario["id"]})
         return events
+
+    def _asset_type_of(self, asset_id: str) -> str:
+        """Type of an asset by id, used by the scenario-driven process scope."""
+        return next((a.get("asset_type", "") for a in self.asset_defs if a["id"] == asset_id), "")
 
     def attempt_attack_objective(self, scenario: dict) -> dict:
         """Replay check used by verification on a (possibly modified) twin."""
