@@ -69,6 +69,10 @@ python scripts/verify_cert.py certificate-<runId>.json
 
 A FAIL run gets no proof button. There is nothing to certify.
 
+**`CERT_DEMO_KEY` is required.** Certificates are HMAC-signed with the key in the `CERT_DEMO_KEY` environment variable — there is no built-in default, and the backend refuses to start (and `scripts/verify_cert.py` exits with code 2) when it is unset. Generate one as any long random string, for example `python -c "import secrets; print(secrets.token_hex(32))"`, set it in the environment of the shell/process that starts the backend (add `CERT_DEMO_KEY=<value>` to `backend/.env` for local dev and export the same value), and use the same value when running `scripts/verify_cert.py`.
+
+**Rotation:** change `CERT_DEMO_KEY` in the backend's environment (e.g. `backend/.env`) and restart the backend. Certificates signed with the old key will fail verification after rotation (`HMAC signature mismatch`). Re-issue a certificate by re-downloading it from the (restarted) backend, which signs it with the new key.
+
 ## Counterfactual time machine
 
 Finished a run and wondered *"what if Blue had chosen differently?"* Fork the run at its decision point with an alternative candidate. The fork replays through the same policy gate and verifier as a brand-new recorded run — **the original is never changed** — and the Compare view shows both timelines and both twins side by side, with metric deltas for disruption, risk, rounds, and verdict.

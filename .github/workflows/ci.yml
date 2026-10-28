@@ -4,7 +4,7 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: backend } }
-    env: { OFFLINE_MODE: "true", SIM_STEP_DELAY_MS: "0", HUMAN_APPROVAL_ENABLED: "false" }
+    env: { OFFLINE_MODE: "true", SIM_STEP_DELAY_MS: "0", HUMAN_APPROVAL_ENABLED: "false", CERT_DEMO_KEY: "ci-test-key" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

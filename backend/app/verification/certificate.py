@@ -13,7 +13,12 @@ import os
 
 from app.simulation.twin import DigitalTwin
 
-DEMO_KEY = os.environ.get("CERT_DEMO_KEY", "cybergenesis-demo-key")
+DEMO_KEY = os.environ.get("CERT_DEMO_KEY")
+if not DEMO_KEY:
+    raise RuntimeError(
+        "CERT_DEMO_KEY environment variable is not set: set CERT_DEMO_KEY to a long random "
+        "secret before starting the backend (see .env.example / README 'Proof-carrying defense')."
+    )
 
 
 def _chain(events: list[dict]) -> str:

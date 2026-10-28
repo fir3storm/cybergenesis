@@ -3,6 +3,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    # Why protected_namespaces=("settings_",): Pydantic v2 otherwise warns/errors
+    # when a field name starts with the protected prefix ("model_" by default).
+    # Guarding "settings_" keeps that check for any future settings_* field;
+    # keep it until such fields are renamed.
     model_config = ConfigDict(protected_namespaces=("settings_",), env_file=".env", extra="ignore")
 
     model_api_base_url: str = "https://api.meta.ai/v1"

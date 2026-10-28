@@ -78,7 +78,7 @@ def _offline_campaign(twin: DigitalTwin, src: str, tgt: str) -> CampaignPlan | N
 
 def sort_campaign_paths(twin, paths: list[list[str]]) -> list[list[str]]:
     """Shortest first; among equals, the weakest (cheapest-to-exploit) route first — decoys exploit this."""
-    postures = {a["id"]: a["posture"] for a in twin.to_dict()["assets"]}
+    postures = twin.asset_postures()
 
     def weakness(path: list[str]) -> float:
         return sum(1 - postures.get(n, 0.7) for n in path[1:])

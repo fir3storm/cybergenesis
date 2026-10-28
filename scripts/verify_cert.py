@@ -12,17 +12,23 @@ import os
 import sys
 from collections import deque
 
-DEMO_KEY = os.environ.get("CERT_DEMO_KEY", "cybergenesis-demo-key")
+DEMO_KEY = os.environ.get("CERT_DEMO_KEY")
 
 
 def main() -> int:
+    if not DEMO_KEY:
+        print("error: CERT_DEMO_KEY environment variable is not set; set it to the key the "
+              "certificate was signed with before verifying.", file=sys.stderr)
+        return 2
     if len(sys.argv) < 2:
         print("usage: verify_cert.py certificate.json [twin.json]")
         return 2
-    cert = json.loads(open(sys.argv[1], encoding="utf-8").read())
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        cert = json.loads(fh.read())
     twin = cert["final_twin"]
     if len(sys.argv) > 2:
-        twin = json.loads(open(sys.argv[2], encoding="utf-8").read())
+        with open(sys.argv[2], encoding="utf-8") as fh:
+            twin = json.loads(fh.read())
     reasons: list[str] = []
 
     # 1. HMAC over the canonical cert (excluding the signature itself)

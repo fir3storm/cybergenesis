@@ -50,6 +50,41 @@ def test_memory_persists_to_disk(tmp_path):
     assert ArenaMemory.load(tmp_path / "missing.json").data["matches"] == 0
 
 
+def test_learned_blue_prefers_blocking_over_perfect_history_nonblocking():
+    """Gap 10 regression: a blocking candidate beats a non-blocking one even
+    when the non-blocking label has a perfect learned rate and every blocking
+    label has a terrible one. In learned_blue_chooser's ascending min() key,
+    blocked=True -> (not blocked) is False (0), which sorts first, so the
+    blocking preference is the primary key and learned rate only breaks
+    ties within a blocked class."""
+    from app.simulation.candidates import evaluate_candidates
+
+    scenario = SCENARIOS["ransomware_activity"]
+    twin = DigitalTwin()
+    baseline = twin.clone()
+    twin.apply_attack(scenario, seed=42)
+    proposal = [dict(a) for a in (scenario.get("expected_defense") or [])]
+    cands = [c for c in evaluate_candidates(twin, baseline, scenario, proposal) if c.get("feasible")]
+    blocking = [c for c in cands if c.get("blocked")]
+    nonblocking = [c for c in cands if not c.get("blocked")]
+    assert blocking and nonblocking  # precondition: both classes exist here
+
+    blue: dict = {}
+    for c in nonblocking:  # perfect history: always blocked, zero disruption
+        blue[c["label"]] = {"plays": 20, "blocks": 20, "disrupted": 0}
+    for c in blocking:  # worst history: never blocked, heavy disruption
+        blue[c["label"]] = {"plays": 20, "blocks": 0, "disrupted": 200}
+    mem = ArenaMemory({"blue": blue, "red": {}, "matches": 20})
+    assert mem.blue_rate(nonblocking[0]["label"]) > mem.blue_rate(blocking[0]["label"])
+
+    twin2 = DigitalTwin()
+    baseline2 = twin2.clone()
+    twin2.apply_attack(scenario, seed=42)
+    choice = learned_blue_chooser(mem)(twin2, baseline2, scenario, [])
+    assert choice is not None
+    assert choice.get("blocked") is True
+
+
 def test_learning_accumulates_across_matches():
     mem = ArenaMemory()
     for _ in range(3):

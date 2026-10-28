@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Bounds, Html, Instances, Instance, Line, OrbitControls } from '@react-three/drei'
-import { Bloom, ChromaticAberration, EffectComposer, Vignette } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import type { Asset, Conn, Twin } from '../types'
@@ -16,6 +15,26 @@ export { STATUS_COLOR } from './status'
 export const REDUCED_MOTION = typeof window !== 'undefined'
   && typeof window.matchMedia === 'function'
   && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// Post-processing is decorative: load it after the scene itself so the
+// ~70 kB postprocessing chunk never blocks the first 3D frame.
+const PostEffects = lazy(async () => {
+  const { Bloom, ChromaticAberration, EffectComposer, Vignette } = await import('@react-three/postprocessing')
+  function PostEffectsInner({ compromised }: { compromised: boolean }) {
+    return (
+      <EffectComposer>
+        <>
+          <Bloom intensity={0.8} luminanceThreshold={0.6} luminanceSmoothing={0.3} mipmapBlur />
+          {compromised && !REDUCED_MOTION
+            ? <ChromaticAberration offset={new THREE.Vector2(0.00045, 0.00045)} radialModulation={false} modulationOffset={0.15} />
+            : <></>}
+          <Vignette eskil={false} offset={0.2} darkness={0.6} />
+        </>
+      </EffectComposer>
+    )
+  }
+  return { default: PostEffectsInner }
+})
 
 const SHORT_LABEL: Record<string, string> = {
   internet: 'Internet', firewall: 'Firewall', 'web-server': 'Web Server', 'app-server': 'App Server',
@@ -529,15 +548,9 @@ export default function TwinScene({ twin }: { twin: Twin }) {
         <KeyboardNav assets={twin.assets} />
         <DemandInvalidator twin={twin} />
         <OrbitControls enableDamping makeDefault maxPolarAngle={Math.PI * 0.49} minDistance={4} maxDistance={30} />
-        <EffectComposer>
-          <>
-            <Bloom intensity={0.8} luminanceThreshold={0.6} luminanceSmoothing={0.3} mipmapBlur />
-            {anyCompromised && !REDUCED_MOTION
-              ? <ChromaticAberration offset={new THREE.Vector2(0.00045, 0.00045)} radialModulation={false} modulationOffset={0.15} />
-              : <></>}
-            <Vignette eskil={false} offset={0.2} darkness={0.6} />
-          </>
-        </EffectComposer>
+        <Suspense fallback={null}>
+          <PostEffects compromised={anyCompromised} />
+        </Suspense>
       </Canvas>
 
       {/* camera controls: reset + zoom in/out */}

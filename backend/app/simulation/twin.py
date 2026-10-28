@@ -304,6 +304,17 @@ class DigitalTwin:
     def asset_ids(self) -> list[str]:
         return [a["id"] for a in self.asset_defs]
 
+    def asset_postures(self) -> dict[str, float]:
+        # Cheap: posture lives only on asset_defs (to_dict spreads it verbatim).
+        # Rebuilt fresh each call - O(assets), no to_dict()/config_hash()/device
+        # catalog - so decoys appended by apply_action are always visible and
+        # no cache invalidation is needed (nothing mutates posture in place).
+        return {a["id"]: a["posture"] for a in self.asset_defs}
+
+    def asset_types(self) -> dict[str, str]:
+        # Cheap twin of asset_postures() for asset_type (also asset_defs-only).
+        return {a["id"]: a["asset_type"] for a in self.asset_defs}
+
     def assets_status_isolated(self) -> list[str]:
         return [aid for aid, v in self.isolated.items() if v]
 

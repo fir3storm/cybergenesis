@@ -1,6 +1,7 @@
 import asyncio
 import html
 import json
+import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -24,6 +25,18 @@ from app.simulation.scenarios import SCENARIOS
 from app.simulation.twin import ALLOWED_ACTIONS, ATTACK_STEP_TYPES, DigitalTwin
 
 TERMINAL_RUN_STATES = ("COMPLETED", "FAILED")
+
+logger = logging.getLogger(__name__)
+
+
+def _on_experiment_done(run_id: str, task: asyncio.Task) -> None:
+    orchestrator.unregister_task(run_id, task)
+    if task.cancelled():
+        logger.warning("experiment task cancelled run_id=%s", run_id)
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("experiment task failed run_id=%s", run_id, exc_info=(type(exc), exc, exc.__traceback__))
 
 
 def sweep_stale_runs(db: Session) -> int:
@@ -59,6 +72,9 @@ async def lifespan(_app: FastAPI):
     finally:
         db.close()
     yield
+    active = orchestrator.active_runs()
+    if active:
+        logger.warning("shutdown with %d experiment task(s) still running: %s", len(active), ", ".join(sorted(active)))
 
 
 app = FastAPI(title="CYBERGENESIS", description="Autonomous Self-Defending Digital Twin — synthetic simulation only", version="1.0.0", lifespan=lifespan)
@@ -209,7 +225,9 @@ async def run_exp(run_id: str, step_delay_ms: int | None = None, db: Session = D
     if r.state not in ("IDLE", "FAILED", "COMPLETED"):
         raise HTTPException(409, f"experiment already in state {r.state}")
     delay = None if step_delay_ms is None else max(0, min(step_delay_ms, 2000))
-    asyncio.create_task(orchestrator.run_experiment(run_id, step_delay_ms=delay))
+    task = asyncio.create_task(orchestrator.run_experiment(run_id, step_delay_ms=delay))
+    orchestrator.register_task(run_id, task)
+    task.add_done_callback(lambda done, _run_id=run_id: _on_experiment_done(_run_id, done))
     return {"started": True, "run_id": run_id, "step_delay_ms": delay}
 
 

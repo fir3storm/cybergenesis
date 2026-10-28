@@ -44,12 +44,10 @@ def evaluate_campaign(campaign: dict, twin: DigitalTwin) -> dict:
     return {"approved": approved, "reasons": reasons, "path": seq}
 
 
-# assets that may never be isolated (would break the twin's core)
-NEVER_ISOLATE = {"firewall", "database", "internet", "security-sensor", "identity-provider"}
-PATCHABLE = {"web-server", "app-server", "employee-workstation", "admin-workstation", "file-server"}
-SERVICE_DISABLEABLE = {"web-server", "app-server"}
-QUARANTINABLE = PATCHABLE | {"database", "identity-provider"}
-# role-based equivalents, so generated/custom twins (ids like "db-main") get the same protection
+# Type-based policy sets: the single source of truth, keyed on asset_type so
+# generated/custom twins (ids like "db-main") get the same protection as the
+# builtin twin. (The removed QUARANTINABLE id set was unused; its type
+# equivalent would be PATCHABLE_TYPES | {"database", "identity"}.)
 NEVER_ISOLATE_TYPES = {"firewall", "database", "gateway", "sensor", "identity"}
 PATCHABLE_TYPES = {"web_server", "app_server", "workstation", "file_server"}
 SERVICE_DISABLEABLE_TYPES = {"web_server", "app_server"}
@@ -69,15 +67,15 @@ def evaluate(action_type: str, asset_id: str, params: dict, twin: DigitalTwin) -
         approved = False; reasons.append(f"asset '{asset_id}' does not exist in the twin")
         return PolicyDecision(action_type=action_type, asset_id=asset_id, approved=False, reasons=reasons)
     atype = _asset_type(twin, asset_id)
-    core = asset_id in NEVER_ISOLATE or atype in NEVER_ISOLATE_TYPES
-    identity_scope = asset_id in ("identity-provider", "admin-workstation", "employee-workstation") or atype in IDENTITY_SCOPE_TYPES
+    core = atype in NEVER_ISOLATE_TYPES
+    identity_scope = atype in IDENTITY_SCOPE_TYPES
     if action_type == "isolate_asset" and core:
         approved = False; reasons.append(f"isolating core asset '{asset_id}' is prohibited")
     if action_type == "isolate_asset" and twin.isolated[asset_id]:
         approved = False; reasons.append("asset already isolated")
-    if action_type == "apply_patch" and not (asset_id in PATCHABLE or atype in PATCHABLE_TYPES):
+    if action_type == "apply_patch" and atype not in PATCHABLE_TYPES:
         approved = False; reasons.append(f"apply_patch not permitted on '{asset_id}'")
-    if action_type == "disable_service" and not (asset_id in SERVICE_DISABLEABLE or atype in SERVICE_DISABLEABLE_TYPES):
+    if action_type == "disable_service" and atype not in SERVICE_DISABLEABLE_TYPES:
         approved = False; reasons.append(f"disable_service not permitted on '{asset_id}'")
     if action_type == "block_connection":
         s, t = params.get("source", asset_id), params.get("target")

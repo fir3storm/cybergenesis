@@ -6,6 +6,7 @@ Each run owns its twin; the display twin syncs only when a run finishes.
 """
 
 import asyncio
+import logging
 import secrets
 import time
 from datetime import UTC, datetime
@@ -28,6 +29,24 @@ _ws_queues: dict[str, list[asyncio.Queue]] = {}
 _cancelled: set[str] = set()
 _seq: dict[str, int] = {}
 _approvals: dict[str, dict] = {}
+_tasks: dict[str, asyncio.Task] = {}
+
+logger = logging.getLogger(__name__)
+
+
+def register_task(run_id: str, task: asyncio.Task) -> asyncio.Task:
+    _tasks[run_id] = task
+    return task
+
+
+def unregister_task(run_id: str, task: asyncio.Task | None = None) -> None:
+    if task is not None and _tasks.get(run_id) is not task:
+        return
+    _tasks.pop(run_id, None)
+
+
+def active_runs() -> list[str]:
+    return [run_id for run_id, task in _tasks.items() if not task.done()]
 
 
 def subscribe(run_id: str) -> asyncio.Queue:
