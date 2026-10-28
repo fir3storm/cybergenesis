@@ -30,3 +30,12 @@ def test_generated_case_measures_business_disruption():
 async def test_evaluation_does_not_transfer_memory_to_unseen_scenarios():
     report = await evaluate_strategies(cases=1, training_matches=1)
     assert all(r['prior_matches'] == 0 for r in report['cases'])
+
+def test_committed_evaluation_report_matches_current_schema():
+    import json
+    from pathlib import Path
+
+    report = json.loads((Path(__file__).resolve().parents[2] / "docs" / "arena-evaluation.json").read_text(encoding="utf-8"))
+    assert report["version"] == 1 and report["evaluation_memory_unchanged"] is True
+    assert set(report["summary"]) == {"deterministic", "simulate"}
+    assert all("mean_optimality_gap" in row for row in report["summary"].values())

@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "Set-Location backend; python -m uvicorn app.main:app --port 8000"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "url": "http://localhost:5173"
+    }
+  ]
+}

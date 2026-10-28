@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "created_at": "2026-10-28T05:54:09.951938+00:00",
+  "created_at": "2026-10-28T17:17:39.071768+00:00",
   "seed": 42,
   "live_requested": false,
   "training_cases": [
@@ -18,22 +18,24 @@
     "heldout-4"
   ],
   "evaluation_memory_unchanged": true,
-  "memory_sha256": "0e6ce0def99bd74dbc43a50d92d5af9522c8c6788d0436bfc34414f5b95a6ea2",
+  "memory_sha256": "d01b17d2ee7b70bea70bc3acfc38811bd26e6cb2edec0e02038f490b8a7dbab5",
   "summary": {
     "deterministic": {
       "cases": 5,
       "blue_wins": 5,
       "mean_disrupted": 1.0,
-      "mean_latency_ms": 41.6,
+      "mean_optimality_gap": 0.0,
+      "mean_latency_ms": 218.6,
       "tokens": 0,
       "live_cases": 0,
       "fallbacks": 0
     },
-    "learned": {
+    "simulate": {
       "cases": 5,
       "blue_wins": 5,
       "mean_disrupted": 1.0,
-      "mean_latency_ms": 46.9,
+      "mean_optimality_gap": 0.0,
+      "mean_latency_ms": 256.6,
       "tokens": 0,
       "live_cases": 0,
       "fallbacks": 0
@@ -49,7 +51,9 @@
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 47.5,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 240.2,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -61,19 +65,19 @@
           "asset_ids": [
             "employee-workstation",
             "relay-2",
-            "file-server"
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
               "relay-2",
-              "file-server"
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.548452+00:00",
+          "timestamp": "2026-10-28T17:17:36.892740+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -97,23 +101,25 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.548452+00:00",
+          "timestamp": "2026-10-28T17:17:36.892740+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     },
     {
       "case_id": "heldout-0",
       "case_seed": 10042,
-      "strategy": "learned",
+      "strategy": "simulate",
       "prior_matches": 0,
       "mode": "offline",
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 78.0,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 240.3,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -125,19 +131,19 @@
           "asset_ids": [
             "employee-workstation",
             "relay-2",
-            "file-server"
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
               "relay-2",
-              "file-server"
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.626601+00:00",
+          "timestamp": "2026-10-28T17:17:37.132920+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -161,12 +167,12 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.626601+00:00",
+          "timestamp": "2026-10-28T17:17:37.132920+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     },
     {
       "case_id": "heldout-1",
@@ -177,135 +183,9 @@
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 32.2,
-      "tokens": 0,
-      "fallbacks": 0,
-      "decisions": [
-        {
-          "agent_role": "adversary_simulator",
-          "evidence_refs": [
-            "arena-round-1"
-          ],
-          "asset_ids": [
-            "employee-workstation",
-            "relay-0",
-            "file-server"
-          ],
-          "action": {
-            "path": [
-              "employee-workstation",
-              "relay-0",
-              "file-server"
-            ]
-          },
-          "justification": "Deterministic validated strategy",
-          "confidence": 1.0,
-          "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.660705+00:00",
-          "mode": "offline",
-          "fallback_reason": null
-        },
-        {
-          "agent_role": "defense_strategist",
-          "evidence_refs": [
-            "arena-round-1"
-          ],
-          "asset_ids": [
-            "employee-workstation"
-          ],
-          "action": {
-            "actions": [
-              {
-                "action_type": "quarantine_vlan",
-                "asset_id": "employee-workstation",
-                "params": {}
-              }
-            ]
-          },
-          "justification": "Deterministic validated strategy",
-          "confidence": 1.0,
-          "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.660705+00:00",
-          "mode": "offline",
-          "fallback_reason": null
-        }
-      ],
-      "config_hash": "928cdda00c62c42f"
-    },
-    {
-      "case_id": "heldout-1",
-      "case_seed": 10043,
-      "strategy": "learned",
-      "prior_matches": 0,
-      "mode": "offline",
-      "winner": "blue",
-      "rounds": 1,
-      "disrupted": 1,
-      "latency_ms": 29.0,
-      "tokens": 0,
-      "fallbacks": 0,
-      "decisions": [
-        {
-          "agent_role": "adversary_simulator",
-          "evidence_refs": [
-            "arena-round-1"
-          ],
-          "asset_ids": [
-            "employee-workstation",
-            "relay-0",
-            "file-server"
-          ],
-          "action": {
-            "path": [
-              "employee-workstation",
-              "relay-0",
-              "file-server"
-            ]
-          },
-          "justification": "Deterministic validated strategy",
-          "confidence": 1.0,
-          "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.689776+00:00",
-          "mode": "offline",
-          "fallback_reason": null
-        },
-        {
-          "agent_role": "defense_strategist",
-          "evidence_refs": [
-            "arena-round-1"
-          ],
-          "asset_ids": [
-            "employee-workstation"
-          ],
-          "action": {
-            "actions": [
-              {
-                "action_type": "quarantine_vlan",
-                "asset_id": "employee-workstation",
-                "params": {}
-              }
-            ]
-          },
-          "justification": "Deterministic validated strategy",
-          "confidence": 1.0,
-          "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.689776+00:00",
-          "mode": "offline",
-          "fallback_reason": null
-        }
-      ],
-      "config_hash": "928cdda00c62c42f"
-    },
-    {
-      "case_id": "heldout-2",
-      "case_seed": 10044,
-      "strategy": "deterministic",
-      "prior_matches": 0,
-      "mode": "offline",
-      "winner": "blue",
-      "rounds": 1,
-      "disrupted": 1,
-      "latency_ms": 30.0,
+      "min_cut": 3,
+      "optimality_gap": 0,
+      "latency_ms": 170.3,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -317,19 +197,19 @@
           "asset_ids": [
             "employee-workstation",
             "relay-1",
-            "file-server"
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
               "relay-1",
-              "file-server"
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.721210+00:00",
+          "timestamp": "2026-10-28T17:17:37.310756+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -353,23 +233,25 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.721210+00:00",
+          "timestamp": "2026-10-28T17:17:37.310756+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "928cdda00c62c42f"
+      "config_hash": "e58eef303ff9743b"
     },
     {
-      "case_id": "heldout-2",
-      "case_seed": 10044,
-      "strategy": "learned",
+      "case_id": "heldout-1",
+      "case_seed": 10043,
+      "strategy": "simulate",
       "prior_matches": 0,
       "mode": "offline",
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 32.0,
+      "min_cut": 3,
+      "optimality_gap": 0,
+      "latency_ms": 177.5,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -381,19 +263,19 @@
           "asset_ids": [
             "employee-workstation",
             "relay-1",
-            "file-server"
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
               "relay-1",
-              "file-server"
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.752250+00:00",
+          "timestamp": "2026-10-28T17:17:37.491681+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -417,12 +299,144 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.752250+00:00",
+          "timestamp": "2026-10-28T17:17:37.491681+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "928cdda00c62c42f"
+      "config_hash": "e58eef303ff9743b"
+    },
+    {
+      "case_id": "heldout-2",
+      "case_seed": 10044,
+      "strategy": "deterministic",
+      "prior_matches": 0,
+      "mode": "offline",
+      "winner": "blue",
+      "rounds": 1,
+      "disrupted": 1,
+      "min_cut": 3,
+      "optimality_gap": 0,
+      "latency_ms": 177.0,
+      "tokens": 0,
+      "fallbacks": 0,
+      "decisions": [
+        {
+          "agent_role": "adversary_simulator",
+          "evidence_refs": [
+            "arena-round-1"
+          ],
+          "asset_ids": [
+            "employee-workstation",
+            "relay-1",
+            "database"
+          ],
+          "action": {
+            "path": [
+              "employee-workstation",
+              "relay-1",
+              "database"
+            ]
+          },
+          "justification": "Deterministic validated strategy",
+          "confidence": 1.0,
+          "model_id": "deterministic",
+          "timestamp": "2026-10-28T17:17:37.668182+00:00",
+          "mode": "offline",
+          "fallback_reason": null
+        },
+        {
+          "agent_role": "defense_strategist",
+          "evidence_refs": [
+            "arena-round-1"
+          ],
+          "asset_ids": [
+            "employee-workstation"
+          ],
+          "action": {
+            "actions": [
+              {
+                "action_type": "quarantine_vlan",
+                "asset_id": "employee-workstation",
+                "params": {}
+              }
+            ]
+          },
+          "justification": "Deterministic validated strategy",
+          "confidence": 1.0,
+          "model_id": "deterministic",
+          "timestamp": "2026-10-28T17:17:37.669181+00:00",
+          "mode": "offline",
+          "fallback_reason": null
+        }
+      ],
+      "config_hash": "e58eef303ff9743b"
+    },
+    {
+      "case_id": "heldout-2",
+      "case_seed": 10044,
+      "strategy": "simulate",
+      "prior_matches": 0,
+      "mode": "offline",
+      "winner": "blue",
+      "rounds": 1,
+      "disrupted": 1,
+      "min_cut": 3,
+      "optimality_gap": 0,
+      "latency_ms": 177.2,
+      "tokens": 0,
+      "fallbacks": 0,
+      "decisions": [
+        {
+          "agent_role": "adversary_simulator",
+          "evidence_refs": [
+            "arena-round-1"
+          ],
+          "asset_ids": [
+            "employee-workstation",
+            "relay-1",
+            "database"
+          ],
+          "action": {
+            "path": [
+              "employee-workstation",
+              "relay-1",
+              "database"
+            ]
+          },
+          "justification": "Deterministic validated strategy",
+          "confidence": 1.0,
+          "model_id": "deterministic",
+          "timestamp": "2026-10-28T17:17:37.849335+00:00",
+          "mode": "offline",
+          "fallback_reason": null
+        },
+        {
+          "agent_role": "defense_strategist",
+          "evidence_refs": [
+            "arena-round-1"
+          ],
+          "asset_ids": [
+            "employee-workstation"
+          ],
+          "action": {
+            "actions": [
+              {
+                "action_type": "quarantine_vlan",
+                "asset_id": "employee-workstation",
+                "params": {}
+              }
+            ]
+          },
+          "justification": "Deterministic validated strategy",
+          "confidence": 1.0,
+          "model_id": "deterministic",
+          "timestamp": "2026-10-28T17:17:37.849335+00:00",
+          "mode": "offline",
+          "fallback_reason": null
+        }
+      ],
+      "config_hash": "e58eef303ff9743b"
     },
     {
       "case_id": "heldout-3",
@@ -433,7 +447,9 @@
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 43.5,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 239.3,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -444,20 +460,20 @@
           ],
           "asset_ids": [
             "employee-workstation",
-            "relay-0",
-            "file-server"
+            "relay-1",
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
-              "relay-0",
-              "file-server"
+              "relay-1",
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.796090+00:00",
+          "timestamp": "2026-10-28T17:17:38.086550+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -481,23 +497,25 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.796090+00:00",
+          "timestamp": "2026-10-28T17:17:38.086550+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     },
     {
       "case_id": "heldout-3",
       "case_seed": 10045,
-      "strategy": "learned",
+      "strategy": "simulate",
       "prior_matches": 0,
       "mode": "offline",
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 47.0,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 218.8,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -508,20 +526,20 @@
           ],
           "asset_ids": [
             "employee-workstation",
-            "relay-0",
-            "file-server"
+            "relay-1",
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
-              "relay-0",
-              "file-server"
+              "relay-1",
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.841809+00:00",
+          "timestamp": "2026-10-28T17:17:38.307607+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -545,12 +563,12 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.841809+00:00",
+          "timestamp": "2026-10-28T17:17:38.307607+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     },
     {
       "case_id": "heldout-4",
@@ -561,7 +579,9 @@
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 55.0,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 266.3,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -572,20 +592,20 @@
           ],
           "asset_ids": [
             "employee-workstation",
-            "relay-0",
-            "file-server"
+            "relay-1",
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
-              "relay-0",
-              "file-server"
+              "relay-1",
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.897331+00:00",
+          "timestamp": "2026-10-28T17:17:38.562439+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -609,23 +629,25 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.897331+00:00",
+          "timestamp": "2026-10-28T17:17:38.562439+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     },
     {
       "case_id": "heldout-4",
       "case_seed": 10046,
-      "strategy": "learned",
+      "strategy": "simulate",
       "prior_matches": 0,
       "mode": "offline",
       "winner": "blue",
       "rounds": 1,
       "disrupted": 1,
-      "latency_ms": 48.4,
+      "min_cut": 4,
+      "optimality_gap": 0,
+      "latency_ms": 469.1,
       "tokens": 0,
       "fallbacks": 0,
       "decisions": [
@@ -636,20 +658,20 @@
           ],
           "asset_ids": [
             "employee-workstation",
-            "relay-0",
-            "file-server"
+            "relay-1",
+            "database"
           ],
           "action": {
             "path": [
               "employee-workstation",
-              "relay-0",
-              "file-server"
+              "relay-1",
+              "database"
             ]
           },
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.947939+00:00",
+          "timestamp": "2026-10-28T17:17:39.021457+00:00",
           "mode": "offline",
           "fallback_reason": null
         },
@@ -673,12 +695,12 @@
           "justification": "Deterministic validated strategy",
           "confidence": 1.0,
           "model_id": "deterministic",
-          "timestamp": "2026-10-28T05:54:09.947939+00:00",
+          "timestamp": "2026-10-28T17:17:39.021457+00:00",
           "mode": "offline",
           "fallback_reason": null
         }
       ],
-      "config_hash": "b309a0889f348f85"
+      "config_hash": "45488094b4853c3f"
     }
   ],
   "limitations": "Small generated synthetic topologies; different seeds can share topology structure. Paired full-team comparison, not an isolated model ablation. Unseen scenarios start with zero prior matches, matching production scope; this measures cold-start behavior, not learning improvement. No claim of production resilience or improvement; ties are reported as ties."
