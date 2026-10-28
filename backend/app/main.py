@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import hmac
 import html
 import json
@@ -143,15 +142,20 @@ def settings_providers(request: Request):
     gated, because it persists keys and swaps the live model.
 
     The generated admin token is handed back here too, but ONLY when the
-    operator has not pinned one in the env — a generated token is a local dev
-    convenience, not a secret that must be protected, and the Settings UI
-    needs it to authenticate its own follow-up calls."""
+    operator has not pinned one in the env AND the caller is on this machine
+    (loopback). Handing it to any LAN client would make the write gate
+    meaningless; the local Settings UI still gets it for its follow-up calls."""
     from app.integrations.providers import public_catalogue
 
     out = {"providers": public_catalogue(), "active": meta_client.provider_id, "api_keys_exposed": False}
-    if not os.environ.get("ADMIN_TOKEN"):
+    if not os.environ.get("ADMIN_TOKEN") and settings.admin_token and _is_loopback(request):
         out["admin_token"] = settings.admin_token
     return out
+
+
+def _is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost")
 
 
 class ProviderActivate(BaseModel):
@@ -502,6 +506,15 @@ def exp_evidence(run_id: str, db: Session = Depends(get_db)):
              "timestamp": e.created_at.isoformat() if e.created_at else None} for e in rows]
 
 
+@app.get("/api/certificates/public-key")
+def certificate_public_key():
+    """Ed25519 public key that signs run certificates. Pin it when verifying:
+    python scripts/verify_cert.py cert.json --pubkey <hex>"""
+    from app.verification.certificate import public_key_hex
+
+    return {"alg": "Ed25519", "public_key": public_key_hex()}
+
+
 @app.get("/api/experiments/{run_id}/certificate")
 def exp_certificate(run_id: str, db: Session = Depends(get_db)):
     from app.simulation.scenarios import SCENARIOS as _SC
@@ -543,6 +556,43 @@ def exp_report(run_id: str, db: Session = Depends(get_db)):
     return report
 
 
+def _run_scenario(db: Session, r: models.SimulationRun) -> dict:
+    if r.custom_scenario_id:
+        srow = db.get(models.CustomScenarioDefinition, r.custom_scenario_id)
+        if srow:
+            return {**srow.definition, "id": srow.id, "name": srow.name}
+    return SCENARIOS.get(r.scenario_id, {"id": r.scenario_id, "name": r.scenario_id})
+
+
+async def _briefing(run_id: str, narrate: bool, db: Session) -> dict:
+    from app.verification import briefing as br
+
+    r = db.get(models.SimulationRun, run_id)
+    if not r:
+        raise HTTPException(404, "experiment not found")
+    results = exp_results(run_id, db)
+    facts = br.fact_sheet(results["run"], _run_scenario(db, r), results)
+    narrative = await br.ai_narrative(facts, run_id) if narrate else br.deterministic_narrative(facts)
+    return {"facts": facts, "narrative": narrative, "compliance": br.compliance_tags(results["executions"]),
+            "disclaimer": br.DISCLAIMER}
+
+
+@app.get("/api/experiments/{run_id}/briefing")
+async def exp_briefing(run_id: str, narrate: bool = False, db: Session = Depends(get_db)):
+    """One-page CISO board briefing. narrate=true asks the active AI provider to
+    rephrase the verified facts (labelled live, or offline with the reason)."""
+    return await _briefing(run_id, narrate, db)
+
+
+@app.get("/api/experiments/{run_id}/briefing/markdown")
+async def exp_briefing_markdown(run_id: str, narrate: bool = False, db: Session = Depends(get_db)):
+    from fastapi.responses import PlainTextResponse
+
+    from app.verification.briefing import to_markdown
+
+    return PlainTextResponse(to_markdown(await _briefing(run_id, narrate, db)), media_type="text/markdown")
+
+
 @app.get("/api/experiments/{run_id}/report/markdown")
 def exp_report_markdown(run_id: str, db: Session = Depends(get_db)):
     from fastapi.responses import PlainTextResponse
@@ -554,9 +604,11 @@ def exp_report_markdown(run_id: str, db: Session = Depends(get_db)):
     data = exp_results(run_id, db)
     ver = data["verification"] or {}
     metrics = ver.get("metrics", {})
-    mode_label = {"live": "LIVE META AI (muse-spark-1.3)",
-                  "mixed": "MIXED (live Meta AI + deterministic offline agents)"}.get(
-                      r.mode, "OFFLINE SIMULATION (deterministic, no Meta inference)")
+    # label from the models this run actually used, not whichever provider is active now
+    _models = ", ".join(data["usage"].get("models") or []) or "model not recorded"
+    mode_label = {"live": f"LIVE AI ({_models})",
+                  "mixed": f"MIXED (live {_models} + deterministic offline agents)"}.get(
+                      r.mode, "OFFLINE SIMULATION (deterministic, no model inference)")
     lines = [
         "# CYBERGENESIS Experiment Report", "",
         f"**Run ID:** {r.id} · **Scenario:** {sc.get('name', r.scenario_id)} · **Seed:** {r.seed}",
@@ -1318,9 +1370,9 @@ def _twin_row(r: models.CustomTwinDefinition) -> dict:
             "connections": r.connections, "created_at": r.created_at.isoformat() if r.created_at else ""}
 
 
-def _validate_twin(body: CreateCustomTwin) -> DigitalTwin:
-    if len(body.assets) < 2:
-        raise HTTPException(422, "a twin needs at least 2 assets")
+def _validate_twin(body: CreateCustomTwin, min_assets: int = 2) -> DigitalTwin:
+    if len(body.assets) < min_assets:
+        raise HTTPException(422, f"a twin needs at least {min_assets} assets")
     known_types = {a["id"] for a in ASSET_TYPES}
     for a in body.assets:
         if a.asset_type not in known_types:
@@ -1377,6 +1429,60 @@ def activate_custom_twin(twin_id: str, db: Session = Depends(get_db)):
 class FromImageRequest(BaseModel):
     image_data_url: str
     name: str = "Whiteboard Twin"
+
+
+class TwinImportRequest(BaseModel):
+    """Bring-your-own-network import. Exactly one source:
+    - text_config: one or more pasted running-configs (+ dialect); links inferred from shared subnets / descriptions
+    - csv_inventory: id,name,asset_type,zone,posture,vulnerabilities,connects_to (';'-separated lists)
+    - image_data_url: data:image/... whiteboard photo (Muse vision)
+    - json_twin: a Twin Designer body ({"assets": [...], "connections": [...]})"""
+    text_config: str | None = Field(default=None, max_length=200_000)
+    dialect: str = "cisco_ios"
+    csv_inventory: str | None = Field(default=None, max_length=200_000)
+    image_data_url: str | None = None
+    json_twin: dict | None = None
+    name: str = Field(default="Imported Twin", max_length=120)
+
+
+@app.post("/api/twins/import", status_code=201)
+async def twin_import(body: TwinImportRequest, db: Session = Depends(get_db)):
+    """Import a twin and save it as a custom twin. Every source ends in the
+    same CreateCustomTwin validation and compiler the Designer uses, so the
+    result is immediately usable by the experiment loop."""
+    from pydantic import ValidationError
+
+    from app.simulation.importers import ImportError_, parse_csv_inventory, parse_running_configs
+
+    sources = [k for k in ("text_config", "csv_inventory", "image_data_url", "json_twin") if getattr(body, k)]
+    if len(sources) != 1:
+        raise HTTPException(422, "exactly one of text_config, csv_inventory, image_data_url, json_twin must be provided")
+    source = sources[0]
+    try:
+        if source == "text_config":
+            data = parse_running_configs(body.text_config, body.dialect)
+        elif source == "csv_inventory":
+            data = parse_csv_inventory(body.csv_inventory)
+        elif source == "image_data_url":
+            img = await architect_twin(body.image_data_url, body.name)
+            data = {"assets": [a.model_dump() for a in img.assets], "connections": [c.model_dump() for c in img.connections]}
+        else:
+            data = body.json_twin
+        twin_body = CreateCustomTwin(name=body.name, description=f"Imported from {source.replace('_', ' ')}",
+                                     assets=data.get("assets") or [], connections=data.get("connections") or [])
+    except ImportError_ as e:
+        raise HTTPException(422, str(e)) from e
+    except ValidationError as e:
+        raise HTTPException(422, f"invalid twin definition: {e.errors()[0].get('msg')} at {e.errors()[0].get('loc')}") from e
+    twin = _validate_twin(twin_body, min_assets=1)
+    row = models.CustomTwinDefinition(name=twin_body.name, description=twin_body.description,
+                                      assets=[a.model_dump() for a in twin_body.assets],
+                                      connections=[c.model_dump() for c in twin_body.connections])
+    db.add(row); db.commit(); db.refresh(row)
+    exposed = sorted({v for a in twin_body.assets for v in a.vulnerabilities})
+    return {**_twin_row(row), "summary": {"source": source, "assets": len(twin_body.assets),
+                                          "links": len(twin_body.connections), "weaknesses": exposed,
+                                          "edges_compiled": twin.graph.number_of_edges()}}
 
 
 @app.post("/api/twins/from-image", status_code=201)

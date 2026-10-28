@@ -12,6 +12,7 @@ os.environ["ADMIN_TOKEN"] = ""
 # import reads settings — tests must never touch the demo DB (cybergenesis.db).
 _TEST_DB_PATH = Path(tempfile.mkdtemp(prefix="cybergenesis-tests-")) / "cybergenesis-test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH.as_posix()}"
+os.environ["CERT_SIGNING_KEY_PATH"] = str(_TEST_DB_PATH.parent / "cert_signing_key.pem")
 os.environ["SIM_STEP_DELAY_MS"] = "0"
 os.environ["OFFLINE_MODE"] = "true"  # hermetic tests: never call the live provider by default
 os.environ["HUMAN_APPROVAL_ENABLED"] = "false"  # approval gate is exercised in its own test with a resolver

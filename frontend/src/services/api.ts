@@ -1,4 +1,4 @@
-import type { ArenaEvaluation, ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin } from '../types'
+import type { ArenaEvaluation, Briefing, ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin, TwinImportResult } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
@@ -36,6 +36,8 @@ export const api = {
   runExperiment: (id: string, stepDelayMs?: number) => j<{ started: boolean }>(`/api/experiments/${id}/run${stepDelayMs !== undefined ? `?step_delay_ms=${stepDelayMs}` : ''}`, { method: 'POST' }),
   snapshots: (id: string) => j<{ label: string; snapshot: { status: Record<string, string> } }[]>(`/api/experiments/${id}/snapshots`),
   fromImage: (image_data_url: string, name: string) => j<CustomTwinDef>('/api/twins/from-image', { method: 'POST', body: JSON.stringify({ image_data_url, name }) }),
+  importTwin: (body: { text_config?: string; dialect?: string; csv_inventory?: string; name: string }) =>
+    j<TwinImportResult>('/api/twins/import', { method: 'POST', body: JSON.stringify(body) }),
   results: (id: string) => j<RunResult>(`/api/experiments/${id}/results`),
   events: (id: string) => j<SimEvent[]>(`/api/experiments/${id}/events`),
   evidence: (id: string) => j<{ id: string; kind: string; ref: string; summary: string }[]>(`/api/experiments/${id}/evidence`),
@@ -82,6 +84,12 @@ export const api = {
   evalLatest: () => j<{ available: boolean; result?: { n: number; mode: string; agents: Record<string, Record<string, unknown>>; calibration: Record<string, { bucket: string; n: number; accuracy: number | null }[]> } }>('/api/agents/eval/latest'),
   learningCurve: () => j<{ points: { run_id: string; scenario_id: string; mode: string; outcome: string; optimality_gap: number | null }[]; runs: number }>('/api/learning/curve'),
   calibration: () => j<{ buckets: { bucket: string; n: number; passes: number; pass_rate_pct: number | null }[] }>('/api/benchmark/calibration'),
+  briefing: (id: string, narrate: boolean) => j<Briefing>(`/api/experiments/${id}/briefing?narrate=${narrate}`),
+  briefingMarkdown: async (id: string, narrate: boolean): Promise<string> => {
+    const r = await fetch(`${API}/api/experiments/${id}/briefing/markdown?narrate=${narrate}`)
+    if (!r.ok) throw new Error(`briefing/markdown -> HTTP ${r.status}`)
+    return r.text()
+  },
   getCertificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
   certificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
   fork: (id: string, choose_candidate: number | string, at_event = 'attacked') =>

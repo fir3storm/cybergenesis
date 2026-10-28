@@ -10,6 +10,29 @@ interface DConn { source: string; target: string; trust: string; traversable: bo
 
 export interface TemplateAsset { id: string; name: string; asset_type: string; device_id: string }
 
+// Synthetic examples for the network importer (no real addresses or secrets).
+const SAMPLE_CONFIGS = `hostname edge-fw
+interface Gi0/0
+ description uplink to core-rtr
+ ip address 10.0.0.1 255.255.255.252
+line vty 0 4
+ transport input telnet
+hostname core-rtr
+interface Gi0/1
+ ip address 10.0.0.2/30
+interface Gi0/2
+ ip address 10.1.0.1/24
+snmp-server community public RO
+hostname db-01
+interface eth0
+ ip address 10.1.0.20/24
+username dba role admin mfa off`
+const SAMPLE_CSV = `id,name,asset_type,zone,posture,vulnerabilities,connects_to
+internet,Internet,gateway,external,0.4,exposed_surface,web
+web,Web Server,web_server,dmz,0.6,exposed_service,app
+app,App Server,app_server,internal,0.7,overprivileged_service_account,db
+db,Database,database,data,0.9,,`
+
 /**
  * Starter templates built from real catalog devices (ids verified against
  * GET /api/devices/catalog / backend catalog.csv). Flagship switches:
@@ -229,6 +252,23 @@ export default function TwinDesigner() {
     setMsg(`Mermaid import: ${nodes.size} assets, ${edges.length} connections — review, then Save.`)
   }
 
+  const [importKind, setImportKind] = useState<'config' | 'csv'>('config')
+  const [importDialect, setImportDialect] = useState('cisco_ios')
+  const [importText, setImportText] = useState(SAMPLE_CONFIGS)
+  async function importNetwork() {
+    try {
+      const body = importKind === 'config'
+        ? { text_config: importText, dialect: importDialect, name }
+        : { csv_inventory: importText, name }
+      const t = await api.importTwin(body)
+      setAssets(t.assets.map((a) => ({ ...a, posture: a.posture ?? 0.7, vulnerabilities: a.vulnerabilities ?? [], pos: [a.pos[0], a.pos[1], a.pos[2]] as [number, number, number] })))
+      setConns(t.connections.map((c) => ({ source: c.source, target: c.target, trust: c.trust ?? 'medium', traversable: c.traversable ?? true, types: c.types ?? ['network'] })))
+      const w = t.summary.weaknesses
+      setMsg(`Imported and saved "${t.name}": ${t.summary.assets} assets, ${t.summary.links} links${w.length ? `, weaknesses found: ${w.join(', ')}` : ''}. Activate it, then run an attack from the Playbook.`)
+      void refresh()
+    } catch (e) { setMsg(`Import failed: ${(e as Error).message}`) }
+  }
+
   function handleImageFile(f: File) {
     if (!['image/png', 'image/jpeg'].includes(f.type)) { setMsg('Only PNG/JPEG images are accepted.'); return }
     if (f.size > 4_000_000) { setMsg(`Image rejected: ${(f.size / 1e6).toFixed(1)} MB exceeds the 4 MB limit.`); return }
@@ -302,6 +342,28 @@ export default function TwinDesigner() {
           <textarea value={mermaid} onChange={(e) => setMermaid(e.target.value)} rows={4} aria-label="Mermaid diagram"
             className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 font-mono text-[10px]" />
           <button onClick={importMermaid} className="mt-1 w-full rounded border border-cyan-700 py-1 text-[11px] text-cyan-200">Import Mermaid → canvas</button>
+          <h2 className="mt-4 text-xs font-bold tracking-wider text-cyan-300">IMPORT YOUR NETWORK</h2>
+          <div className="mt-1 flex gap-1">
+            {(['config', 'csv'] as const).map((k) => (
+              <button key={k} onClick={() => { setImportKind(k); setImportText(k === 'config' ? SAMPLE_CONFIGS : SAMPLE_CSV) }}
+                aria-pressed={importKind === k}
+                className={`rounded px-2 py-1 text-[10px] ${importKind === k ? 'bg-cyan-700 text-white' : 'bg-slate-800'}`}>
+                {k === 'config' ? 'Running-configs' : 'CSV inventory'}
+              </button>
+            ))}
+            {importKind === 'config' && (
+              <select value={importDialect} onChange={(e) => setImportDialect(e.target.value)} aria-label="Config dialect"
+                className="rounded border border-slate-700 bg-slate-950 px-1 text-[10px]">
+                {['cisco_ios', 'junos', 'fortios', 'panos', 'routeros'].map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            )}
+          </div>
+          <textarea value={importText} onChange={(e) => setImportText(e.target.value)} rows={6} aria-label="Network import text"
+            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 font-mono text-[10px]" />
+          <p className="text-[10px] text-slate-500">{importKind === 'config'
+            ? 'Paste one or more configs (each starts with "hostname"). Links are inferred from shared subnets and interface descriptions.'
+            : 'Columns: id,name,asset_type,zone,posture,vulnerabilities,connects_to (lists separated by ;).'}</p>
+          <button onClick={() => void importNetwork()} className="mt-1 w-full rounded border border-emerald-700 py-1 text-[11px] text-emerald-200">Import → twin (saved)</button>
           <h2 className="mt-4 text-xs font-bold tracking-wider text-cyan-300">ASSETS ({assets.length})</h2>
           {assets.map((a) => (
             <div key={a.id} className="mt-1 flex items-center justify-between rounded bg-slate-950/60 px-2 py-1 text-xs">

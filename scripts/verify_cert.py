@@ -1,8 +1,11 @@
-"""Independent certificate checker. Stdlib only, no LLM, no database.
+"""Independent certificate checker. No LLM, no database.
 
-Usage: python scripts/verify_cert.py certificate.json [twin.json]
-Recomputes: HMAC signature, event hash chain, reachability + frontier from the
-embedded final twin, and the min-cut claim. Prints VALID or INVALID (with reasons).
+Usage: python scripts/verify_cert.py certificate.json [twin.json] [--pubkey HEX]
+Recomputes: the Ed25519 signature (public key only, needs the `cryptography`
+package; pin the signer with --pubkey from GET /api/certificates/public-key),
+the legacy HMAC (only when CERT_DEMO_KEY is set), the event hash chain,
+reachability + frontier from the embedded final twin, and the min-cut claim.
+Prints VALID or INVALID (with reasons).
 """
 
 import hashlib
@@ -15,27 +18,65 @@ from collections import deque
 DEMO_KEY = os.environ.get("CERT_DEMO_KEY")
 
 
+def _check_ed25519(cert: dict, pinned: str | None, reasons: list[str]) -> bool:
+    """True when a valid Ed25519 signature was checked; failures go to reasons."""
+    block = cert.get("ed25519")
+    if not block:
+        if pinned:
+            reasons.append("--pubkey given but the certificate carries no Ed25519 signature")
+        return False
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except ImportError:
+        print("note: `cryptography` not installed; Ed25519 signature not checked", file=sys.stderr)
+        return False
+    if pinned and pinned.lower() != str(block.get("public_key", "")).lower():
+        reasons.append("Ed25519 public key does not match the pinned --pubkey (different signer)")
+        return False
+    body = {k: cert[k] for k in sorted(cert) if k not in ("signature", "ed25519")}
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(block["public_key"])).verify(
+            bytes.fromhex(block["signature"]), json.dumps(body, sort_keys=True, default=str).encode())
+    except (InvalidSignature, ValueError, KeyError):
+        reasons.append("Ed25519 signature invalid (tampered or wrong key)")
+        return False
+    return True
+
+
 def main() -> int:
-    if not DEMO_KEY:
-        print("error: CERT_DEMO_KEY environment variable is not set; set it to the key the "
-              "certificate was signed with before verifying.", file=sys.stderr)
+    args = sys.argv[1:]
+    pinned = None
+    if "--pubkey" in args:
+        i = args.index("--pubkey")
+        if i + 1 >= len(args):
+            print("error: --pubkey needs a hex value", file=sys.stderr)
+            return 2
+        pinned = args[i + 1]
+        del args[i:i + 2]
+    if not args:
+        print("usage: verify_cert.py certificate.json [twin.json] [--pubkey HEX]")
         return 2
-    if len(sys.argv) < 2:
-        print("usage: verify_cert.py certificate.json [twin.json]")
-        return 2
-    with open(sys.argv[1], encoding="utf-8") as fh:
+    with open(args[0], encoding="utf-8") as fh:
         cert = json.loads(fh.read())
     twin = cert["final_twin"]
-    if len(sys.argv) > 2:
-        with open(sys.argv[2], encoding="utf-8") as fh:
+    if len(args) > 1:
+        with open(args[1], encoding="utf-8") as fh:
             twin = json.loads(fh.read())
     reasons: list[str] = []
 
-    # 1. HMAC over the canonical cert (excluding the signature itself)
-    signed = {k: cert[k] for k in sorted(cert) if k != "signature"}
-    expect = hmac.new(DEMO_KEY.encode(), json.dumps(signed, sort_keys=True, default=str).encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expect, cert.get("signature", "")):
-        reasons.append("HMAC signature mismatch (tampered or wrong key)")
+    # 1. signatures: Ed25519 (public key) and/or legacy HMAC (shared CERT_DEMO_KEY)
+    ed_ok = _check_ed25519(cert, pinned, reasons)
+    if DEMO_KEY:
+        signed = {k: cert[k] for k in sorted(cert) if k != "signature"}
+        expect = hmac.new(DEMO_KEY.encode(), json.dumps(signed, sort_keys=True, default=str).encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expect, cert.get("signature", "")):
+            reasons.append("HMAC signature mismatch (tampered or wrong key)")
+    elif not ed_ok and not reasons:
+        print("error: no signature could be checked: certificate has no Ed25519 signature (or `cryptography` "
+              "is missing) and CERT_DEMO_KEY is not set.", file=sys.stderr)
+        return 2
+    sig_note = "Ed25519 " + ("verified" if ed_ok else "absent") + (", HMAC verified" if DEMO_KEY else "")
 
     # 2. reachability from the embedded twin, honouring directed arcs + isolation
     conns = twin["connections"]
@@ -99,7 +140,7 @@ def main() -> int:
             print(f" - {r}")
         return 1
     print(f"VALID — run {cert['run_id']}, scenario {cert['scenario']['id']}, "
-          f"campaigns {len(cert['campaigns'])}, target reachable: {reachable}")
+          f"campaigns {len(cert['campaigns'])}, target reachable: {reachable} [{sig_note}]")
     return 0
 
 

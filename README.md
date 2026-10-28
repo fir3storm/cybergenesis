@@ -60,18 +60,29 @@ Strategy modes: **AI + learning** · **Learning only** · **Deterministic**.
 
 ## Proof-carrying defense
 
-When a run's verdict is **PASS**, CYBERGENESIS hands you a proof instead of asking for trust: a self-contained, HMAC-signed certificate (event hash chain, campaigns replayed, per-campaign unreachable-proof with the blocking rule for every frontier arc, embedded final twin). Anyone can verify it offline — no LLM, no database:
+When a run's verdict is **PASS**, CYBERGENESIS hands you a proof instead of asking for trust: a self-contained certificate (event hash chain, campaigns replayed, per-campaign unreachable-proof with the blocking rule for every frontier arc, embedded final twin) signed with **Ed25519**. Anyone can verify it offline with only the public key: no shared secret, no LLM, no database.
 
 ```powershell
-python scripts/verify_cert.py certificate-<runId>.json
-# VALID — or INVALID, with the exact reason
+# public key: GET /api/certificates/public-key (also embedded in the certificate)
+python scripts/verify_cert.py certificate-<runId>.json --pubkey <public_key_hex>
+# VALID ... [Ed25519 verified] — or INVALID, with the exact reason
 ```
+
+`--pubkey` pins the signer, so a certificate re-signed with someone else's key is rejected. The signing key is generated on first use at `CERT_SIGNING_KEY_PATH` (default `./cert_signing_key.pem`, gitignored); delete it to rotate.
 
 A FAIL run gets no proof button. There is nothing to certify.
 
-**`CERT_DEMO_KEY` is required.** Certificates are HMAC-signed with the key in the `CERT_DEMO_KEY` environment variable — there is no built-in default, and the backend refuses to start (and `scripts/verify_cert.py` exits with code 2) when it is unset. Generate one as any long random string, for example `python -c "import secrets; print(secrets.token_hex(32))"`, set it in the environment of the shell/process that starts the backend (add `CERT_DEMO_KEY=<value>` to `backend/.env` for local dev and export the same value), and use the same value when running `scripts/verify_cert.py`.
+**`CERT_DEMO_KEY` is still required** for the legacy HMAC signature that certificates (and Arena winner certificates) also carry; the backend refuses to start without it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"` and put it in `backend/.env`. `verify_cert.py` checks the HMAC too when `CERT_DEMO_KEY` is set in its environment; changing the key invalidates older HMACs (`HMAC signature mismatch`), so re-download certificates after rotating.
 
-**Rotation:** change `CERT_DEMO_KEY` in the backend's environment (e.g. `backend/.env`) and restart the backend. Certificates signed with the old key will fail verification after rotation (`HMAC signature mismatch`). Re-issue a certificate by re-downloading it from the (restarted) backend, which signs it with the new key.
+## Board briefing and control evidence
+
+Every finished run has a one-page **board briefing**: headline, business impact (risk before/after with its 95% CI, users affected, legitimate paths disrupted), decisions requested, and the full decision trail. **Draft with AI** asks the active provider to rephrase the verified facts in plain language. The output is schema-checked and labelled *AI-drafted*, and if the provider is unavailable it falls back to the deterministic text with the reason. **Read aloud** and **.md** export are built in (`GET /api/experiments/{id}/briefing`, `/briefing/markdown`).
+
+Each executed defense is tagged with the **NIST CSF 2.0** subcategories and **CIS Controls v8** it evidences (for example `enforce_mfa` → PR.AA-03 and CIS 6). Every verified run also evidences ID.IM-02, improvements identified from security tests. This mapping is indicative evidence from a simulation, not an audit opinion.
+
+## Judge Mode
+
+**⚖ Judge Mode** on the welcome screen runs the ransomware demo end to end with a caption bar: Attack → Observe → Reason → Propose + simulate → Guardrails → Act → Verify → Prove. Each stage is explained in one plain sentence as it happens, and a FAIL is captioned as a FAIL.
 
 ## Counterfactual time machine
 
@@ -104,6 +115,7 @@ Some defenses disrupt legitimate paths, so they wait for a human. The approval c
 ## Design your own
 
 - **Twin Designer** — build a custom topology from the component palette (drag assets, click two to connect, save, activate), or photograph a whiteboard and let Muse Spark vision generate the twin.
+- **Import your network** — paste one or more running-configs (Cisco IOS, JunOS, FortiOS, PAN-OS, RouterOS) or a CSV inventory. Links are inferred from shared subnets and interface descriptions; weaknesses the config itself shows (telnet, default SNMP community, permit-any ACLs, users without MFA) become vulnerabilities. The result is a saved twin, ready to attack and defend (`POST /api/twins/import`). Pitch: *before you push a firewall change, prove it doesn't open a path to your crown jewels.*
 - **Attack Playbook** — compose a custom scenario from the allowlisted step/defense libraries and run it through the identical loop.
 - **Component Library** — browse every asset type, attack step, and defense action the policy engine accepts (`GET /api/library`).
 
@@ -167,7 +179,7 @@ cd backend;  python -m pytest -q;  python -m ruff check app tests
 cd frontend; npm test; npm run build; npm run test:e2e   # Playwright, requires servers running
 ```
 
-**140 backend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
+**211 backend tests** (1 skipped) and **30 frontend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered, Ed25519 public-key verification and signer pinning), network import (configs, CSV, bad input → 422), the board briefing (control mapping, honest AI fallback), settings hardening (provider host allowlist, loopback-only admin token), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
 
 ## Documentation
 

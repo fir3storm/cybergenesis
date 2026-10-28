@@ -23,6 +23,8 @@ import { BenchmarkView, ScorecardsView } from './views/benchmark'
 import { EvidenceView } from './views/evidence'
 import { ProviderSettings } from './views/providers'
 import { ProofCard } from './views/proof'
+import { BriefingCard } from './views/briefing'
+import { JudgeCaptions } from './views/judgeMode'
 import { TimeMachine } from './views/timemachine'
 import { MobileApprovalQR } from './views/mobileApproval'
 
@@ -169,6 +171,7 @@ export default function App() {
   const [replayPlaying, setReplayPlaying] = useState(false)
   const [snapshots, setSnapshots] = useState<{ label: string; snapshot: { status: Record<string, string> } }[]>([])
   const [tourStep, setTourStep] = useState<number | null>(null)
+  const [judge, setJudge] = useState(false)
   const [whatIf, setWhatIf] = useState('what if the admin laptop is phished?')
   const [whatIfMsg, setWhatIfMsg] = useState<string | null>(null)
   const [whatIfCard, setWhatIfCard] = useState<{
@@ -467,6 +470,7 @@ export default function App() {
         </nav>
       </header>
 
+      {judge && <JudgeCaptions state={s.runState} outcome={s.results?.verification?.outcome} onClose={() => setJudge(false)} />}
       {s.error && <div role="alert" className="mx-4 mt-3 rounded border border-red-500/60 bg-red-950/50 px-3 py-2 text-sm text-red-200">{s.error}</div>}
 
       {s.view === 'welcome' && (
@@ -480,6 +484,7 @@ export default function App() {
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button onClick={() => s.set({ view: 'twin' })} className="rounded-lg bg-cyan-500 px-5 py-3 font-semibold text-slate-950 hover:bg-cyan-400">Enter the Digital Twin</button>
             <button onClick={() => void runDemo('ransomware_activity')} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-slate-950 hover:bg-emerald-400"><Play size={16} /> Run Autonomous Defense Demo</button>
+            <button onClick={() => { setJudge(true); void runDemo('ransomware_activity') }} className="rounded-lg border border-violet-400 bg-violet-600/20 px-5 py-3 font-semibold text-violet-100 hover:bg-violet-600/40" title="Runs the full demo with plain-language captions for each stage">⚖ Judge Mode</button>
             <button onClick={() => { setTourStep(0); s.set({ view: TOUR_STEPS[0].view }) }} className="rounded-lg border border-violet-600 px-5 py-3 text-violet-200 hover:bg-violet-950/50">▶ 60-Second Guided Tour</button>
             <button onClick={() => s.set({ view: 'agents' })} className="rounded-lg border border-cyan-700 px-5 py-3 hover:bg-slate-800">Explore Architecture</button>
             <button onClick={exportReport} disabled={!s.runId} className="rounded-lg border border-slate-600 px-5 py-3 disabled:opacity-40" title={s.runId ? 'Download evidence report' : 'Run an experiment first'}><Download size={15} className="inline" /> Download Report</button>
@@ -686,6 +691,7 @@ export default function App() {
                     <p className="text-xs text-slate-400">Effectiveness {String(s.results.verification.metrics.defense_effectiveness_pct)}% · disrupted legit paths: {String(s.results.verification.metrics.operational_impact_disrupted_legit_paths)}</p>
                     <button onClick={() => s.set({ view: 'verification' })} className="mt-1 text-xs text-cyan-300 underline">Open Verification Lab →</button>
                     <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
+                    <BriefingCard runId={s.runId} outcome={s.results.verification.outcome} />
                   </>
                 ) : <p className="text-xs text-slate-500">No outcome yet. A failed or rejected defense will show FAIL here — honestly.</p>}
               </section>
@@ -827,6 +833,7 @@ export default function App() {
               </div>
               {s.replayVerdict && <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">{s.replayVerdict}</p>}
               <ProofCard runId={s.runId} outcome={s.results.verification.outcome} />
+              <BriefingCard runId={s.runId} outcome={s.results.verification.outcome} />
             </div>
           )}
         </main>

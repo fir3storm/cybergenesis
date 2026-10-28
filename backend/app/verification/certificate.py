@@ -3,13 +3,20 @@
 Contains everything an independent checker needs — no LLM, no database:
 scenario, seed, config hashes, applied diffs, min-cut, per-campaign replay
 proofs (BFS frontier + the rule blocking each frontier edge), an event hash
-chain, and an HMAC signature (demo key via CERT_DEMO_KEY).
+chain, and two signatures:
+- ``ed25519``: public-key signature. Anyone can verify it with only the
+  public key (published at /api/certificates/public-key), no shared secret.
+- ``signature``: the legacy HMAC (CERT_DEMO_KEY), kept for older checkers.
 """
 
 import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.simulation.twin import DigitalTwin
 
@@ -19,6 +26,36 @@ if not DEMO_KEY:
         "CERT_DEMO_KEY environment variable is not set: set CERT_DEMO_KEY to a long random "
         "secret before starting the backend (see .env.example / README 'Proof-carrying defense')."
     )
+
+
+_SIGNING_KEY: Ed25519PrivateKey | None = None
+
+
+def signing_key() -> Ed25519PrivateKey:
+    """Ed25519 key, created on first use and kept on this machine (gitignored PEM)."""
+    global _SIGNING_KEY
+    if _SIGNING_KEY is None:
+        path = Path(os.environ.get("CERT_SIGNING_KEY_PATH", "./cert_signing_key.pem"))
+        if path.exists():
+            key = serialization.load_pem_private_key(path.read_bytes(), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise RuntimeError(f"{path} is not an Ed25519 private key")
+        else:
+            key = Ed25519PrivateKey.generate()
+            path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                               serialization.NoEncryption()))
+        _SIGNING_KEY = key
+    return _SIGNING_KEY
+
+
+def public_key_hex() -> str:
+    return signing_key().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+
+
+def ed25519_payload(cert: dict) -> bytes:
+    """Bytes covered by the Ed25519 signature: everything except the two signature fields."""
+    body = {k: cert[k] for k in sorted(cert) if k not in ("signature", "ed25519")}
+    return json.dumps(body, sort_keys=True, default=str).encode()
 
 
 def _chain(events: list[dict]) -> str:
@@ -88,6 +125,9 @@ def build_certificate(run, scenario: dict, baseline_twin: DigitalTwin, final_twi
                                                          "defense_edges_removed", "optimality_gap", "rounds")},
             "unreachable_proof": _frontier_proof(final_twin, scenario["source_asset"], scenario["target_asset"]),
         })
+    cert["ed25519"] = {"alg": "Ed25519", "public_key": public_key_hex(),
+                       "signature": signing_key().sign(ed25519_payload(cert)).hex()}
+    # HMAC last, over everything above (including the Ed25519 block) — unchanged legacy semantics
     canonical = json.dumps({k: cert[k] for k in sorted(cert)}, sort_keys=True, default=str)
     cert["signature"] = hmac.new(DEMO_KEY.encode(), canonical.encode(), hashlib.sha256).hexdigest()
     return cert

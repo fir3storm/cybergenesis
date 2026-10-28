@@ -49,3 +49,37 @@ async def test_certificate_valid_then_tampered_invalid(tmp_path):
     bad.write_text(json.dumps(tampered), encoding="utf-8")
     out = _verify(bad)
     assert out.returncode == 1 and "INVALID" in out.stdout
+
+
+def _verify_args(*args, env_drop_hmac=False) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    if env_drop_hmac:
+        env.pop("CERT_DEMO_KEY", None)
+    return subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "verify_cert.py"), *map(str, args)],
+                          capture_output=True, text=True, check=False, env=env)
+
+
+@pytest.mark.asyncio
+async def test_ed25519_certificate_verifies_with_public_key_only(tmp_path):
+    rid = client.post("/api/experiments", json={"scenario_id": "ransomware_activity", "seed": 7}).json()["id"]
+    await run_experiment(rid)
+    data = client.get(f"/api/experiments/{rid}/certificate").json()
+    pub = client.get("/api/certificates/public-key").json()
+    assert data["ed25519"]["alg"] == "Ed25519" and data["ed25519"]["public_key"] == pub["public_key"]
+
+    good = tmp_path / "cert.json"
+    good.write_text(json.dumps(data), encoding="utf-8")
+    # no shared secret at all: the public key alone proves integrity
+    out = _verify_args(good, "--pubkey", pub["public_key"], env_drop_hmac=True)
+    assert out.returncode == 0 and "Ed25519 verified" in out.stdout, out.stdout + out.stderr
+
+    # a different signer is rejected when the key is pinned
+    out = _verify_args(good, "--pubkey", "00" * 32, env_drop_hmac=True)
+    assert out.returncode == 1 and "pinned" in out.stdout
+
+    # editing any signed field (here: the claimed seed) breaks the signature
+    edited = json.loads(json.dumps(data)); edited["seed"] = 999
+    bad = tmp_path / "edited.json"
+    bad.write_text(json.dumps(edited), encoding="utf-8")
+    out = _verify_args(bad, env_drop_hmac=True)
+    assert out.returncode == 1 and "Ed25519 signature invalid" in out.stdout

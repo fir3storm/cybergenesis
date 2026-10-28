@@ -40,7 +40,9 @@ export function ProofCard({ runId, outcome }: { runId: string | null; outcome: s
       {err && <p className="mt-2 text-xs text-red-300">Certificate unavailable: {err}</p>}
       {cert && (
         <dl className="mt-3 grid gap-2 text-xs md:grid-cols-2">
-          <div><dt className="text-slate-400">Signature (HMAC-SHA256)</dt><dd className="font-mono text-emerald-200">{cert.signature.slice(0, 24)}…</dd></div>
+          {cert.ed25519
+            ? <div><dt className="text-slate-400">Signature (Ed25519, public key)</dt><dd className="font-mono text-emerald-200" title={`signer ${cert.ed25519.public_key}`}>{cert.ed25519.signature.slice(0, 24)}…</dd></div>
+            : <div><dt className="text-slate-400">Signature (HMAC-SHA256)</dt><dd className="font-mono text-emerald-200">{cert.signature.slice(0, 24)}…</dd></div>}
           <div><dt className="text-slate-400">Event hash chain ({cert.events_count} events)</dt><dd className="font-mono text-emerald-200">{cert.event_hash_chain.slice(0, 24)}…</dd></div>
           <div><dt className="text-slate-400">Campaigns replayed</dt><dd className="text-slate-200">{cert.campaigns.length} · min-cut {cert.min_cut_edges} edge(s)</dd></div>
           <div><dt className="text-slate-400">Target reachable after defense</dt>
@@ -48,7 +50,7 @@ export function ProofCard({ runId, outcome }: { runId: string | null; outcome: s
               {String(last?.unreachable_proof.target_reachable ?? '—')} · {last?.unreachable_proof.frontier.length ?? 0} blocked frontier arc(s)</dd></div>
         </dl>
       )}
-      <p className="mt-2 font-mono text-[11px] text-slate-400">Verify locally: python scripts/verify_cert.py certificate-{runId}.json</p>
+      <p className="mt-2 font-mono text-[11px] text-slate-400">Verify locally: python scripts/verify_cert.py certificate-{runId}.json{cert?.ed25519 ? ` --pubkey ${cert.ed25519.public_key}` : ''}</p>
     </section>
   )
 }

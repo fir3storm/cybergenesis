@@ -29,6 +29,13 @@ export interface Certificate {
   event_hash_chain: string
   events_count: number
   signature: string
+  ed25519?: { alg: string; public_key: string; signature: string }
+}
+export interface Briefing {
+  facts: Record<string, unknown> & { run_id: string; outcome: string }
+  narrative: { headline: string; summary: string; board_asks: string[]; mode: string; model: string; fallback_reason?: string }
+  compliance: { framework: string; id: string; title: string; evidenced_by: string[] }[]
+  disclaimer: string
 }
 export interface ForkSummary {
   outcome: string | null
@@ -126,4 +133,7 @@ export interface ArenaLeague {
 export interface LibraryItem { id: string; label: string; description: string; params_contract?: string; default_posture?: number; default_zone?: string; mitre?: string; d3fend?: string }
 export interface Library { asset_types: LibraryItem[]; attack_steps: LibraryItem[]; defense_actions: LibraryItem[]; verification_kinds: string[]; zones: string[] }
 export interface CustomTwinDef { id: string; name: string; description: string; assets: { id: string; name: string; asset_type: string; zone: string; posture?: number; pos: number[]; vulnerabilities?: string[] }[]; connections: { source: string; target: string; trust?: string; traversable?: boolean; types?: string[] }[]; created_at: string }
+export interface TwinImportResult extends CustomTwinDef {
+  summary: { source: string; assets: number; links: number; weaknesses: string[]; edges_compiled: number }
+}
 export interface CustomScenarioDef { id: string; name: string; description: string; definition: Record<string, unknown>; created_at: string }

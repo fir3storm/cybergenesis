@@ -66,6 +66,29 @@ def test_activate_unknown_provider_422_and_empty_key_keeps_stored():
     assert meta_client.key == "kilo-key-1" and meta_client.model == "other/model"
 
 
+def test_base_url_must_be_provider_host_or_localhost():
+    bad = client.post("/api/settings/provider", json={"provider": "meta", "base_url": "https://evil.example.com/v1"})
+    assert bad.status_code == 422 and "not allowed" in bad.text
+    plain = client.post("/api/settings/provider", json={"provider": "meta", "base_url": "http://api.meta.ai/v1"})
+    assert plain.status_code == 422
+    ok = client.post("/api/settings/provider", json={"provider": "meta", "base_url": "https://api.meta.ai/v1/"})
+    assert ok.status_code == 200 and ok.json()["base_url"] == "https://api.meta.ai/v1"
+    local = client.post("/api/settings/provider", json={"provider": "kilo", "base_url": "http://localhost:4000/v1"})
+    assert local.status_code == 200
+
+
+def test_generated_admin_token_only_handed_to_loopback(monkeypatch):
+    monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+    monkeypatch.setattr(settings, "admin_token", "generated-test-token")
+    # TestClient's peer is "testclient", i.e. not this machine's loopback
+    assert "admin_token" not in client.get("/api/settings/providers").json()
+    assert client.post("/api/settings/provider", json={"provider": "meta"}).status_code == 403
+    import app.main as main_mod
+    monkeypatch.setattr(main_mod, "_is_loopback", lambda request: True)
+    assert client.get("/api/settings/providers").json()["admin_token"] == "generated-test-token"
+    monkeypatch.setattr(settings, "admin_token", "")
+
+
 @pytest.mark.asyncio
 async def test_chat_json_routes_to_active_provider(monkeypatch):
     client.post("/api/settings/provider", json={"provider": "commandcode", "api_key": "cmd_test", "model": "test-model"})

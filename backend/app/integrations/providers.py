@@ -92,9 +92,39 @@ def public_catalogue() -> list[dict]:
     return out
 
 
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def check_base_url(provider_id: str, base_url: str) -> str:
+    """The API key travels to base_url, so only the provider's own host (or the
+    host pinned in the env by the operator) is accepted over https; plain http
+    is allowed only for a gateway on this machine."""
+    from urllib.parse import urlparse
+
+    u = urlparse(base_url.strip())
+    host = (u.hostname or "").lower()
+    if not host:
+        raise ValueError(f"invalid base_url: {base_url!r}")
+    if host in _LOCAL_HOSTS:
+        if u.scheme not in ("http", "https"):
+            raise ValueError("base_url must be http(s)")
+        return base_url.strip().rstrip("/")
+    allowed = {urlparse(PROVIDERS[provider_id]["default_base_url"]).hostname}
+    env_base = getattr(settings, _ENV_BASES[provider_id]) or ""
+    if env_base:
+        allowed.add(urlparse(env_base).hostname)
+    if u.scheme != "https":
+        raise ValueError("base_url must use https (http only for localhost)")
+    if host not in allowed:
+        raise ValueError(f"base_url host {host!r} is not allowed for provider {provider_id} (allowed: {', '.join(sorted(h for h in allowed if h))})")
+    return base_url.strip().rstrip("/")
+
+
 def activate(provider_id: str, api_key: str | None = None, model: str | None = None, base_url: str | None = None) -> dict:
     if provider_id not in PROVIDERS:
         raise ValueError(f"unknown provider: {provider_id}")
+    if base_url:
+        base_url = check_base_url(provider_id, base_url)
     saved = load_saved()
     providers = saved.get("providers") or {}
     entry = dict(providers.get(provider_id) or {})
