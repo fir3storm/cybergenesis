@@ -74,6 +74,23 @@ A FAIL run gets no proof button. There is nothing to certify.
 
 **`CERT_DEMO_KEY` is still required** for the legacy HMAC signature that certificates (and Arena winner certificates) also carry; the backend refuses to start without it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"` and put it in `backend/.env`. `verify_cert.py` checks the HMAC too when `CERT_DEMO_KEY` is set in its environment; changing the key invalidates older HMACs (`HMAC signature mismatch`), so re-download certificates after rotating.
 
+## Proof-carrying defenses
+
+By Menger's theorem, the maximum number of edge-disjoint attacker paths from source to target equals the size of a minimum edge cut, so publishing that many disjoint witness paths proves no defense can succeed by cutting fewer edges. Every certificate now carries an `optimality_proof` (signed by both Ed25519 and the legacy HMAC): the baseline attack graph and its SHA-256, the witness paths, the defense's relevant removed edges, and a verdict — `OPTIMAL` when the cut equals the lower bound, `SUBOPTIMAL` with the exact gap, `NOT_A_CUT` when a path survives, or `NO_PATH_AT_BASELINE`. A third party can check the whole proof from the certificate alone — no twin, no database, no LLM.
+
+```powershell
+python scripts/verify_cert.py certificate-<runId>.json --pubkey <public_key_hex>
+# OPTIMALITY: OPTIMAL (cut 1 = lower bound 1, 1 edge-disjoint witness paths)
+```
+
+## Attack-path regression preflight
+
+Before merging a network change, replay it against every saved scenario on a clone of the twin (the stored twin is never mutated). If the change opens any new source-to-target path, preflight **FAILs** with that exact path. Change ops are typed and allowlisted (`add_link`, `remove_link`, `add_vulnerability`, `remove_vulnerability`, `set_posture`, `add_asset`), or derived by diffing pasted running-configs / CSV against the current twin.
+
+- API: `POST /api/twins/{twin_id}/preflight` with `{change, scenario_ids?}` → `{verdict, results, change_ops, twin_sha256_before, generated_at}` (persists nothing).
+- CLI: `python scripts/preflight.py --offline --twin examples/preflight/twin.json --change examples/preflight/regression-change.json --scenarios examples/preflight/scenarios.json` — exit 0 PASS, 1 FAIL, 2 error. Online mode: `--api http://localhost:8000 --twin <id> --change change.json`.
+- GitHub Actions: `.github/workflows/attack-path-preflight.yml` runs the offline CLI on pull requests touching `network/**` against `network/twin.json` + `network/change.json` and fails the job on regression.
+- UI: **Preflight a change** panel in the Twin Designer (paste ops or configs, PASS/FAIL banner, per-scenario rows, regression path listed).
 ## Board briefing and control evidence
 
 Every finished run has a one-page **board briefing**: headline, business impact (risk before/after with its 95% CI, users affected, legitimate paths disrupted), decisions requested, and the full decision trail. **Draft with AI** asks the active provider to rephrase the verified facts in plain language. The output is schema-checked and labelled *AI-drafted*, and if the provider is unavailable it falls back to the deterministic text with the reason. **Read aloud** and **.md** export are built in (`GET /api/experiments/{id}/briefing`, `/briefing/markdown`).
@@ -179,7 +196,7 @@ cd backend;  python -m pytest -q;  python -m ruff check app tests
 cd frontend; npm test; npm run build; npm run test:e2e   # Playwright, requires servers running
 ```
 
-**211 backend tests** (1 skipped) and **30 frontend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered, Ed25519 public-key verification and signer pinning), network import (configs, CSV, bad input → 422), the board briefing (control mapping, honest AI fallback), settings hardening (provider host allowlist, loopback-only admin token), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
+**234 backend tests** (1 skipped) and **32 frontend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered, Ed25519 public-key verification and signer pinning), network import (configs, CSV, bad input → 422), the board briefing (control mapping, honest AI fallback), settings hardening (provider host allowlist, loopback-only admin token), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
 
 ## Documentation
 

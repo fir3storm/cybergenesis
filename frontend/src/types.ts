@@ -16,6 +16,25 @@ export interface RunResult {
   policy: { action_type: string; asset_id: string; approved: boolean; reasons: string[] }[];
   executions: { action_type: string; asset_id: string; success: boolean; transition: Record<string, unknown> }[];
 }
+export interface OptimalityProof {
+  version: number; source: string; target: string; graph_edges: string[][];
+  graph_sha256: string; witness_paths: string[][]; lower_bound: number;
+  defense_cut: string[][]; defense_cut_size: number; is_cut: boolean;
+  optimality_gap: number | null;
+  verdict: 'OPTIMAL' | 'SUBOPTIMAL' | 'NOT_A_CUT' | 'NO_PATH_AT_BASELINE'
+}
+export interface PreflightResultRow {
+  scenario_id: string; scenario_name: string; source: string; target: string;
+  status: 'OK' | 'REGRESSION' | 'IMPROVED' | 'STILL_EXPOSED';
+  baseline_reachable: boolean; after_reachable: boolean;
+  baseline_paths: string[][]; after_paths: string[][]; new_paths: string[][];
+  min_cut_before: number | null; min_cut_after: number | null
+}
+export interface PreflightResult {
+  verdict: 'PASS' | 'FAIL'; results: PreflightResultRow[];
+  change_ops: Record<string, unknown>[]; twin_id?: string;
+  twin_sha256_before: string; generated_at: string
+}
 export interface Certificate {
   version: number
   run_id: string
@@ -25,6 +44,7 @@ export interface Certificate {
   config_hash_before: string
   config_hash_after: string
   min_cut_edges: number
+  optimality_proof?: OptimalityProof
   campaigns: { outcome: string; unreachable_proof: { target_reachable: boolean; visited: string[]; frontier: { from: string; to: string; blocking_rule: string }[] } }[]
   event_hash_chain: string
   events_count: number

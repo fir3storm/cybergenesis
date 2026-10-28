@@ -77,6 +77,15 @@ def fact_sheet(run: dict, scenario: dict, results: dict) -> dict:
     modes = sorted({d.get("mode") for d in results.get("decisions", []) if d.get("mode")})
     models = sorted({d.get("model") for d in results.get("decisions", []) if d.get("mode") == "live" and d.get("model")})
     usage = results.get("usage") or {}
+    gap = m.get("optimality_gap")
+    if m.get("primary_objective_blocked") is False:
+        opt_verdict = "NOT_A_CUT"
+    elif gap is None:
+        opt_verdict = None
+    elif gap == 0:
+        opt_verdict = "OPTIMAL"
+    else:
+        opt_verdict = "SUBOPTIMAL"
     return {
         "run_id": run["id"], "scenario": scenario.get("name", run.get("scenario_id")),
         "threat": scenario.get("description", ""), "target": scenario.get("target_asset"),
@@ -89,6 +98,7 @@ def fact_sheet(run: dict, scenario: dict, results: dict) -> dict:
         "legit_paths_disrupted": m.get("operational_impact_disrupted_legit_paths"),
         "time_to_detect_s": m.get("time_to_detect_s"), "time_to_contain_s": m.get("time_to_contain_s"),
         "time_basis": m.get("time_basis"),
+        "optimality_verdict": opt_verdict, "optimality_gap": gap,
         "actions": [f"{e['action_type']} on {e['asset_id']}" for e in execs],
         "policy_rejections": [f"{p['action_type']} on {p['asset_id']}: {'; '.join(p.get('reasons') or [])}" for p in rejected],
         "ai_modes": modes, "ai_models": models,
@@ -110,11 +120,19 @@ def deterministic_narrative(f: dict) -> dict:
         headline = f"Simulated {f['scenario']} NOT stopped: {f['target']} remained reachable after the response."
     ci = f["risk_after_ci95"]
     ci_text = f" (95% CI {ci[0]}-{ci[1]}%)" if ci else ""
+    opt_text = ""
+    if f.get("optimality_verdict") == "OPTIMAL":
+        opt_text = " The defense is provably optimal (optimality verdict OPTIMAL, gap 0)."
+    elif f.get("optimality_verdict") == "SUBOPTIMAL":
+        opt_text = f" Optimality verdict SUBOPTIMAL: the defense used {f.get('optimality_gap')} edge(s) more than the proven minimum."
+    elif f.get("optimality_verdict") == "NOT_A_CUT":
+        opt_text = " Optimality verdict NOT_A_CUT: the defense did not cut every attack path."
     summary = (
         f"Breach likelihood moved from {_fmt(f['risk_before_pct'], '%')} to {_fmt(f['risk_after_pct'], '%')}{ci_text}. "
         f"{len(f['actions'])} defensive action(s) applied; {_fmt(f['users_affected'])} users affected and "
         f"{_fmt(f['legit_paths_disrupted'])} legitimate paths disrupted. "
         f"{len(f['policy_rejections'])} proposed action(s) were rejected by the policy gate."
+        f"{opt_text}"
     )
     asks = []
     if not blocked:
@@ -168,6 +186,7 @@ def to_markdown(b: dict) -> str:
              f"- Risk: {_fmt(f['risk_before_pct'], '%')} -> {_fmt(f['risk_after_pct'], '%')}",
              f"- Users affected: {_fmt(f['users_affected'])} · legitimate paths disrupted: {_fmt(f['legit_paths_disrupted'])}",
              f"- Detect / contain: {_fmt(f['time_to_detect_s'], ' s')} / {_fmt(f['time_to_contain_s'], ' s')} ({f['time_basis'] or 'simulated'})",
+             f"- Optimality: {f.get('optimality_verdict') or 'unknown'} (gap {_fmt(f.get('optimality_gap'))})",
              f"- Actions: {', '.join(f['actions']) or 'none'}",
              f"- Policy rejections: {'; '.join(f['policy_rejections']) or 'none'}",
              f"- AI involvement: modes {', '.join(f['ai_modes']) or 'none'}; models {', '.join(f['ai_models']) or 'none'}; {f['tokens']} tokens",

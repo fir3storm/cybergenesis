@@ -10,6 +10,7 @@ Prints VALID or INVALID (with reasons).
 
 import hashlib
 import hmac
+import itertools
 import json
 import os
 import sys
@@ -42,6 +43,93 @@ def _check_ed25519(cert: dict, pinned: str | None, reasons: list[str]) -> bool:
         reasons.append("Ed25519 signature invalid (tampered or wrong key)")
         return False
     return True
+
+
+def check_optimality_proof(proof) -> tuple[bool, list[str]]:
+    """Standalone copy of app.verification.optimality.check_optimality_proof.
+
+    Uses only the proof itself (hash, witness disjointness, cut check via BFS).
+    Kept dependency-free apart from the stdlib so the script works anywhere.
+    """
+    reasons: list[str] = []
+    if not isinstance(proof, dict):
+        return False, ["proof is not an object"]
+    for field in ("version", "source", "target", "graph_edges", "graph_sha256",
+                  "witness_paths", "lower_bound", "defense_cut", "defense_cut_size",
+                  "is_cut", "optimality_gap", "verdict"):
+        if field not in proof:
+            reasons.append(f"proof missing field: {field}")
+    if reasons:
+        return False, reasons
+    if proof["version"] != 1:
+        reasons.append(f"unsupported proof version: {proof['version']}")
+    src, tgt = proof["source"], proof["target"]
+    graph_edges = [list(e) for e in proof["graph_edges"]]
+    edge_set = {tuple(e) for e in graph_edges}
+    if len(edge_set) != len(graph_edges):
+        reasons.append("graph_edges contains duplicate edges")
+    if graph_edges != sorted(graph_edges):
+        reasons.append("graph_edges is not sorted")
+    blob = json.dumps(graph_edges, sort_keys=True, separators=(",", ":"))
+    if hashlib.sha256(blob.encode()).hexdigest() != proof["graph_sha256"]:
+        reasons.append("graph_sha256 mismatch (graph_edges tampered)")
+    witness = [list(p) for p in proof["witness_paths"]]
+    if proof["lower_bound"] != len(witness):
+        reasons.append(f"lower_bound {proof['lower_bound']} != number of witness paths {len(witness)}")
+    used: set = set()
+    for i, path in enumerate(witness):
+        if not path or path[0] != src or path[-1] != tgt:
+            reasons.append(f"witness path {i} does not run {src}->{tgt}")
+            continue
+        for a, b in itertools.pairwise(path):
+            if (a, b) not in edge_set:
+                reasons.append(f"witness path {i} uses edge {a}->{b} not in graph_edges")
+            if (a, b) in used:
+                reasons.append(f"witness paths are not edge-disjoint: edge {a}->{b} reused")
+            used.add((a, b))
+    cut = [list(e) for e in proof["defense_cut"]]
+    cut_set = {tuple(e) for e in cut}
+    if proof["defense_cut_size"] != len(cut):
+        reasons.append(f"defense_cut_size {proof['defense_cut_size']} != len(defense_cut) {len(cut)}")
+    for a, b in cut:
+        if (a, b) not in edge_set:
+            reasons.append(f"defense_cut edge {a}->{b} not in graph_edges")
+    adj: dict[str, list[str]] = {}
+    for a, b in graph_edges:
+        if (a, b) not in cut_set:
+            adj.setdefault(a, []).append(b)
+    seen = {src}
+    q = deque([src])
+    while q:
+        node = q.popleft()
+        for nb in adj.get(node, []):
+            if nb not in seen:
+                seen.add(nb)
+                q.append(nb)
+    has_path = tgt in seen
+    is_cut = not has_path
+    if bool(proof["is_cut"]) != is_cut:
+        reasons.append(f"is_cut claim {proof['is_cut']} disagrees with recomputation (path remains: {has_path})")
+    k = len(witness)
+    verdict, gap = proof["verdict"], proof["optimality_gap"]
+    if k == 0:
+        if verdict != "NO_PATH_AT_BASELINE":
+            reasons.append(f"verdict {verdict} inconsistent: no witness paths but verdict is not NO_PATH_AT_BASELINE")
+        if gap is not None:
+            reasons.append("optimality_gap must be null when there is no baseline path")
+    elif not is_cut:
+        if verdict != "NOT_A_CUT":
+            reasons.append(f"verdict {verdict} inconsistent: defense_cut is not a cut")
+        if gap is not None:
+            reasons.append("optimality_gap must be null when defense is not a cut")
+    else:
+        expected_gap = len(cut) - k
+        if gap != expected_gap:
+            reasons.append(f"optimality_gap {gap} != defense_cut_size - lower_bound ({expected_gap})")
+        expected_verdict = "OPTIMAL" if expected_gap == 0 else "SUBOPTIMAL"
+        if verdict != expected_verdict:
+            reasons.append(f"verdict {verdict} inconsistent: expected {expected_verdict}")
+    return (not reasons), reasons
 
 
 def main() -> int:
@@ -129,6 +217,28 @@ def main() -> int:
             reasons.append(f"campaign claims PASS but {tgt} IS reachable in the certified twin")
         if proof["target_reachable"] != reachable:
             reasons.append("frontier proof reachability disagrees with recomputation")
+
+    # 2b. optimality proof (third-party checkable, from the proof alone)
+    proof = cert.get("optimality_proof")
+    if proof is None:
+        print("OPTIMALITY: not present (legacy certificate)")
+    else:
+        ok, opt_reasons = check_optimality_proof(proof)
+        if ok:
+            if proof["verdict"] == "OPTIMAL":
+                print(f"OPTIMALITY: OPTIMAL (cut {proof['defense_cut_size']} = lower bound "
+                      f"{proof['lower_bound']}, {len(proof['witness_paths'])} edge-disjoint witness paths)")
+            elif proof["verdict"] == "SUBOPTIMAL":
+                print(f"OPTIMALITY: SUBOPTIMAL by {proof['optimality_gap']} edge(s) "
+                      f"(cut {proof['defense_cut_size']}, lower bound {proof['lower_bound']})")
+            elif proof["verdict"] == "NOT_A_CUT":
+                print(f"OPTIMALITY: NOT_A_CUT (cut {proof['defense_cut_size']}, lower bound {proof['lower_bound']})")
+            else:
+                print(f"OPTIMALITY: {proof['verdict']} (lower bound {proof['lower_bound']})")
+        else:
+            for r in opt_reasons:
+                reasons.append(f"optimality proof: {r}")
+            print(f"OPTIMALITY: INVALID ({'; '.join(opt_reasons)})")
 
     # 3. event hash chain is internally consistent (count + chain head present)
     if cert["events_count"] < 1 or len(cert["event_hash_chain"]) != 64:

@@ -23,6 +23,7 @@ import { BenchmarkView, ScorecardsView } from './views/benchmark'
 import { EvidenceView } from './views/evidence'
 import { ProviderSettings } from './views/providers'
 import { ProofCard } from './views/proof'
+import { PreflightPanel } from './views/preflight'
 import { BriefingCard } from './views/briefing'
 import { JudgeCaptions } from './views/judgeMode'
 import { TimeMachine } from './views/timemachine'
@@ -840,6 +841,7 @@ export default function App() {
       )}
 
       {s.view === 'designer' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Twin Designer…</div>}><TwinDesigner /></Suspense>}
+      {s.view === 'designer' && <PreflightPanel />}
       {s.view === 'playbook' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Attack Playbook…</div>}><AttackPlaybook onRunCustom={(sid, tid) => void runCustomExperiment(sid, tid)} /></Suspense>}
       {s.view === 'library' && <Suspense fallback={<div className="p-6 text-slate-400">Loading Component Library…</div>}><ComponentLibrary /></Suspense>}
       {s.view === 'battle' && <BattleView onRunBattle={() => void runDemo('red_vs_blue_battle')} />}

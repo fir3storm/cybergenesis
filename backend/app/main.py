@@ -1384,6 +1384,63 @@ def _validate_twin(body: CreateCustomTwin, min_assets: int = 2) -> DigitalTwin:
         raise HTTPException(422, str(e)) from e
 
 
+class PreflightRequest(BaseModel):
+    change: object = Field(description="list of change ops, or {ops:[...]}, or {configs, dialect}, or {csv}")
+    scenario_ids: list[str] | None = None
+
+
+@app.post("/api/twins/{twin_id}/preflight")
+def twin_preflight(twin_id: str, body: PreflightRequest, db: Session = Depends(get_db)):
+    """Attack-path regression preflight: replay a proposed change on a clone.
+
+    Deterministic, persists nothing, never mutates the stored twin.
+    """
+    from app.simulation.importers import ImportError_
+    from app.simulation.preflight import run_preflight
+
+    if twin_id in ("builtin", "active"):
+        twin = orchestrator.TWIN
+    else:
+        row = db.get(models.CustomTwinDefinition, twin_id)
+        if not row:
+            raise HTTPException(404, "twin not found")
+        try:
+            twin = DigitalTwin.from_dict(row.assets, row.connections)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+
+    # size limits like the import endpoint
+    raw = json.dumps(body.change, default=str) if not isinstance(body.change, str) else body.change
+    if len(raw) > 200_000:
+        raise HTTPException(422, "change payload too large (max 200000 chars)")
+
+    asset_ids = set(twin.asset_ids())
+    all_scenarios: dict[str, dict] = {}
+    for sid, s in SCENARIOS.items():
+        all_scenarios[sid] = {**s, "id": sid}
+    for r in db.query(models.CustomScenarioDefinition).all():
+        all_scenarios[r.id] = {**r.definition, "id": r.id, "name": r.name}
+
+    if body.scenario_ids:
+        scenarios = []
+        for sid in body.scenario_ids:
+            if sid not in all_scenarios:
+                raise HTTPException(422, f"unknown scenario_id: {sid}")
+            scenarios.append(all_scenarios[sid])
+    else:
+        scenarios = [s for s in all_scenarios.values()
+                     if s.get("source_asset") in asset_ids and s.get("target_asset") in asset_ids
+                     and s.get("verification_kind", "reachability") == "reachability"]
+    try:
+        result = run_preflight(twin, scenarios, body.change)
+    except ImportError_ as e:
+        raise HTTPException(422, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return {**result, "twin_id": twin_id, "twin_sha256_before": twin.config_hash(),
+            "generated_at": datetime.now(UTC).isoformat()}
+
+
 @app.post("/api/twins/custom", status_code=201)
 def create_custom_twin(body: CreateCustomTwin, db: Session = Depends(get_db)):
     _validate_twin(body)

@@ -1,0 +1,12 @@
+{
+  "assets": [
+    {"id": "web-server", "name": "Web Server", "asset_type": "web_server", "zone": "dmz", "posture": 0.6, "pos": [0, 1, 0], "vulnerabilities": ["exposed_service"]},
+    {"id": "app-server", "name": "App Server", "asset_type": "app_server", "zone": "internal", "posture": 0.7, "pos": [1, 1, 0], "vulnerabilities": ["overprivileged_service_account"]},
+    {"id": "relay", "name": "Relay", "asset_type": "app_server", "zone": "internal", "posture": 0.7, "pos": [1, 1, 1], "vulnerabilities": ["legacy_unpatched"]},
+    {"id": "database", "name": "Database", "asset_type": "database", "zone": "data", "posture": 0.9, "pos": [2, 1, 0], "vulnerabilities": []}
+  ],
+  "connections": [
+    {"source": "web-server", "target": "app-server", "trust": "medium", "traversable": true, "types": ["network"]},
+    {"source": "app-server", "target": "database", "trust": "high", "traversable": true, "types": ["network"]}
+  ]
+}

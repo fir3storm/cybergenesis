@@ -1,4 +1,4 @@
-import type { ArenaEvaluation, Briefing, ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin, TwinImportResult } from '../types'
+import type { ArenaEvaluation, Briefing, ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, PreflightResult, ProviderInfo, RunResult, Scenario, SimEvent, Twin, TwinImportResult } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
@@ -90,6 +90,8 @@ export const api = {
     if (!r.ok) throw new Error(`briefing/markdown -> HTTP ${r.status}`)
     return r.text()
   },
+  preflight: (twinId: string, change: unknown, scenarioIds?: string[]) =>
+    j<PreflightResult>(`/api/twins/${twinId}/preflight`, { method: 'POST', body: JSON.stringify({ change, scenario_ids: scenarioIds ?? null }) }),
   getCertificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
   certificate: (id: string) => j<Certificate>(`/api/experiments/${id}/certificate`),
   fork: (id: string, choose_candidate: number | string, at_event = 'attacked') =>

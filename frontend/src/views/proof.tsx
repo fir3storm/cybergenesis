@@ -50,6 +50,21 @@ export function ProofCard({ runId, outcome }: { runId: string | null; outcome: s
               {String(last?.unreachable_proof.target_reachable ?? '—')} · {last?.unreachable_proof.frontier.length ?? 0} blocked frontier arc(s)</dd></div>
         </dl>
       )}
+      {cert?.optimality_proof && (
+        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <b className="text-slate-200">Optimality proof (Menger duality)</b>
+            {cert.optimality_proof.verdict === 'OPTIMAL' && <span className="rounded bg-emerald-600 px-2 py-0.5 font-bold text-white">OPTIMAL</span>}
+            {cert.optimality_proof.verdict === 'SUBOPTIMAL' && <span className="rounded bg-amber-600 px-2 py-0.5 font-bold text-white">SUBOPTIMAL +{cert.optimality_proof.optimality_gap} edges</span>}
+            {cert.optimality_proof.verdict === 'NOT_A_CUT' && <span className="rounded bg-red-600 px-2 py-0.5 font-bold text-white">NOT_A_CUT</span>}
+            {cert.optimality_proof.verdict === 'NO_PATH_AT_BASELINE' && <span className="rounded bg-slate-600 px-2 py-0.5 font-bold text-white">NO_PATH_AT_BASELINE</span>}
+          </div>
+          <p className="mt-1 text-slate-300">Lower bound {cert.optimality_proof.lower_bound} · cut size {cert.optimality_proof.defense_cut_size} · gap {cert.optimality_proof.optimality_gap ?? '—'}</p>
+          <div className="mt-1 text-slate-300">Witness paths:
+            <ul className="ml-4 list-disc">{cert.optimality_proof.witness_paths.map((p, i) => <li key={i} className="font-mono">{p.join(' → ')}</li>)}</ul>
+          </div>
+        </div>
+      )}
       <p className="mt-2 font-mono text-[11px] text-slate-400">Verify locally: python scripts/verify_cert.py certificate-{runId}.json{cert?.ed25519 ? ` --pubkey ${cert.ed25519.public_key}` : ''}</p>
     </section>
   )

@@ -125,6 +125,12 @@ def build_certificate(run, scenario: dict, baseline_twin: DigitalTwin, final_twi
                                                          "defense_edges_removed", "optimality_gap", "rounds")},
             "unreachable_proof": _frontier_proof(final_twin, scenario["source_asset"], scenario["target_asset"]),
         })
+    # Optimality proof (Menger duality) BEFORE both signatures so Ed25519 and
+    # HMAC cover it; legacy fields above stay unchanged for old checkers.
+    if scenario.get("verification_kind", "reachability") == "reachability":
+        from app.verification.optimality import build_optimality_proof
+
+        cert["optimality_proof"] = build_optimality_proof(baseline_twin, final_twin, scenario)
     cert["ed25519"] = {"alg": "Ed25519", "public_key": public_key_hex(),
                        "signature": signing_key().sign(ed25519_payload(cert)).hex()}
     # HMAC last, over everything above (including the Ed25519 block) — unchanged legacy semantics

@@ -1,0 +1,3 @@
+[
+  {"id": "lateral_movement", "name": "Lateral Movement", "source_asset": "web-server", "target_asset": "database", "verification_kind": "reachability", "invariant": "Database is unreachable from the web server"}
+]
