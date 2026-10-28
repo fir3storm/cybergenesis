@@ -133,6 +133,7 @@ def build_certificate(run, scenario: dict, baseline_twin: DigitalTwin, final_twi
     if scenario.get("verification_kind", "reachability") == "reachability":
         from app.verification.optimality import build_optimality_proof
 
+        cert["baseline_twin"] = baseline_twin.to_dict()
         cert["optimality_proof"] = build_optimality_proof(baseline_twin, final_twin, scenario)
     cert["ed25519"] = {"alg": "Ed25519", "public_key": public_key_hex(),
                        "signature": signing_key().sign(ed25519_payload(cert)).hex()}

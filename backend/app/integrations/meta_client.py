@@ -27,6 +27,34 @@ class ProviderUnavailable(Exception):
     pass
 
 
+MAX_RETRY_WAIT_S = 20.0
+
+
+def _retry_wait(r: httpx.Response, attempt: int) -> float | None:
+    """Seconds to wait before retrying an HTTP error, or None to stop now.
+
+    Only rate limits (429) and transient overload (5xx) are worth retrying, and
+    only after a pause: instant retries on a 429 burn quota and fail again. A
+    provider-suggested wait longer than MAX_RETRY_WAIT_S (e.g. a daily free-tier
+    cap) is not worth blocking a run for, so it fails fast to the labelled
+    offline fallback. Other 4xx (bad model, bad key) never succeed on retry.
+    """
+    import re
+
+    if r.status_code != 429 and r.status_code < 500:
+        return None
+    hint = r.headers.get("retry-after")
+    if not hint:
+        m = re.search(r"retry in (?:(\d+)h)?(?:(\d+)m)?([\d.]+)s", r.text)
+        if m:
+            hint = str(int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + float(m.group(3)))
+    try:
+        wait = float(hint) if hint else 2.0 * (2 ** attempt)
+    except ValueError:
+        wait = 2.0 * (2 ** attempt)
+    return wait if wait <= MAX_RETRY_WAIT_S else None
+
+
 class MetaModelClient:
     """One OpenAI-compatible client serving every registered AI provider.
 
@@ -157,6 +185,10 @@ class MetaModelClient:
                 latency = int((time.time() - started) * 1000)
                 if r.status_code >= 400:
                     last_err = f"HTTP {r.status_code}"
+                    wait = _retry_wait(r, attempt)
+                    if wait is None or attempt == settings.model_max_retries:
+                        break
+                    await asyncio.sleep(wait)
                     continue
                 data = r.json()
                 content = data["choices"][0]["message"]["content"]

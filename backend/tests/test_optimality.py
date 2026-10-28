@@ -162,7 +162,7 @@ def _verify_script(cert_path, pubkey):
 @pytest.mark.asyncio
 async def test_end_to_end_certificate_verify_cert_passes(tmp_path):
     cert, path, pubkey = await _run_and_cert(tmp_path)
-    assert "optimality_proof" in cert
+    assert "optimality_proof" in cert and "baseline_twin" in cert
     ok, reasons = check_optimality_proof(cert["optimality_proof"])
     assert ok, reasons
     r = _verify_script(path, pubkey)

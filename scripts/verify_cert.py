@@ -132,6 +132,29 @@ def check_optimality_proof(proof) -> tuple[bool, list[str]]:
     return (not reasons), reasons
 
 
+def derive_graph_edges(twin: dict, tgt: str) -> list:
+    """Re-derive the gated baseline attack graph from an embedded twin dict.
+
+    Mirrors DigitalTwin.live_graph for a baseline twin: directed arcs from
+    connection dir flags (which already encode isolation/quarantine cuts),
+    gated by hop_allowed (vulnerability / target / compromised-identity).
+    """
+    vulns = {a["id"]: (a.get("vulnerabilities") or []) for a in twin.get("assets", [])}
+    any_comp = any(i.get("compromised") for i in (twin.get("identities") or {}).values())
+
+    def hop_allowed(dest: str) -> bool:
+        return dest == tgt or bool(vulns.get(dest)) or (any_comp and dest in ("database", "admin-workstation", "identity-provider"))
+
+    edges = set()
+    for c in twin.get("connections", []):
+        if not c.get("traversable"):
+            continue
+        if c.get("dir_forward_active", c.get("active")) and hop_allowed(c["target"]):
+            edges.add((c["source"], c["target"]))
+        if c.get("dir_reverse_active", c.get("active")) and hop_allowed(c["source"]):
+            edges.add((c["target"], c["source"]))
+    return sorted([list(e) for e in edges])
+
 def main() -> int:
     args = sys.argv[1:]
     pinned = None
@@ -220,6 +243,14 @@ def main() -> int:
             reasons.append("frontier proof reachability disagrees with recomputation")
 
     # 2b. optimality proof (third-party checkable, from the proof alone)
+    if cert.get("optimality_proof") is not None and cert.get("baseline_twin"):
+        derived = derive_graph_edges(cert["baseline_twin"], cert["optimality_proof"]["target"])
+        if derived != [list(e) for e in cert["optimality_proof"]["graph_edges"]]:
+            reasons.append("optimality graph_edges do not match the graph re-derived from the embedded baseline twin")
+        else:
+            print("BASELINE: graph re-derived from embedded baseline twin matches optimality proof")
+    elif cert.get("optimality_proof") is not None:
+        print("BASELINE: not embedded (proof-format v1; internal consistency only)")
     proof = cert.get("optimality_proof")
     if proof is None:
         print("OPTIMALITY: not present (legacy certificate)")

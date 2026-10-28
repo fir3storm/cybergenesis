@@ -62,6 +62,47 @@ def _patch_async_client(monkeypatch, responses):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """Retry back-off must not slow the suite; record the waits instead."""
+    waits: list[float] = []
+
+    async def fake_sleep(s):
+        waits.append(s)
+
+    monkeypatch.setattr(meta_client.asyncio, "sleep", fake_sleep)
+    return waits
+
+
+def test_rate_limit_waits_provider_hint_then_succeeds(monkeypatch, _no_real_sleep):
+    mc = _live_client(monkeypatch)
+    calls = _patch_async_client(monkeypatch, [
+        (429, {"error": {"message": "Quota exceeded for requests per minute. Please retry in 7.5s."}}),
+        (200, {"choices": [{"message": {"content": '{"answer": "ok"}'}}], "usage": {}}),
+    ])
+    data, _ = asyncio.run(mc.chat_json("sys", "user", "run-rl"))
+    assert data == {"answer": "ok"} and calls["n"] == 2
+    assert _no_real_sleep == [7.5]
+
+
+def test_daily_quota_429_fails_fast_without_burning_retries(monkeypatch, _no_real_sleep):
+    mc = _live_client(monkeypatch)
+    calls = _patch_async_client(monkeypatch, [
+        (429, {"error": {"message": "Requests per day limit exceeded on Free Tier. Please retry in 15h16m59.6s."}}),
+    ] * 5)
+    with pytest.raises(meta_client.ProviderUnavailable, match="HTTP 429"):
+        asyncio.run(mc.chat_json("sys", "user", "run-daily"))
+    assert calls["n"] == 1 and _no_real_sleep == []
+
+
+def test_client_error_is_not_retried(monkeypatch):
+    mc = _live_client(monkeypatch)
+    calls = _patch_async_client(monkeypatch, [(404, {"error": "model not found"})] * 5)
+    with pytest.raises(meta_client.ProviderUnavailable, match="HTTP 404"):
+        asyncio.run(mc.chat_json("sys", "user", "run-404"))
+    assert calls["n"] == 1
+
+
 def test_chat_json_retries_on_500_then_succeeds(monkeypatch):
     mc = _live_client(monkeypatch)
     calls = _patch_async_client(monkeypatch, [

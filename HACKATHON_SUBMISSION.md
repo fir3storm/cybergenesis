@@ -20,7 +20,7 @@ An autonomous closed loop on a living 3D digital twin of an enterprise: **Observ
 ## Multi-provider Settings
 Four providers are integrated behind a unified settings panel: **Meta Muse Spark**, **Command Code**, **Kilo Gateway**, and **Google AI Studio**. Each provider's credentials, model selection, and fallback behaviour are configurable at runtime, allowing judges to swap backends without code changes.
 
-## Arena: red vs blue, self-learning (B1–B7 complete)
+## Arena: red vs blue, score-memory learning (B1–B7 complete)
 A second loop pits Red against Blue on the same twin: Red picks a validated attack route, Blue proposes a defense through the deterministic policy gate, and each round is replayed on a clone before anything is applied. The Arena feature set (B1–B7) is complete:
 - **Adaptive rerouting**: Red automatically reroutes when Blue blocks only the selected path.
 - **Atomic policy rejection**: invalid proposals are rejected as a unit — no partial application.
@@ -57,7 +57,7 @@ Reproducible benchmark harness: `python scripts/benchmark.py` runs **50 seeded t
 All 5 scenarios run **live with Meta Muse Spark**: verification PASS, 100% of objectives blocked (computed), honest operational-impact costs displayed (e.g., isolation disrupts legitimate paths). The first live run failed verification because the model proposed an under-specified action the policy engine rejected — the system reported FAIL rather than faking success; after publishing action contracts to the model plus a policy-feedback retry, live runs pass. A no-defense negative test also correctly returns FAIL.
 
 ## Limitations
-Synthetic graph model, not real traffic; live Meta calls require an API key in backend env (offline mode is fully functional and labelled); Docker stack provided but unverified on the dev machine (no Docker installed).
+Synthetic graph model, not real traffic; live Meta calls require an API key in backend env (offline mode is fully functional and labelled); Docker stack provided but unverified on the dev machine (no Docker installed). Arena 'learning' is deterministic outcome-count score memory, not model training; held-out results in docs/holdout-benchmark.md show the deterministic min-cut removing fewer edges than candidate search - the LLM's value is contextual reasoning, not graph arithmetic. Local + Render deploy paths: DEPLOY.md.
 
 ## Future
 SIEM/EDR connectors (Wazuh), cloud & OT/ICS twins, IaC control testing, continuous resilience scoring — behind the same policy/verification boundary.

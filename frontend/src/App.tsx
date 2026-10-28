@@ -458,8 +458,8 @@ export default function App() {
         </span>
         <span className="text-[11px] text-slate-400 font-mono">{s.modelStatus?.detail}</span>
         {s.results?.usage && s.results.usage.calls > 0 && (
-          <span className="text-[11px] font-mono px-2 py-1 rounded-full border border-violet-500/60 text-violet-300" title="Real Meta Model API usage for the current run">
-            Meta tokens: {s.results.usage.prompt_tokens} in + {s.results.usage.completion_tokens} out · {s.results.usage.calls} calls
+          <span className="text-[11px] font-mono px-2 py-1 rounded-full border border-violet-500/60 text-violet-300" title="Real AI provider usage for the current run">
+            AI tokens: {s.results.usage.prompt_tokens} in + {s.results.usage.completion_tokens} out · {s.results.usage.calls} calls
           </span>
         )}
         <nav className="ml-auto flex flex-wrap items-center gap-1" aria-label="Primary">
@@ -474,6 +474,18 @@ export default function App() {
       </header>
 
       {judge && <JudgeCaptions state={s.runState} outcome={s.results?.verification?.outcome} onClose={() => setJudge(false)} />}
+      {judge && (
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded border border-violet-700 bg-violet-950/40 px-3 py-2 text-xs" aria-label="Judge path">
+          <b className="text-violet-200">Judge path:</b>
+          <button onClick={() => s.set({ view: 'designer' })} className="rounded bg-slate-800 px-2 py-1 text-slate-100">1 Import network</button>
+          <span className="text-slate-500">→</span>
+          <button onClick={() => s.set({ view: 'experiment' })} className="rounded bg-slate-800 px-2 py-1 text-slate-100">2 Run + policy</button>
+          <span className="text-slate-500">→</span>
+          <button onClick={() => s.set({ view: 'verification' })} className="rounded bg-slate-800 px-2 py-1 text-slate-100">3 Proof (OPTIMAL)</button>
+          <span className="text-slate-500">→</span>
+          <button onClick={() => s.set({ view: 'designer' })} className="rounded bg-slate-800 px-2 py-1 text-slate-100">4 Preflight a change</button>
+        </div>
+      )}
       {s.error && <div role="alert" className="mx-4 mt-3 rounded border border-red-500/60 bg-red-950/50 px-3 py-2 text-sm text-red-200">{s.error}</div>}
 
       {s.view === 'welcome' && (

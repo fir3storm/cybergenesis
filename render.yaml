@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: cybergenesis-backend
+    runtime: python
+    buildCommand: pip install -e backend
+    startCommand: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: CERT_DEMO_KEY
+        generateValue: true
+      - key: OFFLINE_MODE
+        value: "true"
+      - key: SIM_STEP_DELAY_MS
+        value: "0"
+  - type: web
+    name: cybergenesis-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci --no-audit --no-fund && npm run build
+    publishDir: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://cybergenesis-backend.onrender.com

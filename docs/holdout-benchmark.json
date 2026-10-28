@@ -1,0 +1,134 @@
+{
+  "seed": 7,
+  "generated": "layered random graphs, distinct from builtin/benchmark templates",
+  "summary": {
+    "none": {
+      "blocked": 0,
+      "cases": 6,
+      "mean_edges_removed": 0.0,
+      "mean_disrupted": 0.0
+    },
+    "deterministic": {
+      "blocked": 6,
+      "cases": 6,
+      "mean_edges_removed": 2.83,
+      "mean_disrupted": 0.0
+    },
+    "simulate": {
+      "blocked": 6,
+      "cases": 6,
+      "mean_edges_removed": 5.67,
+      "mean_disrupted": 0.0
+    }
+  },
+  "rows": [
+    {
+      "case": "holdout-0",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 3,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 6,
+        "disrupted": 0
+      }
+    },
+    {
+      "case": "holdout-1",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 3,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 6,
+        "disrupted": 0
+      }
+    },
+    {
+      "case": "holdout-2",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 4,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 8,
+        "disrupted": 0
+      }
+    },
+    {
+      "case": "holdout-3",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 2,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 4,
+        "disrupted": 0
+      }
+    },
+    {
+      "case": "holdout-4",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 3,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 6,
+        "disrupted": 0
+      }
+    },
+    {
+      "case": "holdout-5",
+      "none": {
+        "blocked": false,
+        "edges_removed": 0,
+        "disrupted": 0
+      },
+      "deterministic": {
+        "blocked": true,
+        "edges_removed": 2,
+        "disrupted": 0
+      },
+      "simulate": {
+        "blocked": true,
+        "edges_removed": 4,
+        "disrupted": 0
+      }
+    }
+  ]
+}
