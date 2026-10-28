@@ -164,7 +164,7 @@ async def test_advisory_budget_exhausted_while_backbone_still_works(monkeypatch)
         # backbone may spend past the advisory cap, up to the full budget
         data, _rec = await meta_client.chat_json("sys", "user", run_id=run_id, tier="backbone")
         assert data == {"ok": True}
-        assert captured["body"]["max_tokens"] <= 900
+        assert captured["body"]["max_tokens"] == settings.model_max_tokens_per_call
         # an advisory framework agent falls back offline with the budget reason
         result = await build_agent("incident_commander").run(
             AgentContext(run_id=run_id, twin=DigitalTwin(), scenario={}), fw_io.TextIn(text="ransomware"))

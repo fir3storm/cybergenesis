@@ -48,7 +48,7 @@ Meta Muse Spark (`muse-spark-1.3`, Meta Model API) performs incident investigati
 FastAPI + SQLAlchemy + NetworkX deterministic twin (snapshots, seeded replay) · React/TypeScript + React Three Fiber living twin with WebSocket live events · 14-table audit/evidence store · Docker Compose. Details: `docs/architecture.md`.
 
 ## Working demonstration
-One click ("Run Autonomous Defense Demo") executes the full loop in ~20 seconds; the 3-minute narrated script is in `docs/demo-script.md`. Verified on the dev machine: backend **236 passed, 1 skipped**, frontend **32 passed** across 11 test files with production build (code-split: 320 KB main / 864 KB lazy 3D chunk), Playwright end-to-end smoke test, 12 screenshots in `docs/screenshots/`.
+One click ("Run Autonomous Defense Demo") executes the full loop in ~20 seconds; the 3-minute narrated script is in `docs/demo-script.md`. Verified on the dev machine: backend **241 passed, 1 skipped**, frontend **32 passed** across 11 test files with production build (code-split: 320 KB main / 864 KB lazy 3D chunk), Playwright end-to-end smoke test, 12 screenshots in `docs/screenshots/`.
 
 ## Benchmark
 Reproducible benchmark harness: `python scripts/benchmark.py` runs **50 seeded twin/scenario pairs** across three defenders (none, offline, simulate). Full methodology and results in `docs/benchmark.md`; raw data in `scripts/benchmark_results.json`. All 5 scenarios pass verification under the offline and simulate defenders. Live Muse Spark spot-checks confirm end-to-end PASS with optimality gap 0 on reachability scenarios.

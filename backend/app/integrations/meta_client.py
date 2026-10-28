@@ -13,10 +13,10 @@ from app.core.config import settings
 
 PROMPT_VERSION = "cybergenesis-v4"
 
-# Per-call output cap (API body) and the per-run budget split: backbone agents
-# may spend the full per-run budget; advisory agents may spend only the
-# non-reserved 40%, so the 60% backbone reserve can never be drained by them.
-MAX_TOKENS_PER_CALL = 900
+# Per-run budget split: backbone agents may spend the full per-run budget;
+# advisory agents may spend only the non-reserved 40%, so the 60% backbone
+# reserve can never be drained by them. The per-call output cap is
+# settings.model_max_tokens_per_call.
 ADVISORY_BUDGET_FRACTION = 0.4
 BACKBONE_AGENT_IDS = frozenset({"incident_investigator", "defense_strategist", "red_team_critic"})
 
@@ -34,13 +34,18 @@ def _retry_wait(r: httpx.Response, attempt: int) -> float | None:
     """Seconds to wait before retrying an HTTP error, or None to stop now.
 
     Only rate limits (429) and transient overload (5xx) are worth retrying, and
-    only after a pause: instant retries on a 429 burn quota and fail again. A
+    only after a pause: instant retries on a 429 burn quota and fail again
+    (plus Command Code's intermittent region 403, which is routing, not auth). A
     provider-suggested wait longer than MAX_RETRY_WAIT_S (e.g. a daily free-tier
     cap) is not worth blocking a run for, so it fails fast to the labelled
     offline fallback. Other 4xx (bad model, bad key) never succeed on retry.
     """
     import re
 
+    if r.status_code == 403 and "model_region_unavailable" in r.text:
+        # Command Code refuses a share of Muse Spark calls by region routing,
+        # uncharged; the same request usually succeeds on the next attempt.
+        return 1.0
     if r.status_code != 429 and r.status_code < 500:
         return None
     hint = r.headers.get("retry-after")
@@ -174,7 +179,7 @@ class MetaModelClient:
         self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.2, "response_format": {"type": "json_object"},
-                "max_tokens": MAX_TOKENS_PER_CALL,
+                "max_tokens": settings.model_max_tokens_per_call,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         last_err = ""
         for attempt in range(settings.model_max_retries + 1):
@@ -218,7 +223,7 @@ class MetaModelClient:
         self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
-                "max_tokens": MAX_TOKENS_PER_CALL,
+                "max_tokens": settings.model_max_tokens_per_call,
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": image_data_url}},

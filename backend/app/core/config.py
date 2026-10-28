@@ -33,8 +33,13 @@ class Settings(BaseSettings):
     human_approval_enabled: bool = False
     approval_timeout_seconds: int = 120
     auto_approve: bool = False
-    max_tokens_per_run: int = 20000
-    run_timeout_s: float = 180
+    # Reasoning models (Muse Spark 1.3) write ~1-2.5k tokens per agent answer;
+    # a 900 cap truncated their JSON, so both limits are sized for that.
+    max_tokens_per_run: int = 60000
+    model_max_tokens_per_call: int = 3000
+    # a live reasoning-model run (~14 calls) plus two human approvals (up to
+    # approval_timeout_seconds each) does not fit in 3 minutes
+    run_timeout_s: float = 600
     # base URL phones on the LAN use for mobile approval; empty = auto-detect LAN IP:8000
     public_base_url: str = ""
 # Arena self-learning memory (B2/B4): JSON score memory across matches

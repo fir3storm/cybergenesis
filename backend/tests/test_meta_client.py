@@ -95,6 +95,25 @@ def test_daily_quota_429_fails_fast_without_burning_retries(monkeypatch, _no_rea
     assert calls["n"] == 1 and _no_real_sleep == []
 
 
+def test_region_403_is_retried_and_cap_sent(monkeypatch, _no_real_sleep):
+    mc = _live_client(monkeypatch)
+    sent = []
+    calls = _patch_async_client(monkeypatch, [
+        (403, {"error": {"code": "model_region_unavailable", "message": "not available in your region"}}),
+        (200, {"choices": [{"message": {"content": '{"answer": "ok"}'}}], "usage": {}}),
+    ])
+    orig = httpx.AsyncClient.post
+
+    async def spy(self, url, **kw):
+        sent.append(kw.get("json", {}).get("max_tokens"))
+        return await orig(self, url, **kw)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", spy)
+    data, _ = asyncio.run(mc.chat_json("sys", "user", "run-403"))
+    assert data == {"answer": "ok"} and calls["n"] == 2 and _no_real_sleep == [1.0]
+    assert sent == [_cfg.settings.model_max_tokens_per_call] * 2
+
+
 def test_client_error_is_not_retried(monkeypatch):
     mc = _live_client(monkeypatch)
     calls = _patch_async_client(monkeypatch, [(404, {"error": "model not found"})] * 5)
@@ -126,8 +145,8 @@ def test_chat_json_raises_provider_unavailable_after_retries(monkeypatch):
 def test_budget_tier_split_and_exhaustion():
     mc = meta_client.MetaModelClient()
     # backbone tier gets the full per-run budget; advisory gets 40%.
-    assert mc.budget_limit("backbone") == 20000
-    assert mc.budget_limit("advisory") == 8000
+    assert mc.budget_limit("backbone") == 60000
+    assert mc.budget_limit("advisory") == 24000
     assert mc.tier_for_agent("incident_investigator") == "backbone"
     assert mc.tier_for_agent("red_team_critic") == "backbone"
     assert mc.tier_for_agent("defense_strategist") == "backbone"
@@ -136,7 +155,7 @@ def test_budget_tier_split_and_exhaustion():
     # nothing recorded yet -> not exhausted
     assert not mc.budget_exhausted(None, "advisory")
     # record enough advisory tokens to exhaust the advisory tier
-    asyncio.run(mc._record({"run_id": None, "prompt_tokens": 8000, "completion_tokens": 0,
+    asyncio.run(mc._record({"run_id": None, "prompt_tokens": 24000, "completion_tokens": 0,
                             "latency_ms": 0, "success": True, "error": None}))
     assert mc.budget_exhausted(None, "advisory")
     # but the backbone tier still has its full budget
@@ -184,7 +203,7 @@ def test_provider_failure_recorded_not_faked(monkeypatch):
 def test_budget_exhausted_raises_provider_unavailable(monkeypatch):
     """When the advisory budget is spent, the next call fails loudly offline."""
     mc = _live_client(monkeypatch)
-    asyncio.run(mc._record({"run_id": "r-4", "prompt_tokens": 8000, "completion_tokens": 0,
+    asyncio.run(mc._record({"run_id": "r-4", "prompt_tokens": 24000, "completion_tokens": 0,
                             "latency_ms": 0, "success": True, "error": None}))
     with pytest.raises(meta_client.ProviderUnavailable):
         asyncio.run(mc.chat_json("sys", "user", "r-4"))
