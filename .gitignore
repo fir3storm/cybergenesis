@@ -1,5 +1,6 @@
-*.db
+﻿*.db
 arena_memory.json
+provider_settings.json
 .env
 __pycache__/
 .pytest_cache/
@@ -12,3 +13,4 @@ test-results/
 
 .browser-sessions/
 *.tsbuildinfo
+

@@ -127,16 +127,25 @@ npm run dev        # http://localhost:5173
 
 Open <http://localhost:5173> → **Run Autonomous Defense Demo** — then visit the **Arena** and start a match.
 
-### Meta AI (live mode)
+### AI providers (live mode)
 
-Without a key, the app runs in clearly labelled **OFFLINE SIMULATION** mode (deterministic, evidence-derived — never presented as Meta inference). For live inference:
+CYBERGENESIS was built on **Meta Muse Spark**, and it now speaks to four providers — all through the same OpenAI-compatible chat API, so every agent works with any of them. Switch live in **Settings → AI provider** (no restart): paste a key, pick a model, activate. Keys are stored on this machine only and are never displayed or returned by any API.
+
+| Provider | Default endpoint | Key |
+|---|---|---|
+| Meta Muse Spark | `https://api.meta.ai/v1` | `MODEL_API_KEY` |
+| Command Code | `https://api.commandcode.ai/provider/v1` | `COMMAND_CODE_API_KEY` |
+| Kilo Code (Kilo Gateway) | `https://ai-gateway.kilo.ai/api/v1` | `KILO_API_KEY` |
+| Google AI Studio (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_API_KEY` |
+
+Without a key, the app runs in clearly labelled **OFFLINE SIMULATION** mode (deterministic, evidence-derived — never presented as AI inference). Provider failure is reported honestly, never faked. Environment variables work too (see `.env.example`); Settings choices override them at runtime:
 
 ```powershell
 $env:MODEL_API_KEY = "<your key>"   # backend env only, never committed or displayed
 $env:META_MODEL = "muse-spark-1.3"
 ```
 
-Restart the backend; the header badge switches to **LIVE META AI** and `/api/models/status` reports provider reachability.
+Restart the backend; the header badge switches to **LIVE … AI** for the active provider and `/api/models/status` reports reachability.
 
 ### Docker
 

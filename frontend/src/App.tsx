@@ -21,6 +21,7 @@ import { BattleView } from './views/battle'
 import { ArenaView } from './views/arena'
 import { BenchmarkView, ScorecardsView } from './views/benchmark'
 import { EvidenceView } from './views/evidence'
+import { ProviderSettings } from './views/providers'
 import { ProofCard } from './views/proof'
 import { TimeMachine } from './views/timemachine'
 import { MobileApprovalQR } from './views/mobileApproval'
@@ -440,7 +441,7 @@ export default function App() {
       <header className="relative z-[100] flex flex-wrap items-center gap-3 border-b border-cyan-900/60 px-4 py-2 bg-[#020617]">
         <div className="font-black tracking-[0.3em] text-cyan-300">CYBERGENESIS</div>
         <span className={`text-[11px] font-mono px-2 py-1 rounded-full border ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
-          {live ? '● LIVE META AI' : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
+          {live ? `● LIVE ${{ meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE' }[s.modelStatus?.provider ?? 'meta'] ?? 'AI'} AI` : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
         </span>
         <span className="text-[11px] text-slate-400 font-mono">{s.modelStatus?.detail}</span>
         {s.results?.usage && s.results.usage.calls > 0 && (
@@ -836,11 +837,11 @@ export default function App() {
         <main className="p-6 max-w-2xl space-y-3 text-sm">
           <h1 className="text-2xl font-black text-cyan-200">System Settings</h1>
           <div className="rounded-xl border border-slate-800 glass-panel p-4 space-y-1">
-            <div className="flex items-center gap-2"><Database size={15} /> Model: {s.modelStatus?.model} · Provider: Meta Model API</div>
+            <div className="flex items-center gap-2"><Database size={15} /> Model: {s.modelStatus?.model} · Provider: {s.modelStatus?.provider_label ?? 'Meta Muse Spark'}</div>
             <div>Mode: <b>{s.modelStatus?.mode}</b> · Configured: {String(s.modelStatus?.configured)} · Reachable: {String(s.modelStatus?.reachable)}</div>
             <div className="text-slate-400">{s.modelStatus?.detail}</div>
-            <div className="text-slate-500 text-xs">API keys are read from backend environment only and are never displayed. Set MODEL_API_KEY + restart backend for LIVE META AI; otherwise the app runs in clearly-labelled OFFLINE SIMULATION mode.</div>
           </div>
+          <ProviderSettings onChanged={() => { api.modelStatus().then((m) => s.set({ modelStatus: m })).catch(() => undefined) }} />
           <button onClick={() => void resetAll()} className="rounded bg-red-500/80 px-4 py-2 font-semibold text-white">Reset twin &amp; clear current run view</button>
           <button onClick={exportReport} disabled={!s.runId} className="ml-2 rounded border border-slate-600 px-4 py-2 disabled:opacity-40"><Download size={14} className="inline" /> Export report JSON</button>
         </main>

@@ -77,6 +77,9 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 - [x] B6 winner proof: `GET /api/arena/matches/{id}/certificate` (HMAC, winner + final twin), `verify_cert.py` recomputes the objective; tamper → INVALID; deterministic replay test
 - [x] B7 league table (UI + API), Playwright arena test (play → spectate → winner proof file), README Arena section
 
+## Multi-provider Settings (2026-10-28)
+- [x] Four AI providers behind the one OpenAI-compatible client: Meta Muse Spark, Command Code (`api.commandcode.ai/provider/v1`), Kilo Gateway (`ai-gateway.kilo.ai/api/v1`), Google AI Studio (`generativelanguage.googleapis.com/v1beta/openai`); Settings UI activates any provider at runtime (key + model + base URL), keys stored locally only and never returned by an API; env vars remain a fallback; header badge names the live provider; 4 backend tests + live UI probe
+
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
 - Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.

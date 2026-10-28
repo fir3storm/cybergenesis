@@ -83,7 +83,36 @@ def health():
 @app.get("/api/models/status")
 async def model_status():
     h = await meta_client.health()
-    return {**h, "provider": "meta", "base_url": meta_client.base, "api_key_exposed": False}
+    return {**h, "provider": meta_client.provider_id, "provider_label": meta_client.provider_label,
+            "base_url": meta_client.base, "api_key_exposed": False}
+
+
+@app.get("/api/settings/providers")
+def settings_providers():
+    from app.integrations.providers import public_catalogue
+
+    return {"providers": public_catalogue(), "active": meta_client.provider_id, "api_keys_exposed": False}
+
+
+class ProviderActivate(BaseModel):
+    provider: str
+    api_key: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+
+
+@app.post("/api/settings/provider")
+async def settings_activate_provider(body: ProviderActivate):
+    from app.integrations import providers
+
+    try:
+        cfg = providers.activate(body.provider, api_key=body.api_key, model=body.model, base_url=body.base_url)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    meta_client.apply_provider(cfg)
+    h = await meta_client.health()
+    return {"active": cfg["id"], "provider_label": cfg["label"], "model": cfg["model"], "base_url": cfg["base_url"],
+            "configured": bool(cfg["api_key"] and cfg["model"]), **h, "api_key_exposed": False}
 
 
 @app.get("/api/twin")

@@ -1,4 +1,4 @@
-import type { ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, RunResult, Scenario, SimEvent, Twin } from '../types'
+import type { ArenaLeague, ArenaMatch, ArenaMemorySummary, Certificate, ForkResult, CustomScenarioDef, CustomTwinDef, Library, ModelStatus, ProviderInfo, RunResult, Scenario, SimEvent, Twin } from '../types'
 
 export const API = (import.meta as unknown as { env: Record<string, string> }).env.VITE_API_URL ?? 'http://localhost:8000'
 export const WS = API.replace('http', 'ws')
@@ -12,6 +12,9 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => j<{ status: string }>('/api/health'),
   modelStatus: () => j<ModelStatus>('/api/models/status'),
+  providers: () => j<{ providers: ProviderInfo[]; active: string }>('/api/settings/providers'),
+  activateProvider: (provider: string, api_key: string, model: string, base_url: string) =>
+    j<ModelStatus & { active: string }>('/api/settings/provider', { method: 'POST', body: JSON.stringify({ provider, api_key: api_key || null, model, base_url: base_url || null }) }),
   twin: () => j<Twin>('/api/twin'),
   reset: () => j<{ twin: Twin }>('/api/twin/reset', { method: 'POST' }),
   scenarios: () => j<Scenario[]>('/api/scenarios'),

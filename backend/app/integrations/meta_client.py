@@ -1,4 +1,4 @@
-"""Meta Model API client (OpenAI-compatible). Never fabricates success."""
+﻿"""Meta Model API client (OpenAI-compatible). Never fabricates success."""
 
 import asyncio
 import hashlib
@@ -28,10 +28,32 @@ class ProviderUnavailable(Exception):
 
 
 class MetaModelClient:
+    """One OpenAI-compatible client serving every registered AI provider.
+
+    The active provider (Meta / Command Code / Kilo / Google AI Studio) is
+    chosen at runtime from the Settings UI; switching providers simply
+    re-points base URL, model and key. All call sites keep using this client.
+    """
+
     def __init__(self) -> None:
         self.base = settings.model_api_base_url.rstrip("/")
         self.model = settings.meta_model
         self.key = settings.model_api_key
+        self.provider_id = "meta"
+        self.provider_label = "Meta Muse Spark"
+        try:
+            from app.integrations.providers import active_id, resolved
+
+            self.apply_provider(resolved(active_id()))
+        except Exception:  # noqa: BLE001 - registry failure must not break offline mode
+            self.provider_id = "meta"
+
+    def apply_provider(self, cfg: dict) -> None:
+        self.provider_id = cfg["id"]
+        self.provider_label = cfg["label"]
+        self.base = cfg["base_url"].rstrip("/")
+        self.model = cfg["model"]
+        self.key = cfg["api_key"]
         self._usage: dict[str, list[dict]] = {}
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(4)  # max 4 concurrent Meta calls across all agents/runs
@@ -88,12 +110,13 @@ class MetaModelClient:
 
     @property
     def configured(self) -> bool:
-        return bool(self.key) and not settings.offline_mode
+        return bool(self.key and self.model) and not settings.offline_mode
 
     async def health(self) -> dict:
         if not self.key:
-            return {"configured": False, "reachable": False, "model": self.model,
-                    "mode": "offline", "detail": "MODEL_API_KEY not set — offline simulation mode"}
+            return {"configured": False, "reachable": False, "model": self.model, "provider": self.provider_id,
+                    "provider_label": self.provider_label,
+                    "mode": "offline", "detail": f"no API key for {self.provider_label} â€” offline simulation mode (set one in Settings)"}
         if settings.offline_mode:
             return {"configured": True, "reachable": False, "model": self.model,
                     "mode": "offline", "detail": "OFFLINE_MODE explicitly enabled"}
@@ -117,7 +140,7 @@ class MetaModelClient:
         context applies, defaulting to advisory.
         """
         if not self.configured:
-            raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
+            raise ProviderUnavailable(f"AI provider not configured ({self.provider_label}: no key/model or offline mode)")
         self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.2, "response_format": {"type": "json_object"},
@@ -157,7 +180,7 @@ class MetaModelClient:
                                tier: str | None = None) -> tuple[dict, dict]:
         """Multimodal: send an image + prompt, expect a JSON object back."""
         if not self.configured:
-            raise ProviderUnavailable("Meta Model API not configured (no key or offline mode)")
+            raise ProviderUnavailable(f"AI provider not configured ({self.provider_label}: no key/model or offline mode)")
         self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
         body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
@@ -199,3 +222,4 @@ def _extract_json(text: str) -> dict:
 
 
 meta_client = MetaModelClient()
+

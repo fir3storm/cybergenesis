@@ -52,7 +52,19 @@ export interface ForkResult {
   original_timeline?: { seq: number; event_type: string; message: string }[]
   fork_timeline?: { seq: number; event_type: string; message: string }[]
 }
-export interface ModelStatus { configured: boolean; reachable: boolean; model: string; mode: string; detail: string }
+export interface ModelStatus { configured: boolean; reachable: boolean; model: string; mode: string; detail: string; provider?: string; provider_label?: string; base_url?: string }
+export interface ProviderInfo {
+  id: string
+  label: string
+  short: string
+  description: string
+  base_url: string
+  model: string
+  model_placeholder: string
+  key_hint: string
+  configured: boolean
+  active: boolean
+}
 export interface AgentMsg { id: string; from_agent: string; to_agent: string | null; kind: string; payload: Record<string, unknown>; evidence_refs: string[]; seq: number }
 
 export type View = 'welcome' | 'twin' | 'experiment' | 'battle' | 'arena' | 'agents' | 'attackpath' | 'verification' | 'evidence' | 'settings' | 'designer' | 'playbook' | 'library' | 'benchmark' | 'scorecards'
