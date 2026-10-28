@@ -37,6 +37,16 @@ def deterministic_blue(twin: DigitalTwin, baseline: DigitalTwin, scenario: dict,
     return feasible[0] if feasible else None
 
 
+def simulate_blue(twin: DigitalTwin, baseline: DigitalTwin, scenario: dict, history: list[dict]) -> dict | None:
+    """Simulation-best: pick the top-ranked candidate from the full evaluated
+    candidate list (not just the agent proposal). This is the "simulate
+    before acting" strategy used as the offline benchmark."""
+    proposal = scenario.get("expected_defense") or []
+    cands = evaluate_candidates(twin, baseline, scenario, [dict(a) for a in proposal])
+    feasible = [c for c in cands if c.get("feasible")]
+    return feasible[0] if feasible else None
+
+
 def _objective(twin: DigitalTwin, scenario: dict) -> dict:
     return twin.attempt_attack_objective(scenario)
 

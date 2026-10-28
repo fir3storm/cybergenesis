@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from app import models
 from app.arena.ai import AiBlueChooser, AiRedChooser
-from app.arena.engine import deterministic_blue, deterministic_red, play_match_async
+from app.arena.engine import deterministic_blue, deterministic_red, play_match_async, simulate_blue
 from app.arena.learning import ArenaMemory, learned_blue_chooser, learned_red_chooser
 from app.core.config import settings
 from app.simulation.scenarios import SCENARIOS
@@ -45,7 +45,9 @@ def _choosers(mode: str, memory: ArenaMemory):
         return learned_red_chooser(memory), learned_blue_chooser(memory)
     if mode == "deterministic":
         return deterministic_red, deterministic_blue
-    raise ArenaError(f"unknown arena mode: {mode} (use ai | learned | deterministic)")
+    if mode == "simulate":
+        return deterministic_red, simulate_blue
+    raise ArenaError(f"unknown arena mode: {mode} (use ai | learned | deterministic | simulate)")
 
 
 async def play_and_store(db, scenario_id: str, mode: str = "ai", max_rounds: int | None = None,

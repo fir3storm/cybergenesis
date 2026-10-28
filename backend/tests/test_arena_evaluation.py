@@ -9,7 +9,7 @@ from app.arena.evaluation import evaluate_strategies
 async def test_evaluation_has_paired_cases_and_frozen_memory():
     result = await evaluate_strategies(cases=2, training_matches=2, seed=17)
     assert result['live_requested'] is False
-    assert set(result['summary']) == {'deterministic', 'learned'}
+    assert set(result['summary']) == {'deterministic', 'simulate'}
     assert result['evaluation_memory_unchanged'] is True
     assert len(result['cases']) == 4
     assert {r['case_id'] for r in result['cases']} == {'heldout-0', 'heldout-1'}
