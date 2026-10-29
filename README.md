@@ -31,13 +31,39 @@ CYBERGENESIS is a closed-loop, autonomous cybersecurity digital twin. AI agents 
 
 Everything is synthetic. No real targets, no scanning, no exploitation, no credential harvesting. See the [threat model](docs/threat-model.md).
 
+## Built during the Hackathon (Oct 26 – Nov 4, 2026)
+
+Everything in this repository was built during the Meta Global AI Developer Hackathon. The git history is the evidence: the first commit is dated **Oct 26, 2026, 13:00 ET**, one hour after the 12:00 ET kickoff, and every commit since falls inside the event window (`git log --reverse --format='%ad %s' --date=iso`). No code predates the event.
+
+Built in the Hackathon (the 3-minute video shows the twin, loop, guardrails, proof, vision import and Arena):
+
+- **The twin and the closed loop**: synthetic enterprise twin compiled from device configs, attack simulation, Observer → Investigator → Strategist → Policy → Executor → Verifier.
+- **Meta AI integration**: Muse Spark agents with Pydantic-validated JSON, evidence citations, token budgets, retries, honest offline fallback, a real-call health check; multimodal photo-to-twin import; Muse Spark Open via Baseten.
+- **Guardrails**: deterministic policy engine, allowlisted typed actions, human approval (in the UI or by phone QR).
+- **Proof**: independent replay verification, Ed25519-signed certificates verifiable offline, Menger min-cut optimality proofs, board briefing with NIST CSF / CIS control evidence.
+- **Arena**: live red-vs-blue matches with score memory, held-out strategy evaluation, signed winner proofs.
+- **Preflight**: attack-path regression check (API, CLI, GitHub Action) that blocks a change reopening an attack path.
+
+## Agentic by design
+
+CYBERGENESIS is a multi-agent system that completes a security task end to end without scripted answers:
+
+- **Autonomy**: one click runs observe → investigate → propose → rehearse → validate → apply → verify → prove. No step is hard-coded per scenario; the Strategist derives the defense from the live attack graph.
+- **Decisions**: Muse Spark weighs evidence and business impact, picks among simulated candidates, and in the Arena plays both attacker and defender. Each decision stores role, evidence refs, confidence, model ID, timestamp and live/offline mode.
+- **Coordination**: specialist agents hand off through a typed blackboard; the policy engine, human approval and the independent verifier are checkpoints, not afterthoughts.
+- **Safety**: agents get no shell, filesystem or network access; only allowlisted, typed actions can touch the twin.
+
 ## Why Meta AI is essential
 
 Muse Spark plays **both sides**:
 
 - **Blue team** — investigates evidence-cited telemetry and proposes defenses from the live graph. Historical live spot-checks cover three scenarios; see the evidence scope in [Evaluation](docs/evaluation.md).
 - **Red team** — in the Arena and battle rounds, it chooses among policy-validated attack paths and adapts while the twin hardens itself.
-- **Vision** — its multimodal capability turns a whiteboard photo into a working digital twin (Twin Designer).
+- **Vision** — its multimodal capability turns a whiteboard photo into a working digital twin (Twin Designer → "Try sample"), schema-validated before it becomes a twin.
+- **Board briefing** — drafts a plain-language CISO summary restricted to verified facts.
+- **Open weights** — Meta's **Muse Spark Open** is wired in as a provider through Baseten (`meta-models/muse-spark-open-1026`), selectable in Settings; it needs a Baseten key and was not used in the demo video.
+
+The demo video runs **Muse Spark 1.3** live (accessed through the Command Code gateway); the direct Meta Model API is the default provider when a funded key is set.
 
 With no API key, the app says so honestly and runs a clearly labelled deterministic simulation instead. Meta AI is the difference between a scripted demo and an adaptive adversary. Provider failure is always reported — fake success is treated as a test failure.
 
@@ -167,7 +193,7 @@ Open **Run Autonomous Defense Demo**, or **Judge Mode** for narrated stages.
 
 ### AI providers (live mode)
 
-CYBERGENESIS was built on **Meta Muse Spark**, and it now speaks to four providers — all through the same OpenAI-compatible chat API, so every agent works with any of them. Switch live in **Settings → AI provider** (no restart): paste a key, pick a model, activate. Keys are stored on this machine only and are never displayed or returned by any API.
+CYBERGENESIS was built on **Meta Muse Spark**, and it now speaks to five providers — all through the same OpenAI-compatible chat API, so every agent works with any of them. Switch live in **Settings → AI provider** (no restart): paste a key, pick a model, activate. Keys are stored on this machine only and are never displayed or returned by any API.
 
 | Provider | Default endpoint | Key |
 |---|---|---|
@@ -175,6 +201,7 @@ CYBERGENESIS was built on **Meta Muse Spark**, and it now speaks to four provide
 | Command Code | `https://api.commandcode.ai/provider/v1` | `COMMANDCODE_API_KEY` |
 | Kilo Code (Kilo Gateway) | `https://ai-gateway.kilo.ai/api/v1` | `KILO_API_KEY` |
 | Google AI Studio (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_API_KEY` |
+| Baseten (Meta open-weight Muse Spark Open) | `https://inference.baseten.co/v1` | `BASETEN_API_KEY` |
 
 Without a key, the app runs in clearly labelled **OFFLINE SIMULATION** mode (deterministic, evidence-derived — never presented as AI inference). Provider failure is reported honestly, never faked. Environment variables work too (see `.env.example`); Settings choices override them at runtime:
 

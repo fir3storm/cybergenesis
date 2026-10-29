@@ -29,7 +29,7 @@ def _isolated_store(tmp_path, monkeypatch):
 def test_catalogue_lists_four_providers_without_keys():
     body = client.get("/api/settings/providers").json()
     ids = {p["id"] for p in body["providers"]}
-    assert ids == {"meta", "commandcode", "kilo", "google"}
+    assert ids == {"meta", "commandcode", "kilo", "google", "baseten"}
     assert body["api_keys_exposed"] is False
     for p in body["providers"]:
         assert "api_key" not in p and p["base_url"].startswith("https://")

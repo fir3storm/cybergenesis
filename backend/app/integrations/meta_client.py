@@ -28,6 +28,7 @@ class ProviderUnavailable(Exception):
 
 
 MAX_RETRY_WAIT_S = 20.0
+VISION_MAX_TOKENS = 8000
 HEALTH_CACHE_S = 600.0
 
 
@@ -242,8 +243,10 @@ class MetaModelClient:
             raise ProviderUnavailable(f"AI provider not configured ({self.provider_label}: no key/model or offline mode)")
         self._check_budget(run_id, tier)
         headers = {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
+        # reasoning models think longer over images: Muse Spark 1.3 used the whole
+        # 3k text cap on a diagram and returned empty content
         body = {"model": self.model, "temperature": 0.1, "response_format": {"type": "json_object"},
-                "max_tokens": settings.model_max_tokens_per_call,
+                "max_tokens": max(settings.model_max_tokens_per_call, VISION_MAX_TOKENS),
                 "messages": [{"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": image_data_url}},
@@ -251,7 +254,11 @@ class MetaModelClient:
         started = time.time()
         try:
             async with httpx.AsyncClient(timeout=max(settings.model_timeout_seconds, 60)) as c:
-                r = await c.post(f"{self.base}/chat/completions", headers=headers, json=body)
+                for attempt in range(2):
+                    r = await c.post(f"{self.base}/chat/completions", headers=headers, json=body)
+                    if r.status_code < 400 or attempt or _retry_wait(r, 0) != 1.0:
+                        break  # only the uncharged region 403 is retried here
+                    await asyncio.sleep(1.0)
             if r.status_code >= 400:
                 raise ProviderUnavailable(f"vision call HTTP {r.status_code}")
             data = r.json()

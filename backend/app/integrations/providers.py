@@ -1,6 +1,6 @@
-﻿"""AI provider registry: Meta, Command Code, Kilo Code, Google AI Studio.
+﻿"""AI provider registry: Meta, Command Code, Kilo Code, Google AI Studio, Baseten.
 
-All four speak the OpenAI chat-completions wire format, so the single
+All five speak the OpenAI chat-completions wire format, so the single
 client in meta_client.py serves all of them; this module owns the
 catalogue (endpoints, defaults) and the runtime choices saved from the
 Settings UI. Keys are stored only in the local provider_settings.json
@@ -37,11 +37,20 @@ PROVIDERS: dict[str, dict] = {
         "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "default_model": "gemini-2.5-flash",
         "model_placeholder": "gemini-2.5-flash", "key_hint": "GOOGLE_API_KEY from Google AI Studio (aistudio.google.com)",
     },
+    "baseten": {
+        "label": "Baseten (Muse Spark Open)", "short": "BASETEN",
+        "description": "Meta's open-weight Muse Spark Open served by Baseten (hackathon inference partner).",
+        "default_base_url": "https://inference.baseten.co/v1", "default_model": "meta-models/muse-spark-open-1026",
+        "model_placeholder": "meta-models/muse-spark-open-1026", "key_hint": "BASETEN_API_KEY from app.baseten.co",
+    },
 }
 
-_ENV_KEYS = {"meta": "model_api_key", "commandcode": "commandcode_api_key", "kilo": "kilo_api_key", "google": "google_api_key"}
-_ENV_MODELS = {"meta": "meta_model", "commandcode": "commandcode_model", "kilo": "kilo_model", "google": "google_model"}
-_ENV_BASES = {"meta": "model_api_base_url", "commandcode": "commandcode_base_url", "kilo": "kilo_base_url", "google": "google_base_url"}
+_ENV_KEYS = {"meta": "model_api_key", "commandcode": "commandcode_api_key", "kilo": "kilo_api_key", "google": "google_api_key",
+             "baseten": "baseten_api_key"}
+_ENV_MODELS = {"meta": "meta_model", "commandcode": "commandcode_model", "kilo": "kilo_model", "google": "google_model",
+               "baseten": "baseten_model"}
+_ENV_BASES = {"meta": "model_api_base_url", "commandcode": "commandcode_base_url", "kilo": "kilo_base_url", "google": "google_base_url",
+              "baseten": "baseten_base_url"}
 
 
 def _store() -> Path:

@@ -149,3 +149,13 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 - [x] 3 additional live AI Arena matches were played via API to choose the scenario (all blue in 1 round); they show in the Arena league/past matches.
 - [ ] Known: live AI Blue always wins in round 1 (min-cut), so the take shows no red reroute; Arena decision-evidence lines show "?" separators (encoding bug in arena.tsx, not fixed - Arena code).
 - [ ] Watch the full video with sound before submitting.
+
+## Submission compliance pass - 2026-10-29
+- [x] Rule "new work only / identify what was built": README "Built during the Hackathon" section (first commit Oct 26 13:00 ET, after 12:00 ET kickoff; all commits in window) + HACKATHON_SUBMISSION.md; video opens with "Built entirely during the Meta Global AI Developer Hackathon".
+- [x] More Meta tooling on camera: vision import scene (Twin Designer -> Try sample: office -> Muse Spark 1.3 vision read 6 assets / 5 links, live). Fixed vision: Muse Spark 1.3 used the whole 3k cap reasoning over the image and returned empty content; vision calls now get an 8k budget (VISION_MAX_TOKENS) and retry the uncharged region 403 once.
+- [x] Best Agentic Use-Case: "Agentic by design" in README and a section in HACKATHON_SUBMISSION.md.
+- [x] Baseten provider added for Meta open-weight Muse Spark Open (meta-models/muse-spark-open-1026, https://inference.baseten.co/v1): providers.py, config, .env.example, header label, provider test. NOT exercised live - no Baseten key.
+- [x] Video v4 (docs/demo-final.mp4): 8 scenes - problem 0-15, twin 15-33, vision 33-52, attack 52-80, guardrails 80-106, prove 106-129, Arena 129-166, close 166-180; video/audio 180.000000 s; 5,400 frames normal luma; speech starts +0.2 s per slot; frames inspected. Main run PASS (2 approvals), Arena BLUE WINS with both moves live Muse Spark.
+- [x] Tests: backend 265 passed / 1 skipped, ruff clean, tsc clean, frontend 35 passed.
+- [ ] Still open: Stage One risk - demo uses Muse Spark via Command Code, not the Meta Model API; claim the $150 Meta credits (deadline Nov 4 9 PM ET) and switch to the direct API.
+- [ ] Vision import saved a "Sample diagram-office.png" twin in the DB (shown in Saved Twins).

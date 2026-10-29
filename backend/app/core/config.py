@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_api_base_url: str = "https://api.meta.ai/v1"
     meta_model: str = "muse-spark-1.3"
     model_api_key: str = ""
-    # Active AI provider: meta | commandcode | kilo | google (Settings UI can switch at runtime)
+    # Active AI provider: meta | commandcode | kilo | google | baseten (Settings UI can switch at runtime)
     ai_provider: str = "meta"
     commandcode_api_key: str = ""
     commandcode_model: str = ""
@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     kilo_api_key: str = ""
     kilo_model: str = ""
     kilo_base_url: str = "https://ai-gateway.kilo.ai/api/v1"
+    # Meta open-weight Muse Spark Open on Baseten (hackathon model id)
+    baseten_api_key: str = ""
+    baseten_model: str = "meta-models/muse-spark-open-1026"
+    baseten_base_url: str = "https://inference.baseten.co/v1"
     google_api_key: str = ""
     google_model: str = "gemini-2.5-flash"
     google_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"

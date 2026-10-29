@@ -3,6 +3,9 @@
 **Project:** CYBERGENESIS — *The Autonomous Self-Defending Digital Twin*
 **Creator:** Dr. Abhirup Guha · **Event:** Meta Global AI Developer Hackathon 2026
 
+## Built during the Hackathon
+Everything in this repository was built during the event (Oct 26 – Nov 4, 2026). Git history starts with a commit dated Oct 26, 13:00 ET, one hour after kickoff, and every commit falls inside the window. See README "Built during the Hackathon" for the component list.
+
 ## Problem
 Security tools overwhelmingly stop at detection: logs, alerts, dashboards, and human toil. Teams need repeatable evidence that a proposed defense blocks the modeled attack before they apply it.
 
@@ -18,7 +21,7 @@ An autonomous closed loop on a living 3D digital twin of an enterprise: **Observ
 - Honest AI: live Meta inference or clearly-labelled offline deterministic mode — fake success is treated as a test failure.
 
 ## Multi-provider Settings
-Four providers are integrated behind a unified settings panel: **Meta Muse Spark**, **Command Code**, **Kilo Gateway**, and **Google AI Studio**. Each provider's credentials, model selection, and fallback behaviour are configurable at runtime, allowing judges to swap backends without code changes.
+Five providers are integrated behind a unified settings panel: **Meta Muse Spark**, **Command Code**, **Kilo Gateway**, **Google AI Studio**, and **Baseten** (Meta's open-weight Muse Spark Open, `meta-models/muse-spark-open-1026`). Each provider's credentials, model selection, and fallback behaviour are configurable at runtime, allowing judges to swap backends without code changes.
 
 ## Arena: red vs blue, score-memory learning (B1–B7 complete)
 A second loop pits Red against Blue on the same twin: Red picks a validated attack route, Blue proposes a defense through the deterministic policy gate, and each round is replayed on a clone before anything is applied. The Arena feature set (B1–B7) is complete:
@@ -42,7 +45,10 @@ Honest labels: offline runs say so; a failed provider is recorded as a failure r
 - **Cinematic mode**: camera follows the attack path node by node for judge demos.
 
 ## Meta AI usage
-Meta Muse Spark (`muse-spark-1.3`, Meta Model API) performs incident investigation and defense strategy through structured, Pydantic-validated JSON with confidence, evidence references, retries, timeouts, token accounting, and prompt versioning. See `docs/meta-integration.md`.
+Meta Muse Spark (`muse-spark-1.3`) performs incident investigation and defense strategy through structured, Pydantic-validated JSON with confidence, evidence references, retries, timeouts, token accounting, and prompt versioning. It also plays both red and blue in the Arena, reads network-diagram images into twins (multimodal vision, 8k-token budget for image reasoning), and drafts the board briefing. The demo video runs Muse Spark 1.3 live through the Command Code gateway; the direct Meta Model API is the default provider when a funded key is set, and Muse Spark Open is available through Baseten. See `docs/meta-integration.md`.
+
+## Best Agentic Use-Case
+One click runs a multi-agent workflow end to end: observe → investigate → propose → rehearse on a clone → policy-validate → human approval → apply → independent replay → signed proof. The Strategist derives defenses from the live graph (no scripted answers); every decision is logged with role, evidence, confidence, model and mode; agents have no shell, filesystem or network access.
 
 ## Architecture
 FastAPI + SQLAlchemy + NetworkX deterministic twin (snapshots, seeded replay) · React/TypeScript + React Three Fiber living twin with WebSocket live events · 14-table audit/evidence store · local Python/Node launchers, optional Render blueprint. Details: `docs/architecture.md`.

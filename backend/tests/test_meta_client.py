@@ -130,6 +130,25 @@ def test_health_live_result_is_cached(monkeypatch):
     assert calls["n"] == 1  # page loads must not spend quota
 
 
+def test_vision_retries_region_403_with_large_budget(monkeypatch, _no_real_sleep):
+    mc = _live_client(monkeypatch)
+    sent = []
+    calls = _patch_async_client(monkeypatch, [
+        (403, {"error": {"code": "model_region_unavailable"}}),
+        (200, {"choices": [{"message": {"content": '{"assets": []}'}}], "usage": {}}),
+    ])
+    orig = httpx.AsyncClient.post
+
+    async def spy(self, url, **kw):
+        sent.append(kw.get("json", {}).get("max_tokens"))
+        return await orig(self, url, **kw)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", spy)
+    data, _ = asyncio.run(mc.chat_vision_json("read", "data:image/png;base64,AA"))
+    assert data == {"assets": []} and calls["n"] == 2
+    assert sent[0] >= meta_client.VISION_MAX_TOKENS  # reasoning over images needs more than the text cap
+
+
 def test_client_error_is_not_retried(monkeypatch):
     mc = _live_client(monkeypatch)
     calls = _patch_async_client(monkeypatch, [(404, {"error": "model not found"})] * 5)

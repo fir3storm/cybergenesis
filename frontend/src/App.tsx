@@ -77,7 +77,7 @@ const DEMO_CLOCK: Record<string, string> = {
 // key is not a Meta run: switching to Command Code / Kilo / Google must change
 // what the UI claims is reasoning on the twin.
 const PROVIDER_LABEL: Record<string, string> = {
-  meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE',
+  meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE', baseten: 'BASETEN',
 }
 
 export function NavDropdown({ group, items, active, onSelect }: {
@@ -463,7 +463,7 @@ export default function App() {
       <header className="relative z-[100] flex flex-wrap items-center gap-3 border-b border-cyan-900/60 px-4 py-2 bg-[#020617]">
         <div className="font-black tracking-[0.3em] text-cyan-300">CYBERGENESIS</div>
         <span className={`text-[11px] font-mono px-2 py-1 rounded-full border ${live ? 'border-emerald-400 text-emerald-300' : 'border-amber-400 text-amber-300'}`}>
-          {live ? `● LIVE ${{ meta: 'META', commandcode: 'COMMAND CODE', kilo: 'KILO', google: 'GOOGLE' }[s.modelStatus?.provider ?? 'meta'] ?? 'AI'} AI` : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
+          {live ? `● LIVE ${PROVIDER_LABEL[s.modelStatus?.provider ?? 'meta'] ?? 'AI'} AI` : '● OFFLINE SIMULATION'} — {s.modelStatus?.model ?? 'muse-spark-1.3'}
         </span>
         <span className="text-[11px] text-slate-400 font-mono">{s.modelStatus?.detail}</span>
         {lastRunAi && (
