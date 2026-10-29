@@ -1,40 +1,50 @@
-# CYBERGENESIS — 3:00 demo narration (TTS, target ~430 words)
+# CYBERGENESIS — 3:00 demo narration
 
-## 0:00 Problem (Welcome screen)
-Security tools stop at detection. They flood teams with alerts, dashboards and
-tickets — but nobody proves a defense actually works before a real adversary
-tests it. Automation stalls because letting an AI change a firewall feels
-reckless, so skilled analysts burn out on triage while attackers adapt.
+TTS: edge-tts, voice `en-US-GuyNeural`, rate -5%. Video: `docs/demo-final.mp4`, 180.000 s, 1440x810.
+Live AI in the recorded take: Meta Muse Spark 1.3 (`meta/muse-spark-1.3`) served through Command Code.
 
-## 0:28 Solution + twin (Living Twin)
-CYBERGENESIS gives defenders a safe place to fight, learn and prove. This is a
-living digital twin of an enterprise network — every asset, cable and attack
-path, fully synthetic. Nothing here can touch a real system.
+## 0:00 Problem (Welcome screen, Judge Mode)
+Security tools stop at detection. They raise alerts, but never prove a
+defense works, and letting an AI change a firewall feels reckless.
 
-## 0:45 Attack + reasoning (Run demo, Agents)
+## 0:14 Solution (Living Twin)
+CYBERGENESIS gives defenders a safe place to fight and to prove. This is a
+living digital twin of an enterprise network: every asset, link, service and
+weakness, compiled from configuration. It is fully synthetic, so we can attack
+it as hard as we like.
+
+## 0:36 Attack and reasoning (Run Autonomous Defense Demo)
 We launch a ransomware-style attack. The Observer turns telemetry into
-evidence. Live, Muse Spark investigates: its hypothesis cites the exact
-telemetry behind it — confirmed facts separated from speculation. The
-Strategist then proposes a defense from the graph alone. It was never told
-the answer.
+structured evidence. Then Meta's Muse Spark, running live, investigates. Its
+hypothesis cites the exact telemetry behind each claim, and separates what is
+confirmed from what is speculation. The Strategist proposes a defense from the
+attack graph alone, and every candidate is rehearsed on a cloned twin first.
 
-## 1:35 Guardrails (Policy / approval)
-But the AI never acts directly. A deterministic policy engine — no language
-model involved — checks every proposed action. Invalid actions are rejected
-as a unit, risky ones wait for human approval, and only allowlisted actions
-can touch the twin.
+## 1:07 Guardrails (policy gate, human approval)
+But the AI never acts directly. A deterministic policy engine, with no language
+model in it, validates every proposed action. Invalid plans are rejected as a
+unit. High-impact defenses wait for a human, and here the operator approves.
+Only allowlisted, typed actions can touch the twin. The AI has no shell, no
+file system and no network access.
 
-## 2:00 Verify + prove (Verification Lab, Proof)
-Now the attack is replayed independently. PASS means the target is provably
-unreachable — and a failure would be shown as FAIL, never hidden. Every run
-exports an Ed25519-signed proof certificate anyone can verify offline, plus a
-board-ready briefing.
+## 1:36 Prove (Outcome, Verification Lab)
+Now the attack is replayed independently, and the verdict here is PASS. A
+failure would be shown as FAIL, never hidden. Every run exports an
+Ed25519-signed certificate that anyone can verify offline, checks the fix
+against the graph's minimum cut, and writes a plain-language board briefing.
 
-## 2:30 Arena + preflight (Arena, brief)
-In the Arena, red and blue adapt against each other on the same twin, and a
-proposed network change that would reopen the attack path is blocked in
-preflight — before it is ever merged.
+## 2:02 Arena, live (Arena: Play match, replay, decision evidence, held-out table)
+The Arena puts both sides on the same twin, live. Muse Spark plays red, and
+picks an attack route from paths the engine has already validated. Muse Spark
+also plays blue, and picks a defense that must pass the same policy gate. If
+red still has a route, it reroutes next round; if not, blue wins, and the
+winner gets a signed proof. Every choice is logged with its evidence, and each
+match feeds a score memory that steers the next one: training changes strategy
+scores, never model weights. Across
+held-out networks, each strategy is scored against the provable optimum, not
+against itself.
 
-## 2:50 Close
+## 2:44 Close (Welcome)
 CYBERGENESIS does not merely detect attacks. It tests defenses, proves they
-work, and shows its evidence. Thank you.
+work, and shows its evidence. Built on Muse Spark for the Meta Global
+Hackathon.

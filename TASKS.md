@@ -129,3 +129,23 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 - [x] Live run-through: Muse Spark 1.3 via fresh Command Code key (mode=live, HTTP 200 at /api/models/status); direct Meta key returns HTTP 402, old CommandCode key 401 - disclosed to user. First API run honestly FAILed (approval timeout, auto-deny); UI run with operator approval: verification PASS 100%.
 - [x] Recorded Playwright/Edge take on pristine DB; docs/demo-final.mp4 = 180.000s video+audio, 1440x810, TTS en-US-GuyNeural, problem statement (0:00) then twin/run/policy/verify/proof/arena/close. Script: docs/demo-final-script.md.
 - [ ] Watch docs/demo-final.mp4 fully before submitting; rotate the Command Code key pasted in chat after the submission.
+
+## Demo video re-record - 2026-10-29 (afternoon)
+- [x] Clean slate: stopped a stale uvicorn (pid 31044) that held the DB; moved the previous take's backend/cybergenesis.db to D:\Ajanta-backup-20261029\backend-cybergenesis-take2-prev.db (nothing deleted); single uvicorn on :8000; GET /api/experiments = [].
+- [x] Live AI verified before recording: /api/models/status mode=live, Command Code serving meta/muse-spark-1.3 ("model answered (HTTP 200)" from a real chat probe). Not a direct Meta API connection.
+- [x] Throwaway API run 1b13d826: verification PASS (2 approvals via API, 6 live Muse Spark decisions, 0 fallbacks). UI rehearsal take: PASS.
+- [x] Recorded take (Playwright, msedge headless, 1440x810): Welcome -> Judge Mode -> INSPECT/Living Twin -> Welcome -> Run Autonomous Defense Demo -> 2 approvals -> OUTCOME (PASS, OPTIMAL proof card) -> PROOF/Verification Lab (PASS, risk 58% -> 0%) -> RUN/Arena (held-out table) -> Welcome. On-screen run 92bf041d: PASS, 6 live decisions, 0 fallbacks. Settings never opened.
+- [x] docs/demo-final.mp4 rebuilt: video and audio both 180.000000 s, h264/yuv420p 30 fps 1440x810, AAC 160k (32 kHz, exact AAC frame fit), +faststart. Narration (344 words, 150 s speech, edge-tts en-US-GuyNeural -5%) in docs/demo-final-script.md; segment starts 0/27.6/52.7/85.4/117.0/145.7/162.9.
+- [x] Checked: all 5,400 frames mean luma 24.9-36.7 (no white/black frames); frames at 5/40/70/87/90/100/108/119/125/130/140/150/165/178/179.9 inspected; silencedetect confirms speech starts within 0.25 s of each slot.
+- [ ] Known: each Judge Mode click starts a run that the later "Run Autonomous Defense Demo" reset auto-denies, so the DB holds FAIL runs for those (e280694d, 21466bda) plus an aborted take (f0d38ce3, 638f766a). None appears in the video.
+- [ ] Known: scenes 3-4 (live reasoning + approvals) are sped up ~2.3-2.6x to fit their slots; the prove scene's outcome view has an empty left column.
+- [ ] Watch the full video with sound before submitting (not done by the agent end-to-end in real time).
+
+## Demo video v3: shorter opening, live Arena - 2026-10-29
+- [x] Re-timed narration (356 words, 150.8 s speech): problem 0-14 s (was 27.6), twin 14-36, attack 36-67, guardrails 67-96, prove 96-122, Arena 122-164 (was 17.2 s), close 164-180. Script: docs/demo-final-script.md.
+- [x] Arena scene now plays a live match on camera: Play match with "AI + learning" -> replay -> BLUE WINS banner -> both decision-evidence entries expanded (adversary_simulator and defense_strategist, both live meta/muse-spark-1.3) -> held-out table, "What the Arena learned", past matches. Match ab0d7db3: blue, 1 round, mode ai.
+- [x] Main run on screen 119a0466: PASS, 6 live Muse Spark decisions, 0 fallbacks; 2 approvals; Judge Mode run 038a93f4 auto-denied by the demo reset (FAIL, not shown).
+- [x] docs/demo-final.mp4: video and audio both 180.000000 s, 1440x810, h264 30 fps, AAC; 5,400 frames within normal UI luma (24.9-36.7, no white/black); speech starts within 0.25 s of every slot; 15 frames inspected.
+- [x] 3 additional live AI Arena matches were played via API to choose the scenario (all blue in 1 round); they show in the Arena league/past matches.
+- [ ] Known: live AI Blue always wins in round 1 (min-cut), so the take shows no red reroute; Arena decision-evidence lines show "?" separators (encoding bug in arena.tsx, not fixed - Arena code).
+- [ ] Watch the full video with sound before submitting.

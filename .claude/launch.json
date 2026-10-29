@@ -9,7 +9,9 @@
     },
     {
       "name": "frontend",
-      "url": "http://localhost:5173"
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "Set-Location frontend; node node_modules/vite/bin/vite.js --strictPort"],
+      "port": 5173
     }
   ]
 }
