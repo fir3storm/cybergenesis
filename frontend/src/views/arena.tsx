@@ -192,9 +192,10 @@ export function ArenaView() {
       <section className="mt-4 rounded-lg border border-slate-800 p-4" aria-label="Paired evaluation">
         <h2 className="font-bold text-cyan-200">Held-out strategy evaluation</h2>
         {evaluation?.available && evaluation.summary ? <>
-          <p className="mt-1 text-xs text-slate-400">Seed {evaluation.seed} ? {evaluation.created_at} ? {evaluation.live_requested ? 'AI requested; inspect live counts below' : 'Offline evaluation; no live AI comparison'}</p>
-          <div className="overflow-x-auto"><table className="mt-3 w-full text-left text-xs"><thead><tr>{['Strategy', 'Blue wins', 'Disruption', 'Mean ms', 'Live cases', 'Fallbacks'].map(h => <th key={h} className="p-2">{h}</th>)}</tr></thead>
-            <tbody>{Object.entries(evaluation.summary).map(([name, row]) => <tr key={name} className="border-t border-slate-800"><td className="p-2">{name}</td><td>{row.blue_wins}/{row.cases}</td><td>{row.mean_disrupted.toFixed(1)}</td><td>{row.mean_latency_ms}</td><td>{row.live_cases}</td><td>{row.fallbacks}</td></tr>)}</tbody></table></div>
+          <p className="mt-1 text-xs text-slate-400">Seed {evaluation.seed} · {evaluation.created_at} · {evaluation.live_requested ? 'AI requested; inspect live counts and provider failures below' : 'Offline evaluation; no live AI comparison'}</p>
+          <div className="overflow-x-auto"><table className="mt-3 w-full text-left text-xs"><thead><tr>{['Strategy', 'Blue wins', 'Business paths disrupted', 'Edges removed', 'Edge gap', 'Mean ms', 'Tokens', 'Live cases', 'Provider failures', 'Fallbacks'].map(h => <th key={h} className="p-2">{h}</th>)}</tr></thead>
+            <tbody>{Object.entries(evaluation.summary).map(([name, row]) => <tr key={name} className="border-t border-slate-800"><td className="p-2">{name}</td><td>{row.blue_wins}/{row.cases}</td><td>{row.mean_disrupted.toFixed(1)}</td><td>{row.mean_edges_removed?.toFixed(1) ?? '—'}</td><td>{row.mean_optimality_gap?.toFixed(1) ?? '—'}</td><td>{row.mean_latency_ms}</td><td>{row.tokens}</td><td>{row.live_cases}</td><td>{row.provider_failures ?? 0}</td><td>{row.fallbacks}</td></tr>)}</tbody></table></div>
+          {!!evaluation.within_context?.length && <p className="mt-2 text-xs text-slate-400">Separate repeated-context check: {evaluation.within_context.length} training topologies replayed after one recorded match each; {evaluation.within_context.filter(row => row.warm_disrupted < row.cold_disrupted).length} reduced disruption. This does not measure generalization to unseen networks.</p>}
           <p className="mt-2 text-xs text-slate-500">{evaluation.limitations}</p>
         </> : <p className="mt-2 text-xs text-slate-400">No evaluation report available yet.</p>}
       </section>

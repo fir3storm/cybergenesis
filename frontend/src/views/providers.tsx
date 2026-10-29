@@ -10,6 +10,16 @@ export function ProviderSettings({ onChanged }: { onChanged: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, { key: string; model: string; base: string }>>({})
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [operatorToken, setOperatorToken] = useState('')
+
+  const saveOperatorToken = () => {
+    try {
+      if (operatorToken.trim()) sessionStorage.setItem('cybergenesis_admin_token', operatorToken.trim())
+      else sessionStorage.removeItem('cybergenesis_admin_token')
+      setOperatorToken('')
+      setMsg('Operator access updated for this browser session.')
+    } catch { setMsg('Browser session storage is unavailable; operator access could not be saved.') }
+  }
 
   const load = () => api.providers().then((r) => {
     if (r.admin_token) {
@@ -36,6 +46,15 @@ export function ProviderSettings({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section aria-label="AI provider settings">
+      <div className="mb-4 rounded-xl border border-slate-700 p-3">
+        <label className="block text-sm text-slate-200">Operator token
+          <input type="password" value={operatorToken} onChange={(e) => setOperatorToken(e.target.value)}
+            autoComplete="off" placeholder="Token supplied by the instance owner"
+            className="mt-2 block w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5" />
+        </label>
+        <p className="mt-1 text-xs text-slate-400">Shared instances require this token to run simulations, approve defenses, or change settings. It stays in this browser session.</p>
+        <button onClick={saveOperatorToken} className="mt-2 rounded bg-cyan-700 px-3 py-1.5 text-xs text-white">Save operator access</button>
+      </div>
       <h2 className="flex items-center gap-2 text-sm font-bold text-cyan-200"><Plug size={15} /> AI provider</h2>
       <p className="mt-1 text-xs text-slate-400">
         All providers speak the same OpenAI-compatible chat API, so every agent (Investigator, Strategist, Red Team, Arena)

@@ -102,7 +102,8 @@ export interface ArenaDecision {
 }
 export interface ArenaEvaluation {
   available: boolean; created_at?: string; seed?: number; limitations?: string; live_requested?: boolean;
-  summary?: Record<string, {cases: number; blue_wins: number; mean_disrupted: number; mean_latency_ms: number; tokens: number; live_cases: number; fallbacks: number}>
+  summary?: Record<string, {cases: number; blue_wins: number; mean_disrupted: number; mean_edges_removed?: number; mean_optimality_gap?: number | null; mean_latency_ms: number; tokens: number; live_cases: number; provider_failures?: number; fallbacks: number}>
+  within_context?: {case_id: string; cold_prior_matches: number; warm_prior_matches: number; cold_winner: string; warm_winner: string; cold_disrupted: number; warm_disrupted: number}[]
 }
 export interface ArenaRound {
   twin_after?: Twin

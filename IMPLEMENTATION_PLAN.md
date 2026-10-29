@@ -19,7 +19,7 @@ Compromised identity, lateral movement, each with independent verification.
 Landing, agent collaboration view, verification lab (before/after), attack path explorer, evidence export, settings, accessibility, reduced-motion.
 
 ## Phase 7 — Delivery
-Docker Compose, README, docs (architecture/threat-model/evaluation/demo-script/meta-integration), HACKATHON_SUBMISSION.md, quality gates (pytest, vitest, tsc, ruff, build, health, full experiment, reset/replay).
+Local startup scripts, README, docs (architecture/threat-model/evaluation/demo-script/meta-integration), HACKATHON_SUBMISSION.md, quality gates (pytest, vitest, tsc, ruff, build, health, full experiment, reset/replay).
 
 ## Decisions
 - SQLite dev DB via SQLAlchemy (Postgres-compatible models); single global twin instance guarded by lock, snapshots in DB.

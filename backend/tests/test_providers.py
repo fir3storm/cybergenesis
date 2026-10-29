@@ -80,6 +80,7 @@ def test_base_url_must_be_provider_host_or_localhost():
 def test_generated_admin_token_only_handed_to_loopback(monkeypatch):
     monkeypatch.delenv("ADMIN_TOKEN", raising=False)
     monkeypatch.setattr(settings, "admin_token", "generated-test-token")
+    monkeypatch.setattr(app.state, "generated_admin_token", "generated-test-token", raising=False)
     # TestClient's peer is "testclient", i.e. not this machine's loopback
     assert "admin_token" not in client.get("/api/settings/providers").json()
     assert client.post("/api/settings/provider", json={"provider": "meta"}).status_code == 403

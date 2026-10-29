@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from starlette.requests import HTTPConnection
 
 from app import models
 from app.agents.generative import architect_twin, author_scenario
@@ -67,10 +68,12 @@ async def lifespan(_app: FastAPI):
     # endpoints are still usable from the Settings UI, and print it where a
     # human running the app can see it. An explicit empty value opts into the
     # open dev gate (hermetic tests do this) — it is respected, not overwritten.
+    _app.state.generated_admin_token = None
     if "ADMIN_TOKEN" in os.environ:
         settings.admin_token = os.environ["ADMIN_TOKEN"]
     elif not settings.admin_token:
         settings.admin_token = secrets.token_urlsafe(24)
+        _app.state.generated_admin_token = settings.admin_token
         logger.warning("ADMIN_TOKEN not set — generated at startup: %s", settings.admin_token)
     init_db()
     db = next(get_db())
@@ -91,7 +94,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="CYBERGENESIS", description="Autonomous Self-Defending Digital Twin — synthetic simulation only", version="1.0.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["*"], allow_headers=["*"])
 
 
@@ -130,8 +133,27 @@ def _require_admin(request: Request) -> str:
         return "open"
     provided = request.headers.get("x-admin-token") or request.query_params.get("t")
     if not provided or not hmac.compare_digest(str(provided), expected):
-        raise HTTPException(status_code=403, detail="admin token required for settings endpoints")
+        raise HTTPException(status_code=403, detail="operator token required; enter it in Settings")
     return "ok"
+
+
+def _protect_operator_actions(request: HTTPConnection) -> None:
+    """Protect shared-instance mutations and approval capability disclosure.
+
+    Mobile approvals authenticate their own single-use capability in the handler.
+    Read-only viewers can inspect runs; CLI sockets have a separate token gate.
+    """
+    if request.scope['type'] != 'http':
+        return
+    path = request.url.path
+    mobile = path.startswith('/api/m/approve/')
+    approval = path.startswith('/api/experiments/') and path.endswith('/approval')
+    narration = request.query_params.get('narrate', '').lower() == 'true'
+    if approval or narration or (request.scope['method'] not in ('GET', 'HEAD', 'OPTIONS') and not mobile):
+        _require_admin(request)
+
+
+app.router.dependencies.append(Depends(_protect_operator_actions))
 
 
 @app.get("/api/settings/providers")
@@ -148,7 +170,8 @@ def settings_providers(request: Request):
     from app.integrations.providers import public_catalogue
 
     out = {"providers": public_catalogue(), "active": meta_client.provider_id, "api_keys_exposed": False}
-    if not os.environ.get("ADMIN_TOKEN") and settings.admin_token and _is_loopback(request):
+    if (settings.admin_token and settings.admin_token == getattr(app.state, 'generated_admin_token', None)
+            and _is_loopback(request)):
         out["admin_token"] = settings.admin_token
     return out
 
@@ -1266,6 +1289,9 @@ def cli_complete(asset_id: str, body: CliExecRequest):
 async def ws_cli(ws: WebSocket, asset_id: str):
     from app.cli.engine import execute
 
+    if settings.admin_token and not hmac.compare_digest(ws.query_params.get('t', ''), settings.admin_token):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     try:
         while True:

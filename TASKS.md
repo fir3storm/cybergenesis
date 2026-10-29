@@ -97,7 +97,7 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 
 ## Known limitations (honest)
 - API key lives only in gitignored `backend/.env`; never committed or exposed by API.
-- Docker Compose not run: Docker not installed on dev machine. Local uvicorn + Vite fully verified.
+- Docker removed 2026-10-29 per submitter request. Local uvicorn + Vite verified; Render blueprint unexercised.
 
 ## Verified evidence
 - `scripts/test.sh` equivalent gates: pytest 13 passed/1 skipped, ruff clean, vitest 1 passed, Playwright e2e 1 passed, `tsc -b && vite build` OK.
@@ -107,3 +107,25 @@ Win: red reaches target OR blue survives max_rounds. Learning: hybrid (AI picks 
 - Scoped strategy memory by scenario and custom twin; preserved aggregate historical reporting and existing chooser ranking.
 - Exposed current-scenario experience and clarified that learning updates outcome scores, not model weights. Sessions run while the arena is mounted; persisted completed matches remain available afterward.
 - Verified: 23 arena backend tests; 28 frontend tests including training completion, stop and failure handling; TypeScript and production build passed (existing large-chunk warning).
+
+## Submission-readiness pass - 2026-10-29
+- [x] Removed Docker entirely: docker-compose.yml, backend/Dockerfile, frontend/Dockerfile, frontend/nginx.conf deleted; docs now use local launchers (scripts/start.ps1 / start.sh) + optional Render blueprint.
+- [x] CORS origins configurable via CORS_ORIGINS; hosted frontend origin allowlisted in render.yaml.
+- [x] Operator gate: mutations, approval-token disclosure and narrate=true require ADMIN_TOKEN (loopback bootstrap for local UI; Settings entry for shared hosting); CLI websocket requires token; mobile approval stays single-use capability.
+- [x] Arena evaluation fixed: optimality gap now compares removed directed edges vs directed minimum edge cut (business disruption reported separately); strategies are distinct (min_cut / simulate / learned / optional ai); identical-strategy benchmark removed.
+- [x] Live Meta test opt-in fixed: explicit RUN_META_INTEGRATION setup overrides offline for that fixture only; no-key run reports honestly (one accidental ping returned HTTP 402 - no live success claimed).
+- [x] Submission claims reconciled: live evidence is 3 scenarios (docs/evaluation.md), not 5; no deterministic-vs-learned superiority claim.
+- [x] Verified: backend 264 passed / 1 skipped, ruff clean, frontend 35 passed, tsc clean, production build OK, scripts/start.ps1 -CheckOnly OK.
+- [ ] Still open: exercise hosted Render instance end-to-end; record docs/demo.webm fallback; re-run Playwright e2e.
+
+
+## Clean-slate for demo video - 2026-10-29
+- [x] Moved accumulated runtime data to D:\Ajanta-backup-20261029\ (backend DB 134MB + 134MB bak: 1,143 runs/65,360 events/8,978 decisions/6 custom twins/7 custom scenarios; stray frontend DB; arena_memory.json with 1 learned match).
+- [x] Fresh boot verified: DB reseeds only the 5 built-in scenarios + auto-created local operator user; 0 runs/events/decisions/custom content; /api/experiments=[].
+- [x] Kept by choice: backend/.env (CERT_DEMO_KEY), provider_settings.json (provider keys), cert_signing_key.pem (certificate signer identity). Built-in twin + 5 scenarios are code-defined and remain - demo depends on them.
+- [ ] Before recording: use a fresh browser profile/incognito (clears localStorage operator token), re-run scripts/start.ps1 -CheckOnly.
+
+## Demo video - 2026-10-29
+- [x] Live run-through: Muse Spark 1.3 via fresh Command Code key (mode=live, HTTP 200 at /api/models/status); direct Meta key returns HTTP 402, old CommandCode key 401 - disclosed to user. First API run honestly FAILed (approval timeout, auto-deny); UI run with operator approval: verification PASS 100%.
+- [x] Recorded Playwright/Edge take on pristine DB; docs/demo-final.mp4 = 180.000s video+audio, 1440x810, TTS en-US-GuyNeural, problem statement (0:00) then twin/run/policy/verify/proof/arena/close. Script: docs/demo-final-script.md.
+- [ ] Watch docs/demo-final.mp4 fully before submitting; rotate the Command Code key pasted in chat after the submission.

@@ -4,21 +4,34 @@ export const API = (import.meta as unknown as { env: Record<string, string> }).e
 export const WS = API.replace('http', 'ws')
 
 async function j<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { headers: _authHeaders(), ...init })
-  if (!r.ok) throw new Error(`${path} -> HTTP ${r.status}`)
+  if ((init?.method && init.method !== 'GET') || path.endsWith('/approval') || path.includes('narrate=true')) {
+    await ensureOperatorToken()
+  }
+  const headers = new Headers(_authHeaders())
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+  const r = await fetch(`${API}${path}`, { ...init, headers })
+  if (!r.ok) throw new Error(r.status === 403
+    ? `${path} -> HTTP 403. Enter your operator token in Settings to use this control.` : `${path} -> HTTP ${r.status}`)
   return r.json() as Promise<T>
 }
 
-function _authHeaders(): HeadersInit {
-  // The admin token is either provided by the backend (when ADMIN_TOKEN env var is NOT set)
-  // or must be read from the environment by the frontend (when ADMIN_TOKEN IS set).
-  // We store it in sessionStorage after the first successful /api/settings/providers call.
-  const envToken = (import.meta as unknown as { env: Record<string, string> }).env.VITE_ADMIN_TOKEN
+async function ensureOperatorToken(): Promise<void> {
   try {
-    const t = envToken || sessionStorage.getItem('cybergenesis_admin_token')
+    if (sessionStorage.getItem('cybergenesis_admin_token')) return
+    const r = await fetch(`${API}/api/settings/providers`)
+    if (!r.ok) return
+    const body = await r.json() as { admin_token?: string }
+    if (body.admin_token) sessionStorage.setItem('cybergenesis_admin_token', body.admin_token)
+  } catch { /* The actual request reports network/authentication failures. */ }
+}
+
+function _authHeaders(): HeadersInit {
+  // Never compile operator credentials into the public Vite bundle.
+  try {
+    const t = sessionStorage.getItem('cybergenesis_admin_token')
     return t ? { 'x-admin-token': t, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
   } catch {
-    return envToken ? { 'x-admin-token': envToken, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+    return { 'Content-Type': 'application/json' }
   }
 }
 
@@ -86,7 +99,8 @@ export const api = {
   calibration: () => j<{ buckets: { bucket: string; n: number; passes: number; pass_rate_pct: number | null }[] }>('/api/benchmark/calibration'),
   briefing: (id: string, narrate: boolean) => j<Briefing>(`/api/experiments/${id}/briefing?narrate=${narrate}`),
   briefingMarkdown: async (id: string, narrate: boolean): Promise<string> => {
-    const r = await fetch(`${API}/api/experiments/${id}/briefing/markdown?narrate=${narrate}`)
+    if (narrate) await ensureOperatorToken()
+    const r = await fetch(`${API}/api/experiments/${id}/briefing/markdown?narrate=${narrate}`, { headers: _authHeaders() })
     if (!r.ok) throw new Error(`briefing/markdown -> HTTP ${r.status}`)
     return r.text()
   },

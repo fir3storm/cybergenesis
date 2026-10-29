@@ -28,4 +28,4 @@ States: IDLE → SCENARIO_SELECTED → ATTACK_SIMULATING → TELEMETRY_COLLECTED
 - Secrets only from environment; never logged or returned by API.
 
 ## Stack
-Frontend: React+TS+Vite+Tailwind+R3F/Three/Drei+Zustand+TanStack Query+Lucide. Backend: FastAPI+Pydantic+SQLAlchemy+NetworkX+asyncio+WebSockets. Tests: Pytest, Vitest, Playwright (smoke), Ruff, TS strict. Deploy: Docker Compose (Docker optional for local dev).
+Frontend: React+TS+Vite+Tailwind+R3F/Three/Drei+Zustand+TanStack Query+Lucide. Backend: FastAPI+Pydantic+SQLAlchemy+NetworkX+asyncio+WebSockets. Tests: Pytest, Vitest, Playwright (smoke), Ruff, TS strict. Deploy: local Python/Node services, optional Render blueprint.

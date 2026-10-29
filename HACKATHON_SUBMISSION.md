@@ -4,7 +4,7 @@
 **Creator:** Dr. Abhirup Guha · **Event:** Meta Global AI Developer Hackathon 2026
 
 ## Problem
-Security tools overwhelmingly stop at detection: logs, alerts, dashboards, and human toil. Nobody proves a defense actually works before a real adversary tests it.
+Security tools overwhelmingly stop at detection: logs, alerts, dashboards, and human toil. Teams need repeatable evidence that a proposed defense blocks the modeled attack before they apply it.
 
 ## Solution
 An autonomous closed loop on a living 3D digital twin of an enterprise: **Observe → Reason → Propose → Validate → Act → Retest → Prove.** Six agents (Observer, Adversary Simulator, Incident Investigator, Defense Strategist, Defense Executor, Verification Scientist) run five complete scenarios — ransomware-like activity, compromised credential, lateral movement, data exfiltration, and red-vs-blue battle — end to end. A toggleable Demo Commentary panel narrates the loop for judges, and every run exports a human-readable Markdown evidence report.
@@ -26,8 +26,8 @@ A second loop pits Red against Blue on the same twin: Red picks a validated atta
 - **Atomic policy rejection**: invalid proposals are rejected as a unit — no partial application.
 - **Pydantic-validated AI outputs**: every LLM response is schema-checked before entering the policy engine.
 - **Full decision provenance**: agent role, evidence refs, asset IDs, action, justification, confidence, model ID, timestamp, mode (`live`/`offline`), and fallback reason recorded per round.
-- **Paired evaluation runner**: `scripts/evaluate_arena.py` compares deterministic vs learned strategies on held-out twins with frozen evaluation memory; results at `/api/arena/evaluation` and in `docs/arena-evaluation.json`.
-- **League table**: ranked comparison of strategies surfaced in the UI.
+- **Paired evaluation runner**: `scripts/evaluate_arena.py` compares distinct baselines and score-memory strategies on held-out twins, with optional live Meta calls and explicit cold-start labels; results at `/api/arena/evaluation` and in `docs/arena-evaluation.json`.
+- **League table**: recorded Red/Blue wins by scenario surfaced in the UI.
 
 Honest labels: offline runs say so; a failed provider is recorded as a failure row, never as a success.
 
@@ -45,19 +45,19 @@ Honest labels: offline runs say so; a failed provider is recorded as a failure r
 Meta Muse Spark (`muse-spark-1.3`, Meta Model API) performs incident investigation and defense strategy through structured, Pydantic-validated JSON with confidence, evidence references, retries, timeouts, token accounting, and prompt versioning. See `docs/meta-integration.md`.
 
 ## Architecture
-FastAPI + SQLAlchemy + NetworkX deterministic twin (snapshots, seeded replay) · React/TypeScript + React Three Fiber living twin with WebSocket live events · 14-table audit/evidence store · Docker Compose. Details: `docs/architecture.md`.
+FastAPI + SQLAlchemy + NetworkX deterministic twin (snapshots, seeded replay) · React/TypeScript + React Three Fiber living twin with WebSocket live events · 14-table audit/evidence store · local Python/Node launchers, optional Render blueprint. Details: `docs/architecture.md`.
 
 ## Working demonstration
-One click ("Run Autonomous Defense Demo") executes the full loop in ~20 seconds; the 3-minute narrated script is in `docs/demo-script.md`. Verified on the dev machine: backend **245 passed, 1 skipped**, frontend **32 passed** across 11 test files with production build (code-split: 320 KB main / 864 KB lazy 3D chunk), Playwright end-to-end smoke test, 12 screenshots in `docs/screenshots/`.
+One click ("Run Autonomous Defense Demo") executes the full loop; live latency depends on provider calls and approval waits. Judge Mode captions explain each stage. The 3-minute presentation outline is in `docs/demo-script.md`, with screenshots and a recording available under `docs/`. Fresh automated validation results are recorded in `TASKS.md`; these are distinct from historical browser and live-provider checks.
 
 ## Benchmark
-Reproducible benchmark harness: `python scripts/benchmark.py` runs **50 seeded twin/scenario pairs** across three defenders (none, offline, simulate). Full methodology and results in `docs/benchmark.md`; raw data in `scripts/benchmark_results.json`. All 5 scenarios pass verification under the offline and simulate defenders. Live Muse Spark spot-checks confirm end-to-end PASS with optimality gap 0 on reachability scenarios.
+Reproducible benchmark harness: `python scripts/benchmark.py` runs **50 seeded twin/scenario pairs** across three defenders (none, offline, simulate). Full methodology and results in `docs/benchmark.md`; raw data in `scripts/benchmark_results.json`. All 5 scenarios pass verification under the offline and simulate defenders. Historical live Muse Spark spot-checks are described separately in `docs/evaluation.md`; the offline benchmark does not establish Meta superiority or learning improvement.
 
 ## Results
-All 5 scenarios run **live with Meta Muse Spark**: verification PASS, 100% of objectives blocked (computed), honest operational-impact costs displayed (e.g., isolation disrupts legitimate paths). The first live run failed verification because the model proposed an under-specified action the policy engine rejected — the system reported FAIL rather than faking success; after publishing action contracts to the model plus a policy-feedback retry, live runs pass. A no-defense negative test also correctly returns FAIL.
+The offline automated suite exercises all five builtin scenarios. The historical live record in `docs/evaluation.md` describes three scenarios with Meta Muse Spark: ransomware, compromised identity and lateral movement. It reports PASS after action-contract feedback was added; the first live ransomware attempt reported FAIL when policy rejected an underspecified action. A no-defense negative test also correctly returns FAIL. This submission does not claim a fresh five-scenario live evaluation or live held-out superiority without a corresponding saved report.
 
 ## Limitations
-Synthetic graph model, not real traffic; live Meta calls require an API key in backend env (offline mode is fully functional and labelled); Docker stack provided but unverified on the dev machine (no Docker installed). Arena 'learning' is deterministic outcome-count score memory, not model training; held-out results in docs/holdout-benchmark.md show the deterministic min-cut removing fewer edges than candidate search - the LLM's value is contextual reasoning, not graph arithmetic. Local + Render deploy paths: DEPLOY.md.
+Synthetic graph model, not real traffic; live Meta calls require an API key in backend env (offline mode is fully functional and labelled). Arena 'learning' is deterministic outcome-count score memory, not model training; held-out results in docs/holdout-benchmark.md show the deterministic min-cut removing fewer edges than candidate search - the LLM's value is contextual reasoning, not graph arithmetic. Local + Render deploy paths: DEPLOY.md.
 
 ## Future
 SIEM/EDR connectors (Wazuh), cloud & OT/ICS twins, IaC control testing, continuous resilience scoring — behind the same policy/verification boundary.

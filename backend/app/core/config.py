@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     # Runtime provider choices saved from the Settings UI (keys stay on this machine)
     provider_settings_path: str = "./provider_settings.json"
     database_url: str = "sqlite:///./cybergenesis.db"
+    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     sim_step_delay_ms: int = 350
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2

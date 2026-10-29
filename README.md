@@ -23,7 +23,7 @@ Modern defenders face a structural problem, not a tooling problem:
 - **Automation is hard to trust.** Letting an AI change firewall rules or isolate machines feels reckless, so automation stalls at recommendations a human must still verify by hand. The result: skilled analysts burn out on repetitive triage while mean-time-to-contain stays stubbornly high.
 - **Attackers adapt; static playbooks don't.** A defense that blocks one route teaches the adversary to find another. Fixed runbooks cannot keep up with an opponent who learns.
 
-**CYBERGENESIS solves this by giving defenders a safe place to fight, learn, and prove.** On a synthetic digital twin, autonomous agents attack and defend continuously: the AI proposes, a deterministic policy engine disposes, an independent verifier replays the attack and produces *proof* — not claims — that the defense works, at what operational cost. Defenses are rehearsed, measured, and certified before they ever touch a real network, and both sides get smarter every match.
+**CYBERGENESIS solves this by giving defenders a safe place to fight, learn, and prove.** On a synthetic digital twin, autonomous agents attack and defend continuously: the AI proposes, a deterministic policy engine disposes, an independent verifier replays the attack and produces *proof* — not claims — that the defense works, at what operational cost. Defenses are rehearsed, measured, and certified before they ever touch a real network, and outcome scores are retained for subsequent matches. Learning improvement must be measured separately.
 
 ## What is CYBERGENESIS?
 
@@ -35,7 +35,7 @@ Everything is synthetic. No real targets, no scanning, no exploitation, no crede
 
 Muse Spark plays **both sides**:
 
-- **Blue team** — investigates evidence-cited telemetry and proposes defenses from the live graph. Live-verified on every builtin scenario with an optimality gap of 0 against the NetworkX minimum cut.
+- **Blue team** — investigates evidence-cited telemetry and proposes defenses from the live graph. Historical live spot-checks cover three scenarios; see the evidence scope in [Evaluation](docs/evaluation.md).
 - **Red team** — in the Arena and battle rounds, it chooses among policy-validated attack paths and adapts while the twin hardens itself.
 - **Vision** — its multimodal capability turns a whiteboard photo into a working digital twin (Twin Designer).
 
@@ -140,25 +140,30 @@ Extras: Demo Commentary narration, human-readable Markdown reports, a live Meta 
 
 ---
 
-## Quick start (local, no Docker required)
+## Quick start (local)
 
-Backend (Python 3.12+):
+Requires Python 3.12+ and Node 20+. From the repository root, prepare the backend once:
 
 ```powershell
-cd backend
-pip install -e .   # or use an existing env with fastapi/uvicorn/sqlalchemy/networkx/httpx
-python -m uvicorn app.main:app --port 8000
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e "./backend[dev]"
+if (-not (Test-Path backend/.env)) { Copy-Item .env.example backend/.env }
+python -c "from pathlib import Path; import secrets; p=Path('backend/.env'); s=p.read_text(); p.write_text(s.replace('CERT_DEMO_KEY=\n', 'CERT_DEMO_KEY='+secrets.token_hex(32)+'\n'))"
 ```
 
-Frontend (Node 20+):
+Set `MODEL_API_KEY` in `backend/.env` for live Meta inference, or leave it empty for labelled offline mode. Install the frontend dependencies once:
 
 ```powershell
 cd frontend
-npm install
-npm run dev        # http://localhost:5173
+npm ci
+cd ..
+.\scripts\start.ps1
 ```
 
-Open <http://localhost:5173> → **Run Autonomous Defense Demo** — then visit the **Arena** and start a match.
+The launcher checks dependencies and the signing key, waits for both services to respond, then opens <http://localhost:5173>. Use `-CheckOnly` to validate setup without launching. Unix setup and manual two-terminal startup are in [DEPLOY.md](DEPLOY.md).
+
+Open **Run Autonomous Defense Demo**, or **Judge Mode** for narrated stages.
 
 ### AI providers (live mode)
 
@@ -167,7 +172,7 @@ CYBERGENESIS was built on **Meta Muse Spark**, and it now speaks to four provide
 | Provider | Default endpoint | Key |
 |---|---|---|
 | Meta Muse Spark | `https://api.meta.ai/v1` | `MODEL_API_KEY` |
-| Command Code | `https://api.commandcode.ai/provider/v1` | `COMMAND_CODE_API_KEY` |
+| Command Code | `https://api.commandcode.ai/provider/v1` | `COMMANDCODE_API_KEY` |
 | Kilo Code (Kilo Gateway) | `https://ai-gateway.kilo.ai/api/v1` | `KILO_API_KEY` |
 | Google AI Studio (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai` | `GOOGLE_API_KEY` |
 
@@ -180,15 +185,6 @@ $env:META_MODEL = "muse-spark-1.3"
 
 Restart the backend; the header badge switches to **LIVE … AI** for the active provider and `/api/models/status` reports reachability.
 
-### Docker
-
-Docker was not available on the development machine, so the Compose stack is provided but locally unverified:
-
-```bash
-cp .env.example .env   # fill MODEL_API_KEY if desired
-docker compose up --build
-```
-
 ## Tests
 
 ```powershell
@@ -196,7 +192,9 @@ cd backend;  python -m pytest -q;  python -m ruff check app tests
 cd frontend; npm test; npm run build; npm run test:e2e   # Playwright, requires servers running
 ```
 
-**245 backend tests** (1 skipped) and **32 frontend tests** cover every scenario end-to-end (verification PASS), policy rejection, determinism, failed-defense detection, the proof certificate (valid + tampered, Ed25519 public-key verification and signer pinning), network import (configs, CSV, bad input → 422), the board briefing (control mapping, honest AI fallback), settings hardening (provider host allowlist, loopback-only admin token), counterfactual forks, one-time mobile-approval tokens, and the Arena (engine win rules, learning memory, AI chooser validation with mocked provider, match persistence, winner certificates). Frontend: Vitest + Playwright end-to-end (demo → proof download, fork comparison, phone approval, Arena match). Test runs force `OFFLINE_MODE=true` for hermetic results; live Meta was verified separately on 2026-10-27/28 with real Muse Spark decisions (see [docs/evaluation.md](docs/evaluation.md)).
+The automated suites cover scenario replay, policy rejection, malformed model responses, certificate tampering and signer pinning, imports, briefing fallback, access controls, counterfactual forks, mobile approval and Arena outcomes. Frontend coverage includes Vitest and Playwright flows. Current verification counts and commands are recorded in [TASKS.md](TASKS.md).
+
+Normal tests run offline. The explicitly enabled Meta integration check and historical live evidence are documented in [Evaluation](docs/evaluation.md); offline results do not establish live-model performance.
 
 ## Documentation
 

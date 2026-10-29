@@ -8,14 +8,18 @@ services:
       - key: CERT_DEMO_KEY
         generateValue: true
       - key: OFFLINE_MODE
-        value: "true"
+        value: "false"
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: '["https://cybergenesis-frontend.onrender.com"]'
       - key: SIM_STEP_DELAY_MS
         value: "0"
   - type: web
     name: cybergenesis-frontend
     runtime: static
     buildCommand: cd frontend && npm ci --no-audit --no-fund && npm run build
-    publishDir: frontend/dist
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
         value: https://cybergenesis-backend.onrender.com
